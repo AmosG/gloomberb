@@ -260,7 +260,7 @@ function PortfolioAnalyticsPane({ focused, width, height }: PaneProps) {
     + (historyNote ? wrapTextLines(historyNote, noticeWidth).length : 0);
   // Keep table rows available after active data warnings wrap.
   const availableHistoryChartHeight = height - metricsHeight - 7 - noticeHeight;
-  const historyChartHeight = performanceChartPoints.length >= 2 && availableHistoryChartHeight >= 5
+  const historyChartHeight = performanceChartPoints.filter((point) => Number.isFinite(point.close)).length >= 2 && availableHistoryChartHeight >= 5
     ? Math.min(8, availableHistoryChartHeight)
     : 0;
   const showHistoryChart = historyChartHeight >= 5;
@@ -270,8 +270,6 @@ function PortfolioAnalyticsPane({ focused, width, height }: PaneProps) {
   );
   const historyAxisLabel = buildHistoryAxisLabel({
     performance: brokerPerformance.performance,
-    activePortfolio,
-    baseCurrency,
   });
   const formatHistoryAxis = useCallback((value: number) => (
     formatHistoryAxisValue(value, brokerPerformance.performance)

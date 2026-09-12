@@ -427,7 +427,7 @@ export function buildAnalyticsRiskRows({
 export function resolvePerformancePalette(
   performance: BrokerPortfolioPerformance | null,
 ): ReturnType<typeof resolveChartPalette> {
-  const points = buildPerformanceChartPoints(performance);
+  const points = buildPerformanceChartPoints(performance).filter((point) => Number.isFinite(point.close));
   const firstValue = points[0]?.close ?? null;
   const lastValue = points.at(-1)?.close ?? null;
   return resolveChartPalette(colors, firstValue != null && lastValue != null && lastValue < firstValue ? "negative" : "positive");
@@ -435,15 +435,11 @@ export function resolvePerformancePalette(
 
 export function buildHistoryAxisLabel({
   performance,
-  activePortfolio,
-  baseCurrency,
 }: {
   performance: BrokerPortfolioPerformance | null;
-  activePortfolio: Portfolio | null;
-  baseCurrency: string;
 }): string {
   return resolvePerformanceMetric(performance) === "value"
-    ? `Value (${performance?.currency ?? activePortfolio?.currency ?? baseCurrency})`
+    ? `Value (${performance?.currency?.trim() || "unknown currency"})`
     : "Return";
 }
 

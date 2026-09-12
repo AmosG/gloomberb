@@ -56,6 +56,16 @@ function resolveBrokerAccountId(portfolio: Portfolio | null): string | null {
 
 export type PerformanceMetric = "value" | "cumulativeReturn";
 
+/** A later observation at the same date replaces the whole earlier row. */
+function performanceObservations(performance: BrokerPortfolioPerformance | null) {
+  const byDate = new Map<number, BrokerPortfolioPerformance["points"][number]>();
+  for (const point of performance?.points ?? []) {
+    const timestamp = new Date(point.date).getTime();
+    if (Number.isFinite(timestamp)) byDate.set(timestamp, point);
+  }
+  return [...byDate.entries()].sort(([left], [right]) => left - right);
+}
+
 function finitePointValue(point: BrokerPortfolioPerformance["points"][number], metric: PerformanceMetric): number | null {
   const value = point[metric];
   return value != null && Number.isFinite(value) ? value : null;
@@ -63,9 +73,8 @@ function finitePointValue(point: BrokerPortfolioPerformance["points"][number], m
 
 /** Choose one unit for the entire series; a missing NAV is never a percentage. */
 export function resolvePerformanceMetric(performance: BrokerPortfolioPerformance | null): PerformanceMetric {
-  const points = performance?.points.filter((point) => Number.isFinite(new Date(point.date).getTime())) ?? [];
-  const count = (metric: PerformanceMetric) => new Set(points.filter((point) => finitePointValue(point, metric) != null)
-    .map((point) => new Date(point.date).getTime())).size;
+  const points = performanceObservations(performance);
+  const count = (metric: PerformanceMetric) => points.filter(([, point]) => finitePointValue(point, metric) != null).length;
   const valueCount = count("value");
   const returnCount = count("cumulativeReturn");
   return valueCount >= 2 || (valueCount > 0 && returnCount < 2) ? "value" : "cumulativeReturn";
@@ -74,22 +83,19 @@ export function resolvePerformanceMetric(performance: BrokerPortfolioPerformance
 export function buildPerformanceChartPoints(performance: BrokerPortfolioPerformance | null): ProjectedChartPoint[] {
   if (!performance) return [];
   const metric = resolvePerformanceMetric(performance);
-  const byDate = new Map<number, ProjectedChartPoint>();
-  for (const point of performance.points) {
-    const value = finitePointValue(point, metric);
-    const date = new Date(point.date);
-    if (value == null || !Number.isFinite(date.getTime())) continue;
-    byDate.set(date.getTime(), { date, open: value, high: value, low: value, close: value, volume: 0 });
-  }
-  return [...byDate.values()].sort((left, right) => left.date.getTime() - right.date.getTime());
+  return performanceObservations(performance).map(([timestamp, point]) => {
+    // The chart's nonfinite sentinel preserves a known gap and its date.
+    const value = finitePointValue(point, metric) ?? Number.NaN;
+    return { date: new Date(timestamp), open: value, high: value, low: value, close: value, volume: 0 };
+  });
 }
 
 export function performanceHistoryNote(performance: BrokerPortfolioPerformance | null): string | null {
   if (!performance) return null;
   const metric = resolvePerformanceMetric(performance);
-  const missing = performance.points.filter((point) => finitePointValue(point, metric) == null).length;
+  const missing = performanceObservations(performance).filter(([, point]) => finitePointValue(point, metric) == null).length;
   return missing
-    ? `${missing} missing ${metric === "value" ? "value" : "return"} observation${missing === 1 ? "" : "s"} omitted.`
+    ? `${missing} missing ${metric === "value" ? "value" : "return"} observation${missing === 1 ? "" : "s"}.`
     : null;
 }
 

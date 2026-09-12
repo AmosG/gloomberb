@@ -94,7 +94,7 @@ Published calendar coverage is NYSE/NYSE American/NYSE Arca and named NYSE Natio
 
 The benchmark request explicitly identifies SPY on NYSE Arca in USD, ISIN US78462F1030, following the [issuer's listing table](https://www.ssga.com/us/en/individual/etfs/state-street-spdr-sp-500-etf-trust-spy) checked September 12, 2026. Beta qualifies timestamps on its actual matching sample only; an unrelated older observation outside that sample cannot invalidate an otherwise valid comparison. The model retains the benchmark identity, source timestamps, matching sample, and qualification results.
 
-Broker account-value history includes deposits and withdrawals. Investment returns require cash-flow adjustments. Broker-reported return series may not specify their calculation method. Currency values and percentage returns retain distinct axis labels; missing observations and cached data remain identified in the UI.
+Broker account-value history includes deposits and withdrawals. Investment returns require cash-flow adjustments. Broker-reported return series may not specify their calculation method. Currency values and percentage returns retain distinct axis labels. Account-value currency comes only from the history source; portfolio/display currency settings do not convert that history or establish its currency. The chart preserves elapsed calendar time and known missing dates. A later row at the same timestamp replaces the earlier row, including withdrawn values; missing values break the line instead of joining observations across the gap. Missing observations and cached data remain identified in the UI.
 
 ## Dividends and sectors
 
