@@ -7,7 +7,8 @@ import type {
   DataTableProps,
   DataTableSectionHeader,
 } from "../../../../components/ui/data-table";
-import { WEB_CELL_HEIGHT } from "../input-host";
+import { useFrozenColumnInsets } from "./frozen-column";
+import { WEB_CELL_HEIGHT, WEB_CELL_WIDTH } from "../input-host";
 import {
   CSS_BG,
   CSS_PANEL,
@@ -51,6 +52,9 @@ function inlinePaddingPx(horizontalPadding: number): number {
 
 export function WebDataTableHeader<C extends DataTableColumn>({
   columns,
+  freezeFirstColumn,
+  scrollLeft = 0,
+  viewportWidth = 0,
   columnGap,
   horizontalPadding,
   focusPane,
@@ -61,6 +65,9 @@ export function WebDataTableHeader<C extends DataTableColumn>({
   sortDirection,
 }: {
   columns: C[];
+  freezeFirstColumn?: boolean;
+  scrollLeft?: number;
+  viewportWidth?: number;
   columnGap: number;
   horizontalPadding: number;
   focusPane: () => void;
@@ -70,8 +77,10 @@ export function WebDataTableHeader<C extends DataTableColumn>({
   sortColumnId: string | null;
   sortDirection: "asc" | "desc";
 }) {
+  const { ref, insets } = useFrozenColumnInsets(freezeFirstColumn === true, scrollLeft, viewportWidth, columns, columnGap * WEB_CELL_WIDTH);
   return (
     <div
+      ref={ref}
       data-gloom-role="data-table-header-row"
       style={{
         position: "sticky",
@@ -90,7 +99,7 @@ export function WebDataTableHeader<C extends DataTableColumn>({
         backgroundColor: CSS_PANEL,
       }}
     >
-      {columns.map((column) => {
+      {columns.map((column, columnIndex) => {
         const { isSorted, text } = renderHeaderLabel(
           column,
           sortColumnId,
@@ -103,9 +112,15 @@ export function WebDataTableHeader<C extends DataTableColumn>({
             data-gloom-interactive="true"
             style={{
               minWidth: 0,
+              position: freezeFirstColumn && columnIndex === 0 ? "sticky" : undefined,
+              left: freezeFirstColumn && columnIndex === 0 ? inlinePaddingPx(horizontalPadding) : undefined,
+              zIndex: freezeFirstColumn && columnIndex === 0 ? 1 : undefined,
+              paddingLeft: columnIndex > 0 ? insets[columnIndex] : undefined,
+              boxSizing: "border-box",
               height: WEB_CELL_HEIGHT,
               overflow: "hidden",
               backgroundColor: column.headerBackgroundColor ?? CSS_PANEL,
+              boxShadow: freezeFirstColumn && columnIndex === 0 ? `-${inlinePaddingPx(horizontalPadding)}px 0 0 ${column.headerBackgroundColor ?? CSS_PANEL}, ${columnGap * WEB_CELL_WIDTH}px 0 0 ${column.headerBackgroundColor ?? CSS_PANEL}` : undefined,
             }}
             onMouseDown={(event) => {
               focusPane();
@@ -139,6 +154,9 @@ function WebDataTableRowInner<
   C extends DataTableColumn,
 >({
   columns,
+  freezeFirstColumn,
+  scrollLeft = 0,
+  viewportWidth = 0,
   columnGap,
   horizontalPadding,
   focusPane,
@@ -160,6 +178,9 @@ function WebDataTableRowInner<
   selected,
 }: {
   columns: C[];
+  freezeFirstColumn?: boolean;
+  scrollLeft?: number;
+  viewportWidth?: number;
   columnGap: number;
   horizontalPadding: number;
   focusPane: () => void;
@@ -180,6 +201,7 @@ function WebDataTableRowInner<
   rowContextMenuSurface: boolean;
   selected: boolean;
 }) {
+  const { ref, insets } = useFrozenColumnInsets(freezeFirstColumn === true, scrollLeft, viewportWidth, columns, columnGap * WEB_CELL_WIDTH);
   const sectionHeader: DataTableSectionHeader | null =
     renderSectionHeader?.(item, index) ?? null;
   const baseRowStyle: CSSProperties = {
@@ -244,6 +266,7 @@ function WebDataTableRowInner<
   return (
     <div
       key={itemKey}
+      ref={ref}
       data-gloom-role="data-table-row"
       data-gloom-context-menu-surface={rowContextMenuSurface ? "true" : undefined}
       data-selected={selected ? "true" : undefined}
@@ -271,7 +294,7 @@ function WebDataTableRowInner<
         onActivateRow?.(item, index);
       }}
     >
-      {columns.map((column) => {
+      {columns.map((column, columnIndex) => {
         const cell: DataTableCell = renderCell(item, column, index, rowState);
         return (
           <div
@@ -279,9 +302,15 @@ function WebDataTableRowInner<
             data-gloom-role="data-table-cell"
             style={{
               minWidth: 0,
+              position: freezeFirstColumn && columnIndex === 0 ? "sticky" : undefined,
+              left: freezeFirstColumn && columnIndex === 0 ? inlinePaddingPx(horizontalPadding) : undefined,
+              zIndex: freezeFirstColumn && columnIndex === 0 ? 1 : undefined,
+              paddingLeft: columnIndex > 0 ? insets[columnIndex] : undefined,
+              boxSizing: "border-box",
               height: WEB_CELL_HEIGHT,
               overflow: "hidden",
               backgroundColor: cell.backgroundColor ?? rowBg,
+              boxShadow: freezeFirstColumn && columnIndex === 0 ? `-${inlinePaddingPx(horizontalPadding)}px 0 0 ${cell.backgroundColor ?? rowBg}, ${columnGap * WEB_CELL_WIDTH}px 0 0 ${cell.backgroundColor ?? rowBg}` : undefined,
             }}
             onMouseDown={(event) => {
               focusPane();
