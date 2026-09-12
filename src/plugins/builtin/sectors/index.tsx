@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Box } from "../../../ui";
-import { DataTableView, Notice, Tabs, usePaneFooter, type DataTableCell, type DataTableKeyEvent, type PaneFooterSegment } from "../../../components";
+import { DataTableView, Tabs, usePaneFooter, type DataTableCell, type DataTableKeyEvent, type PaneFooterSegment } from "../../../components";
 import type { PaneProps } from "../../../types/plugin";
 import type { PluginModule } from "../plugin-module";
 import { usePaneSettingValue } from "../../../state/app/context";
 import { colors, priceColor } from "../../../theme/colors";
 import { formatCurrency, formatPercentRaw } from "../../../utils/format";
-import { wrapTextLines } from "../../../utils/text-wrap";
 import { useAssetData, useDebouncedPluginPaneState, usePluginPaneState, usePluginTickerActions } from "../../runtime";
 import { useAutoRefresh, useUpdatedAgo } from "../shared/auto-refresh";
 import { SectorMoveBar } from "./move-bar";
@@ -212,22 +211,24 @@ function SectorPerformancePane({ focused, width, height }: PaneProps) {
   const selectedRow = rows.find((row) => row.etf === selectedEtf);
   const selectedIssues = selectedRow && !selectedRow.loading ? sectorRowIssues(selectedRow) : [];
   const selectedIssue = selectedIssues.length > 0 ? `${selectedEtf}: ${selectedIssues.join(" · ")}` : null;
-  const noticeWidth = Math.max(1, width - 2);
-  const noticeHeight = 1
-    + (selectedIssue ? wrapTextLines(selectedIssue, noticeWidth).length : 0);
 
   usePaneFooter("sectors", () => {
     const info: PaneFooterSegment[] = [];
     if (loading) info.push({ id: "loading", parts: [{ text: "loading", tone: "muted" }] });
     if (loadError) info.push({ id: "error", parts: [{ text: loadError, tone: "warning" }] });
+    if (selectedIssue) info.push({ id: "selected-issue", parts: [{ text: selectedIssue, tone: "warning" }] });
     if (incompleteRows) info.push({ id: "incomplete", parts: [{ text: `${incompleteRows} ETFs have unavailable values`, tone: "warning" }] });
     if (returnAsOfDate) info.push({ id: "return-as-of", parts: [{ text: `returns as of ${returnAsOfDate}`, tone: "muted" }] });
     if (updatedAgo) info.push({ id: "updated", parts: [{ text: `checked ${updatedAgo}`, tone: "muted" }] });
-    return { info };
-  }, [loadError, loading, incompleteRows, returnAsOfDate, updatedAgo]);
+    // Keep the leading current failure readable when the pane is narrow; separate
+    // flex children would each shrink it to a few characters beside routine status.
+    return { info: info.length > 0 ? [{ id: "status", parts: info.flatMap((segment, index) => [
+      ...(index > 0 ? [{ text: "·", tone: "muted" as const }] : []), ...segment.parts,
+    ]) }] : [] };
+  }, [loadError, loading, selectedIssue, incompleteRows, returnAsOfDate, updatedAgo]);
 
   const rootBefore = (
-    <Box height={noticeHeight} flexShrink={0} paddingX={1} flexDirection="column">
+    <Box height={1} flexShrink={0} paddingX={1} flexDirection="column">
       <Tabs
         tabs={tabs}
         activeValue={activeCollection.id}
@@ -240,7 +241,6 @@ function SectorPerformancePane({ focused, width, height }: PaneProps) {
         variant="bare"
         focused={focused}
       />
-      {selectedIssue ? <Notice tone="warning">{selectedIssue}</Notice> : null}
     </Box>
   );
 

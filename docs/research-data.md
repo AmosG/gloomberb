@@ -100,7 +100,7 @@ Dividend reference prices retain their own source timestamp, including Yahoo's r
 
 TTM cash/share sums reported cash with ex-dates within the trailing calendar year. The chart changes on ex-dates and when earlier payments leave that window, holding each level between changes. Cash growth compares complete trailing-year windows; a positive baseline followed by no cash gives −100%, while a zero or incomplete baseline has no defined growth rate. Special distributions remain part of reported cash.
 
-Sector and industry ETF returns are price returns in the listing currency, without reinvested distributions. Rankings use a shared ending session and calendar-month/year boundaries, using a prior close for holidays. Missing or inconsistent endpoints remain unavailable. A successful refresh does not make an old quote current.
+Sector and industry ETF returns are price returns in the listing currency, without reinvested distributions. Rankings use a shared ending session and calendar-month/year boundaries, using a prior close for holidays. Missing or inconsistent endpoints remain unavailable. A reported baseline still establishes the shared starting session when that ETF lacks an ending price; another ETF cannot use an older start because its peer becomes unavailable. A successful refresh does not make an old quote current.
 
 ## FX matrix
 
