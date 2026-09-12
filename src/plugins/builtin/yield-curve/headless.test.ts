@@ -27,7 +27,7 @@ describe("yield curve headless model", () => {
     const context = { apiClient: { getCloudFredSeries: async (id: string, options: { endDate: string }) => {
       calls.push(`${id}:${options.endDate}`);
       return {
-        info: { units: "Percent", frequency: "Daily" },
+        info: { id, units: "Percent", frequency: "Daily" },
         observations: [{ date: "2024-03-01", value: id === "DGS2" ? 4.54 : 4.19 }],
         stale: id === "DGS30",
       };

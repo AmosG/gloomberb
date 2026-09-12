@@ -81,7 +81,7 @@ test("date submission hides the previous curve while pending and keeps controls 
   expect(setup!.captureCharFrame()).not.toContain("2026-09-08");
   await act(async () => { rejectHistory(new Error("offline")); });
   await frame();
-  expect(setup!.captureCharFrame()).toContain("No Treasury observations");
+  expect(setup!.captureCharFrame()).toContain("Treasury curve unavailable");
   const controls = createTestControls(() => setup!);
   await act(async () => { await controls.clickFrameText("[d]ate"); });
   await frame();
@@ -94,10 +94,10 @@ test("date submission hides the previous curve while pending and keeps controls 
 
 test("the transient date editor can be submitted with the mouse", async () => {
   latestSpy = spyOn(apiClient, "getCloudYieldCurve").mockResolvedValue(TREASURY_MATURITIES.map(({ maturity, years }) => ({ maturity, maturityYears: years, yield: 4.5, asOf: "2026-09-08" })));
-  historySpy = spyOn(apiClient, "getCloudFredSeries").mockResolvedValue({
+  historySpy = spyOn(apiClient, "getCloudFredSeries").mockImplementation(async (id) => ({
     observations: [{ date: "2024-03-01", value: 4.2 }],
-    info: { id: "DGS10", title: "Treasury yield", units: "Percent", frequency: "Daily", seasonalAdjustment: "", source: "FRED", notes: "" },
-  });
+    info: { id, title: "Treasury yield", units: "Percent", frequency: "Daily", seasonalAdjustment: "", source: "FRED", notes: "" },
+  }));
   await act(async () => { setup = await testRender(<Harness />, { width: 70, height: 30 }); });
   await frame(); await frame();
   const controls = createTestControls(() => setup!);
@@ -111,4 +111,27 @@ test("the transient date editor can be submitted with the mouse", async () => {
   expect(setup!.captureCharFrame()).toContain("2024-03-01");
   expect(setup!.captureCharFrame()).toContain("requested 2024-03-02");
   expect(setup!.captureCharFrame()).not.toContain("As-of date");
+});
+
+
+test("historical partial source failure reaches the existing footer and a valid retry clears it", async () => {
+  let offline = true;
+  latestSpy = spyOn(apiClient, "getCloudYieldCurve").mockResolvedValue([]);
+  historySpy = spyOn(apiClient, "getCloudFredSeries").mockImplementation(async (id) => {
+    if (offline && id === "DGS2") throw new Error("controlled source 503");
+    return { info: null, observations: [{ date: "2024-03-01", value: id === "DGS2" ? 0 : -.2 }] };
+  });
+  await act(async () => { setup = await testRender(<Harness />, { width: 70, height: 30 }); });
+  await frame(); await frame();
+  await emitKeypress(setup!, { name: "d" });
+  await act(async () => { await setup!.mockInput.typeText("2024-03-02"); setup!.mockInput.pressEnter(); });
+  await frame(); await frame();
+  expect(setup!.captureCharFrame()).toContain("controlled source 503");
+  expect(setup!.captureCharFrame()).toContain("-0.20%");
+  offline = false;
+  await emitKeypress(setup!, { name: "r" });
+  await frame(); await frame();
+  expect(setup!.captureCharFrame()).not.toContain("503");
+  expect(setup!.captureCharFrame()).toContain("0.00%");
+  expect(setup!.captureCharFrame()).toContain("10Y−2Y -20bp");
 });

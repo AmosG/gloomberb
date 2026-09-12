@@ -19,6 +19,7 @@ import {
   parseYieldPoints,
   spreadBasisPoints,
   type YieldPoint,
+  yieldCurveErrors,
 } from "./treasury-data";
 
 export { yieldCurveHeadless } from "./headless";
@@ -90,6 +91,7 @@ export function YieldCurvePane({ focused, width, height }: PaneProps) {
   // Treasury series are daily closes, so which session the curve represents is
   // status the user needs; "updated Xm ago" only says when we last fetched it.
   const asOf = curveAsOf(points);
+  const sourceError = yieldCurveErrors(points).join("; ");
 
   const yieldStatus = useMemo<PaneFooterSegment[]>(() => [
       ...(bp != null ? [{ id: "spread", parts: [{ text: `10Y−2Y ${bp >= 0 ? "+" : ""}${bp}bp`, tone: bp < 0 ? "warning" as const : "muted" as const }] }] : []),
@@ -102,8 +104,8 @@ export function YieldCurvePane({ focused, width, height }: PaneProps) {
   usePaneStatusFooter({
     registrationId: "yield-curve",
     loading,
-    error,
-    info: yieldStatus,
+    error: error || sourceError || null,
+    info: error || sourceError ? [] : yieldStatus,
     hints: [
       { id: "date", key: "d", label: "ate", onPress: () => setEditing(true) },
       ...(requestedDate ? [{ id: "latest", key: "l", label: "atest", onPress: () => selectDate("") }] : []),
