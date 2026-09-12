@@ -5,6 +5,7 @@ import type { Quote } from "../../../../types/financials";
 import { Box, Text, useUiHost } from "../../../../ui";
 import { displayWidth, formatNumber, padTo } from "../../../../utils/format";
 import type { PositionTableRow, StatField } from "./types";
+import { portfolioPnlLabel } from "../../portfolio-list/position-metrics";
 
 const STAT_COLUMN_GAP = 2;
 const STAT_LABEL_WIDTH = 12;
@@ -13,7 +14,7 @@ const RANGE_ENDPOINT_WIDTH = 11;
 const POSITION_COLUMN_GAP = 1;
 
 interface PositionColumn {
-  key: keyof Omit<PositionTableRow, "pnlValue">;
+  key: keyof Omit<PositionTableRow, "pnlValue" | "pnlBasis">;
   label: string;
   width: number;
   align?: "left" | "right";
@@ -245,6 +246,7 @@ function createPositionColumns(width: number): PositionColumn[] {
 
 export function PositionTable({ rows, width }: { rows: PositionTableRow[]; width: number }) {
   const columns = createPositionColumns(width);
+  const pnlLabel = portfolioPnlLabel(rows.map((row) => row.pnlBasis));
 
   return (
     <Box flexDirection="column" width={width}>
@@ -252,7 +254,7 @@ export function PositionTable({ rows, width }: { rows: PositionTableRow[]; width
         {columns.map((column, index) => (
           <Box key={column.key} flexDirection="row">
             {index > 0 && <Box width={POSITION_COLUMN_GAP} />}
-            <Text fg={colors.textDim}>{padTo(t(column.label), column.width, column.align)}</Text>
+            <Text fg={colors.textDim}>{padTo(t(column.key === "pnl" ? pnlLabel : column.label), column.width, column.align)}</Text>
           </Box>
         ))}
       </Box>

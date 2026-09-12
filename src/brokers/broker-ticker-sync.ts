@@ -34,7 +34,7 @@ function buildPositionEntry(
   return {
     portfolio: portfolioId,
     shares: position.shares,
-    avgCost: position.avgCost ?? 0,
+    avgCost: typeof position.avgCost === "number" && Number.isFinite(position.avgCost) ? position.avgCost : undefined,
     currency: position.currency,
     broker: instance.brokerType,
     side: position.side,

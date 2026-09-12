@@ -17,8 +17,9 @@ import {
   formatMarketQuantity,
 } from "../../../../market-data/market/format";
 import type { PositionTableRow, StatField } from "./types";
-import { getPortfolioPositionMetrics, signedPositionDirection } from "../../portfolio-list/position-metrics";
+import { getPortfolioPositionMetrics, resolvePortfolioPositionPnl, portfolioPnlPercent, signedPositionDirection } from "../../portfolio-list/position-metrics";
 import { resolveCurrencyUnit } from "../../../../utils/currency-units";
+import { getActiveQuoteDisplay } from "../../../../market-data/market/status";
 
 type CurrencyConverter = (value: number, fromCurrency: string) => number;
 
@@ -131,7 +132,9 @@ export function buildPositionRows({
   baseCurrency: string;
   toBase: CurrencyConverter;
 }): PositionTableRow[] {
-  return ticker.metadata.positions.map((position) => {
+  const activeQuote = getActiveQuoteDisplay(quote);
+  const currentPrice = activeQuote && Number.isFinite(activeQuote.price) ? activeQuote.price : null;
+  return ticker.metadata.positions.filter((position) => position.shares !== 0).map((position) => {
     const positionCurrency = position.currency || quoteCurrency;
     const metrics = getPortfolioPositionMetrics(
       { ...ticker, metadata: { ...ticker.metadata, positions: [position] } },
@@ -142,21 +145,16 @@ export function buildPositionRows({
     const finiteValue = (value: number | null): number | null => value != null && Number.isFinite(value) ? value : null;
     const costBasisBase = finiteValue(metrics.totalCost);
     const hasBrokerMark = Number.isFinite(position.markPrice);
-    const fallbackMarkPrice = hasBrokerMark ? position.markPrice : quote?.price;
-    const fallbackMarkCurrency = hasBrokerMark ? positionCurrency : quoteCurrency;
-    const marketValueBase = finiteValue(metrics.hasBrokerMktValue
-      ? metrics.brokerMktValue
-      : Number.isFinite(quote?.price)
-        ? toBase(metrics.grossPriceUnits * quote!.price, quoteCurrency)
-        : null);
-    const pnlValue = finiteValue(metrics.hasBrokerPnl
-      ? metrics.brokerPnl
-      : marketValueBase != null
-        ? signedPositionDirection(position) * marketValueBase - metrics.signedCost
-        : null);
-    const returnPercent = pnlValue != null && costBasisBase != null && costBasisBase !== 0
-      ? formatPercentRaw((pnlValue / Math.abs(costBasisBase)) * 100)
-      : "—";
+    const fallbackMarkPrice = currentPrice ?? (hasBrokerMark ? position.markPrice : undefined);
+    const fallbackMarkCurrency = currentPrice != null ? quoteCurrency : positionCurrency;
+    const marketValueBase = finiteValue(currentPrice != null
+      ? toBase(metrics.grossPriceUnits * currentPrice, quoteCurrency)
+      : metrics.hasBrokerMktValue ? metrics.brokerMktValue : null);
+    const selectedPnl = resolvePortfolioPositionPnl(metrics,
+      currentPrice != null ? toBase(currentPrice, quoteCurrency) : null);
+    const pnlValue = selectedPnl.value;
+    const percent = portfolioPnlPercent(pnlValue, costBasisBase != null ? Math.abs(costBasisBase) : Number.NaN);
+    const returnPercent = percent === null ? "—" : formatPercentRaw(percent);
     const unit = metrics.multiplierHint > 1 ? " ct" : " sh";
 
     return {
@@ -177,6 +175,7 @@ export function buildPositionRows({
       pnl: pnlValue != null ? `${pnlValue >= 0 ? "+" : ""}${formatCurrency(pnlValue, baseCurrency)}` : "—",
       ret: returnPercent,
       pnlValue,
+      pnlBasis: selectedPnl.basis,
     };
   });
 }

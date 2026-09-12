@@ -261,6 +261,7 @@ describe("portfolio-metrics", () => {
       text: "5,095.073",
     });
     expect(getColumnValue(pnlColumn, ticker, financials, defaultColumnContext)).toEqual({
+      pnlBasis: "quote-and-cost",
       text: "+7.9k",
       color: expect.any(String),
     });
@@ -293,6 +294,7 @@ describe("portfolio-metrics", () => {
     });
     expect(getSortValue(dayPnlColumn, ticker, financials, defaultColumnContext)).toBe(50);
     expect(getColumnValue(pnlColumn, ticker, financials, defaultColumnContext)).toEqual({
+      pnlBasis: "quote-and-cost",
       text: "+200",
       color: expect.any(String),
     });
@@ -315,6 +317,7 @@ describe("portfolio-metrics", () => {
     expect(getSortValue(dayPnlColumn, ticker, financials, defaultColumnContext)).toBe(200);
     expect(getSortValue(pnlColumn, ticker, financials, defaultColumnContext)).toBe(200);
     expect(getColumnValue(pnlColumn, ticker, financials, defaultColumnContext)).toEqual({
+      pnlBasis: "quote-and-cost",
       text: "+200",
       color: expect.any(String),
     });

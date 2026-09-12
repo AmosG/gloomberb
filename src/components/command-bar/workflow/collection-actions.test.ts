@@ -68,6 +68,17 @@ function createHarness(initialTicker: TickerRecord) {
 }
 
 describe("command-bar collection workflow actions", () => {
+  test("rejects empty acquisition cost before persistence while accepting an explicit zero", async () => {
+    const { actions, order } = createHarness(ticker("AAPL"));
+    for (const avgCost of ["", "  "]) {
+      await expect(actions.setPortfolioPositionFromWorkflow({ portfolioId: "main", ticker: "AAPL", shares: "10", avgCost }))
+        .rejects.toThrow("Avg Cost must be a valid number");
+      expect(order).toEqual([]);
+    }
+    await actions.setPortfolioPositionFromWorkflow({ portfolioId: "main", ticker: "AAPL", shares: "10", avgCost: "0" });
+    expect(order).toEqual(["save:start", "save:end", "dispatch", "event"]);
+  });
+
   test("emits portfolio membership after the ticker is saved and dispatched", async () => {
     const { actions, order, payloads } = createHarness(ticker("AAPL"));
 

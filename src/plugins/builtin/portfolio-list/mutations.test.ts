@@ -182,7 +182,7 @@ describe("portfolio-list mutations", () => {
     const input = { shares: 100, avgCost: 50, currency: "USD" };
     const reconciled = setManualPortfolioPosition(ticker, "main", input).ticker.metadata.positions[0]!;
     expect(reconciled.dateAcquired).toBe("2024-01-02");
-    expect(reconciled.shares * reconciled.avgCost).toBe(position.shares * position.avgCost);
+    expect(reconciled.shares * reconciled.avgCost!).toBe(position.shares * position.avgCost);
     expect(reconciled.marketValue).toBeUndefined();
     expect(reconciled.markPrice).toBeUndefined();
     ticker.metadata.positions.push({ ...position, dateAcquired: "2024-03-01" });

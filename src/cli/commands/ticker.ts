@@ -12,14 +12,14 @@ import {
   renderSection,
   renderStat,
 } from "../../utils/cli-output";
-import { exchangeShortName, marketStateLabel } from "../../market-data/market/status";
+import { exchangeShortName, marketStateLabel, getActiveQuoteDisplay } from "../../market-data/market/status";
 import type { AppConfig } from "../../types/config";
 import type { FinancialStatement, TickerFinancials } from "../../types/financials";
 import type { SecFilingItem } from "../../types/data-provider";
 import type { NewsArticle } from "../../news/types";
 import type { TickerRecord } from "../../types/ticker";
 import type { CliCommandContext } from "../../types/plugin";
-import { getPortfolioPositionMetrics } from "../../plugins/builtin/portfolio-list/position-metrics";
+import { getPortfolioPositionMetrics, resolvePortfolioPositionPnl, resolveBrokerFallbackMarketValue } from "../../plugins/builtin/portfolio-list/position-metrics";
 import { createBaseConverter } from "../base-converter";
 import { initMarketData, withMarketData } from "../context";
 import { fail } from "../errors";
@@ -176,6 +176,49 @@ function shouldFetchSecFilings(tickerFile: TickerRecord | null, financials: Tick
   return /(NASDAQ|NYSE|AMEX|ARCA|IEX|BATS|PINK|OTC|NMS)/.test(exchangeHints);
 }
 
+async function appendTickerPositions(lines: string[], tickerFile: TickerRecord | null, quote: TickerFinancials["quote"],
+  config: AppConfig, toBase: (value: number, currency: string) => Promise<number>): Promise<void> {
+  const quoteCurrency = quote?.currency || tickerFile?.metadata.currency || config.baseCurrency;
+  if (tickerFile && tickerFile.metadata.positions.length > 0) {
+    lines.push("");
+    lines.push(renderSection("Positions"));
+    const positions = tickerFile.metadata.positions.filter((position) => position.shares !== 0);
+    const activeQuote = getActiveQuoteDisplay(quote);
+    const currentPrice = activeQuote && Number.isFinite(activeQuote.price) ? activeQuote.price : null;
+    for (const [index, position] of positions.entries()) {
+      const portfolioName = config.portfolios.find((portfolio) => portfolio.id === position.portfolio)?.name ?? position.portfolio;
+      const multiplier = position.multiplier ?? 1;
+      const positionCurrency = position.currency ?? quoteCurrency;
+      const metrics = getPortfolioPositionMetrics({ ...tickerFile, metadata: { ...tickerFile.metadata, positions: [position] } }, undefined, quoteCurrency);
+      const costBasisBase = await toBase(metrics.signedCost, positionCurrency);
+      const positionRate = await toBase(1, positionCurrency);
+      const baseMetrics = getPortfolioPositionMetrics({ ...tickerFile, metadata: { ...tickerFile.metadata, positions: [position] } }, undefined, quoteCurrency,
+        { currency: config.baseCurrency, convert: value => value * positionRate });
+      const brokerValue = resolveBrokerFallbackMarketValue(baseMetrics);
+      const marketValueBase = currentPrice != null ? await toBase(metrics.totalPriceUnits * currentPrice, quoteCurrency)
+        : brokerValue != null ? baseMetrics.brokerNetMktValue : Number.NaN;
+      const selectedPnl = resolvePortfolioPositionPnl(baseMetrics, currentPrice != null ? await toBase(currentPrice, quoteCurrency) : null);
+      const pnl = selectedPnl.value;
+
+      lines.push(cliStyles.bold(`${portfolioName} (${position.broker})`));
+      lines.push(renderStat(
+        "Position",
+        `${formatMarketQuantity(metrics.totalShares, { assetCategory: tickerFile.metadata.assetCategory, multiplier: position.multiplier })} ${multiplier > 1 ? "contracts" : "shares"} @ ${formatMarketCostWithCurrency(position.avgCost, positionCurrency, { assetCategory: tickerFile.metadata.assetCategory, multiplier: position.multiplier })}`,
+      ));
+      lines.push(renderStat("Cost Basis", formatCurrency(costBasisBase, config.baseCurrency)));
+      lines.push(renderStat("Market Value", formatCurrency(marketValueBase, config.baseCurrency)));
+      lines.push(renderStat(selectedPnl.basis === "broker-snapshot" ? "Broker P&L" : "P&L",
+        pnl === null ? "—" : colorBySign(formatSignedCurrency(pnl, config.baseCurrency), pnl)));
+      if (position.markPrice != null) {
+        lines.push(renderStat("Mark", formatMarketPriceWithCurrency(position.markPrice, positionCurrency, { assetCategory: tickerFile.metadata.assetCategory, multiplier: position.multiplier })));
+      }
+      if (index < positions.length - 1) {
+        lines.push(cliStyles.muted("-".repeat(24)));
+      }
+    }
+  }
+}
+
 export async function buildTickerReport({
   symbol,
   tickerFile,
@@ -202,7 +245,10 @@ export async function buildTickerReport({
   const lines: string[] = [];
 
   if (!quote) {
-    return "";
+    lines.push(`${cliStyles.accent(symbol)} ${cliStyles.bold(name)}`);
+    lines.push(cliStyles.muted("Quote unavailable."));
+    await appendTickerPositions(lines, tickerFile, quote, config, toBase);
+    return lines.join("\n");
   }
 
   lines.push(`${cliStyles.accent(quote.symbol)} ${cliStyles.bold(name)}`);
@@ -340,34 +386,7 @@ export async function buildTickerReport({
     link: filing.filingUrl,
   })));
 
-  if (tickerFile && tickerFile.metadata.positions.length > 0) {
-    lines.push("");
-    lines.push(renderSection("Positions"));
-    for (const [index, position] of tickerFile.metadata.positions.entries()) {
-      const portfolioName = config.portfolios.find((portfolio) => portfolio.id === position.portfolio)?.name ?? position.portfolio;
-      const multiplier = position.multiplier ?? 1;
-      const positionCurrency = position.currency ?? quote.currency;
-      const metrics = getPortfolioPositionMetrics({ ...tickerFile, metadata: { ...tickerFile.metadata, positions: [position] } }, undefined, quote.currency);
-      const costBasisBase = await toBase(metrics.signedCost, positionCurrency);
-      const marketValueBase = await toBase(metrics.totalPriceUnits * quote.price, quote.currency);
-      const pnl = marketValueBase - costBasisBase;
-
-      lines.push(cliStyles.bold(`${portfolioName} (${position.broker})`));
-      lines.push(renderStat(
-        "Position",
-        `${formatMarketQuantity(metrics.totalShares, { assetCategory: tickerFile.metadata.assetCategory, multiplier: position.multiplier })} ${multiplier > 1 ? "contracts" : "shares"} @ ${formatMarketCostWithCurrency(position.avgCost, positionCurrency, { assetCategory: tickerFile.metadata.assetCategory, multiplier: position.multiplier })}`,
-      ));
-      lines.push(renderStat("Cost Basis", formatCurrency(costBasisBase, config.baseCurrency)));
-      lines.push(renderStat("Market Value", formatCurrency(marketValueBase, config.baseCurrency)));
-      lines.push(renderStat("P&L", colorBySign(formatSignedCurrency(pnl, config.baseCurrency), pnl)));
-      if (position.markPrice != null) {
-        lines.push(renderStat("Mark", formatMarketPriceWithCurrency(position.markPrice, positionCurrency, { assetCategory: tickerFile.metadata.assetCategory, multiplier: position.multiplier })));
-      }
-      if (index < tickerFile.metadata.positions.length - 1) {
-        lines.push(cliStyles.muted("-".repeat(24)));
-      }
-    }
-  }
+  await appendTickerPositions(lines, tickerFile, quote, config, toBase);
 
   return lines.join("\n");
 }
@@ -463,11 +482,11 @@ export async function ticker(symbol: string, dependencies: TickerCommandDependen
       );
     }
 
-    if (!financials?.quote) {
+    if (!financials || (!financials.quote && !tickerFile?.metadata.positions.some((position) => position.shares !== 0))) {
       failCommand(`No quote data available for ${normalized}.`);
     }
     const resolvedFinancials = financials as TickerFinancials;
-    const quote = resolvedFinancials.quote!;
+    const quote = resolvedFinancials.quote;
 
     const notesFiles = new NotesFiles(dataDir);
     const [notesResult, newsResult, secFilingsResult] = await Promise.allSettled([
@@ -476,12 +495,12 @@ export async function ticker(symbol: string, dependencies: TickerCommandDependen
         feed: "ticker",
         scope: "ticker",
         ticker: normalized,
-        exchange: exchange || quote.exchangeName || "",
+        exchange: exchange || quote?.exchangeName || "",
         tickerTier: "primary",
         limit: NEWS_ITEM_LIMIT,
       }),
       shouldFetchSecFilings(tickerFile, resolvedFinancials) && dataProvider.getSecFilings
-        ? dataProvider.getSecFilings(normalized, SEC_FILING_LIMIT, exchange || quote.exchangeName || "")
+        ? dataProvider.getSecFilings(normalized, SEC_FILING_LIMIT, exchange || quote?.exchangeName || "")
         : Promise.resolve([]),
     ]);
 

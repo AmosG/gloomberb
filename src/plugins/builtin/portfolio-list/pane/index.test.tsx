@@ -3,6 +3,8 @@ import { existsSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { act, useReducer } from "react";
+import { Box } from "../../../../ui";
+import { PaneFooterProvider, PaneFooterBar } from "../../../../components/layout/pane/footer";
 import type { ReactElement } from "react";
 import { testRender } from "../../../../renderers/opentui/test-utils";
 import { AppPersistence } from "../../../../data/app-persistence";
@@ -250,6 +252,7 @@ function PortfolioHarness({
   stateMutator,
   runtime = createTestPluginRuntime(),
   paneHeight = 24,
+  paneWidth = 100,
   paneFocused = true,
 }: {
   config: AppConfig;
@@ -262,6 +265,7 @@ function PortfolioHarness({
   stateMutator?: (state: ReturnType<typeof createInitialState>) => void;
   runtime?: PluginRuntimeAccess;
   paneHeight?: number;
+  paneWidth?: number;
   paneFocused?: boolean;
 }) {
   const initialState = createPortfolioState(config, collectionId, expanded, {
@@ -281,7 +285,7 @@ function PortfolioHarness({
         paneId={TEST_PANE_ID}
         paneType="portfolio-list"
         focused={paneFocused}
-        width={100}
+        width={paneWidth}
         height={paneHeight}
       />
     </TestPaneProvider>
@@ -761,6 +765,34 @@ describe("PortfolioListPane cash and margin UI", () => {
     expect(frame).not.toContain("€100.00");
     expect(frame).not.toContain("$137.50");
   });
+
+  for (const width of [80, 120]) {
+    test(`keeps unknown imported cost and broker profit distinct until cost recovery at ${width} columns`, async () => {
+      const portfolioId = "cost-review";
+      const config = createPortfolioConfigWithColumns(portfolioId, ["ticker", "avg_cost", "mkt_value", "pnl", "pnl_pct"]);
+      const imported = makeTicker({ portfolios: [portfolioId], positions: [{
+        portfolio: portfolioId, shares: 10, currency: "USD", broker: "demo", unrealizedPnl: 200,
+      }] });
+      testSetup = await testRender(<PaneFooterProvider>{footer => <Box flexDirection="column">
+        <PortfolioHarness config={config} collectionId={portfolioId}
+          ticker={imported} quote={makeQuote({ price: 120 })} paneWidth={width} paneHeight={15} />
+        <PaneFooterBar footer={footer} focused width={width} />
+      </Box>}</PaneFooterProvider>, { width, height: 16 });
+      await flushFrame();
+      const before = testSetup.captureCharFrame();
+      expect(before).toContain("Cost unavailable");
+      expect(before).toMatch(/AAPL\s+—\s+1\.2k\s+\+200\s+—/);
+      expect(before).not.toContain("NaN");
+      const corrected = { ...imported, metadata: { ...imported.metadata,
+        positions: [{ ...imported.metadata.positions[0]!, avgCost: 100 }],
+      } };
+      await act(async () => { harnessDispatch!({ type: "UPDATE_TICKER", ticker: corrected }); });
+      await flushFrame();
+      const after = testSetup.captureCharFrame();
+      expect(after).not.toContain("Cost unavailable");
+      expect(after).toMatch(/AAPL\s+100\s+1\.2k\s+\+200\s+\+20\.00%/);
+    });
+  }
 
   test("shows broker market value and pnl before snapshot warmup", async () => {
     const portfolioId = "broker:ibkr-flex:DU12345";

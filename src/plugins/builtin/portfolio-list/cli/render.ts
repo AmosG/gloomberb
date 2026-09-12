@@ -14,7 +14,7 @@ import {
 } from "../../../../utils/cli-output";
 import { formatCompact } from "../../../../utils/format";
 import { formatMarketCostWithCurrency, formatMarketPriceWithCurrency, formatMarketQuantity } from "../../../../market-data/market/format";
-import { getPortfolioPositionMetrics, resolveBrokerFallbackMarketValue, resolveBrokerFallbackPnl } from "../position-metrics";
+import { getPortfolioPositionMetrics, resolveBrokerFallbackMarketValue, resolvePortfolioPositionPnl } from "../position-metrics";
 import { exchangeShortName, getActiveQuoteDisplay } from "../../../../market-data/market/status";
 import type { AppConfig } from "../../../../types/config";
 import type { CliCommandContext } from "../../../../types/plugin";
@@ -128,14 +128,18 @@ async function showCollectionWithMarketData(
   if (isPortfolio) {
     let totalPnl = 0;
     const unavailablePnl = new Set<string>();
+    const unavailableCost = new Set<string>();
+    const unavailableMarketValue = new Set<string>();
+    const brokerPnlSymbols = new Set<string>();
     const rows: string[][] = [];
     const positionsExport: Record<string, unknown>[] = [];
     const known = (value: number | null | undefined): number | null => value != null && Number.isFinite(value) ? value : null;
 
     for (const ticker of filtered) {
       const quote = quotes.get(ticker.metadata.ticker);
-      const positions = ticker.metadata.positions.filter((position) => position.portfolio === id);
-      const activeQuote = getActiveQuoteDisplay(quote);
+      const positions = ticker.metadata.positions.filter((position) => position.portfolio === id && position.shares !== 0);
+      const displayedQuote = getActiveQuoteDisplay(quote);
+      const activeQuote = displayedQuote && Number.isFinite(displayedQuote.price) ? displayedQuote : null;
       const priceText = quote && activeQuote
         ? colorBySign(formatMarketPriceWithCurrency(activeQuote.price, quote.currency, { assetCategory: ticker.metadata.assetCategory }), activeQuote.change)
         : "—";
@@ -155,21 +159,27 @@ async function showCollectionWithMarketData(
         const positionCurrency = metrics.positionCurrency;
         const costBasisBase = await toBase(metrics.totalCost, positionCurrency);
         const brokerValue = resolveBrokerFallbackMarketValue(metrics);
-        const brokerPnl = resolveBrokerFallbackPnl(metrics);
+        const positionRate = await toBase(1, positionCurrency);
+        const baseMetrics = getPortfolioPositionMetrics({ ...ticker, metadata: { ...ticker.metadata, positions: [position] } }, id, quoteCurrency,
+          { currency: baseCurrency, convert: value => value * positionRate });
         const currentValueBase = activeQuote
           ? await toBase(metrics.grossPriceUnits * activeQuote.price, quoteCurrency)
           : brokerValue != null ? await toBase(brokerValue, positionCurrency) : null;
-        const pnl = activeQuote && currentValueBase != null
-          ? (metrics.totalPriceUnits < 0 ? -1 : 1) * (currentValueBase - costBasisBase)
-          : brokerPnl != null ? await toBase(brokerPnl, positionCurrency) : null;
+        const selectedPnl = resolvePortfolioPositionPnl(baseMetrics,
+          activeQuote ? await toBase(activeQuote.price, quoteCurrency) : null);
+        const pnl = selectedPnl.value;
+        if (!metrics.hasCostBasis) unavailableCost.add(ticker.metadata.ticker);
+        if (known(currentValueBase) === null) unavailableMarketValue.add(ticker.metadata.ticker);
+        if (selectedPnl.basis === "broker-snapshot" || selectedPnl.basis === "mixed") brokerPnlSymbols.add(ticker.metadata.ticker);
         if (pnl != null && Number.isFinite(pnl)) totalPnl += pnl;
         else unavailablePnl.add(ticker.metadata.ticker);
         const direction = metrics.totalPriceUnits < 0 ? -1 : 1;
         positionsExport.push({ symbol: ticker.metadata.ticker, exchange: ticker.metadata.exchange,
-          shares: metrics.totalShares, avgCost: position.avgCost, positionCurrency,
+          shares: metrics.totalShares, avgCost: known(position.avgCost), positionCurrency,
           quotePrice: known(activeQuote?.price), quoteCurrency, quoteAsOf: quote?.lastUpdated ?? null,
           costBasis: known(direction * costBasisBase), marketValue: currentValueBase == null ? null : known(direction * currentValueBase),
-          unrealizedPnl: known(pnl), baseCurrency, dateAcquired: position.dateAcquired ?? null });
+          unrealizedPnl: known(pnl), baseCurrency, dateAcquired: position.dateAcquired ?? null,
+          pnlBasis: selectedPnl.basis, brokerUnrealizedPnl: known(position.unrealizedPnl), brokerPnlCurrency: positionCurrency, brokerPnlAsOf: null });
 
         rows.push([
           ticker.metadata.ticker,
@@ -190,7 +200,9 @@ async function showCollectionWithMarketData(
       ctx.printResult({ data: positionsExport, metadata: {
         portfolioId: id, portfolioName: displayName, baseCurrency,
         totalUnrealizedPnl: unavailablePnl.size > 0 ? null : totalPnl,
-        complete: unavailablePnl.size === 0, unavailableSymbols: [...unavailablePnl],
+        complete: unavailablePnl.size === 0 && unavailableCost.size === 0 && unavailableMarketValue.size === 0,
+        unavailableSymbols: [...new Set([...unavailablePnl, ...unavailableCost, ...unavailableMarketValue])],
+        unavailableCostSymbols: [...unavailableCost], brokerPnlSymbols: [...brokerPnlSymbols],
         accountingBasis, ...(manualAccounting ? { manualAccounting } : {}),
       } });
       return;
@@ -208,8 +220,9 @@ async function showCollectionWithMarketData(
       rows,
     ));
     console.log("");
-    console.log(renderStat("Total P&L", unavailablePnl.size > 0 ? "—" : colorBySign(formatSignedCurrency(totalPnl, baseCurrency), totalPnl)));
-    if (unavailablePnl.size > 0) console.log(cliStyles.muted(`P&L unavailable for ${[...unavailablePnl].join(", ")}: a quote, broker value or currency conversion is missing.`));
+    console.log(renderStat(brokerPnlSymbols.size ? "Total P&L (incl. broker snapshots)" : "Total P&L", unavailablePnl.size > 0 ? "—" : colorBySign(formatSignedCurrency(totalPnl, baseCurrency), totalPnl)));
+    if (unavailableCost.size > 0) console.log(cliStyles.muted(`Cost unavailable for ${[...unavailableCost].join(", ")}.`));
+    if (unavailablePnl.size > 0) console.log(cliStyles.muted(`P&L unavailable for ${[...unavailablePnl].join(", ")}.`));
   } else {
     const rows: string[][] = [];
     for (const ticker of filtered) {

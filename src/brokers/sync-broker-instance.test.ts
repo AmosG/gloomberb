@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createDefaultConfig, type BrokerInstanceConfig } from "../types/config";
 import type { BrokerAdapter } from "../types/broker";
 import type { TickerRecord } from "../types/ticker";
+import { hydrateTickerMetadata } from "../tickers/metadata";
 import { AppPersistence } from "../data/app-persistence";
 import { loadPersistedBrokerAccounts, persistBrokerAccounts } from "./account-cache";
 import {
@@ -125,6 +126,26 @@ function createMultiAccountDemoBroker(): BrokerAdapter {
 }
 
 describe("syncBrokerInstance", () => {
+  test("preserves unavailable imported cost across serialization and replaces it only on source recovery", async () => {
+    const repository = createTickerRepository();
+    let sourceCost: number | undefined;
+    const adapter = createDemoBroker();
+    adapter.importPositions = async () => [{ ticker: "AAPL", exchange: "NASDAQ", shares: 10,
+      currency: "USD", accountId: "ACC-1", avgCost: sourceCost, unrealizedPnl: 200, marketValue: 1200 }];
+    let config = { ...createDefaultConfig("/unused-import-cost"), portfolios: [], brokerInstances: [createBrokerInstance()] };
+    for (const cost of [undefined, Number.NaN, Infinity, 0, 100, undefined]) {
+      sourceCost = cost;
+      const result = await syncBrokerInstance({ config, instanceId: "demo-broker", brokers: new Map([["demo", adapter]]), tickerRepository: repository as any });
+      config = result.config as typeof config;
+      const imported = result.tickers.get("AAPL")!;
+      const reloaded = hydrateTickerMetadata(JSON.parse(JSON.stringify(imported.metadata)));
+      expect(imported.metadata.positions[0]!.avgCost).toBe(Number.isFinite(cost) ? cost : undefined);
+      expect(reloaded.positions[0]!.avgCost).toBe(Number.isFinite(cost) ? cost : undefined);
+      expect(reloaded.positions[0]).toMatchObject({ shares: 10, unrealizedPnl: 200, marketValue: 1200 });
+      expect(reloaded.positions).toHaveLength(1);
+    }
+  });
+
   test("creates broker portfolios and imports positions into local tickers", async () => {
     const config = {
       ...createDefaultConfig("/tmp/gloomberb-sync-broker-instance"),
