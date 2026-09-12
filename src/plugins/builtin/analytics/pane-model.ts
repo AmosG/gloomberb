@@ -6,7 +6,7 @@ import type { Portfolio, TickerRecord } from "../../../types/ticker";
 import { formatCompact, formatNumber, formatPercentRaw } from "../../../utils/format";
 import { formatRelativeAge } from "../../../utils/relative-time";
 import type { PriceHistoryIntegrity } from "../../../utils/price-history-integrity";
-import { instrumentFromTicker, type ChartRequest } from "../../../market-data/request-types";
+import { instrumentFromTicker, type ChartRequest, type TickerInstrumentOptions } from "../../../market-data/request-types";
 import { buildChartKey } from "../../../market-data/selectors";
 import { resolvePortfolioAccountMetrics, resolvePortfolioMarketValue } from "../portfolio-list/account-metrics";
 import type { ColumnContext, PortfolioSummaryTotals } from "../portfolio-list/metrics";
@@ -30,7 +30,7 @@ import type { AnalyticsMetricRow } from "./view";
 
 export interface PortfolioChartTarget {
   ticker: TickerRecord;
-  request: ChartRequest;
+  request: ChartRequest | null;
 }
 
 export type ChartEntryLookup = Map<string, {
@@ -63,18 +63,20 @@ function formatMarginLeverage(netLiquidation: number | undefined, totalMarketVal
   return `${(totalMarketValue / netLiquidation).toFixed(1)}x`;
 }
 
-export function buildPortfolioChartTargets(portfolioTickers: TickerRecord[]): PortfolioChartTarget[] {
-  return portfolioTickers.flatMap((ticker) => {
-    const instrument = instrumentFromTicker(ticker, ticker.metadata.ticker);
-    if (!instrument) return [];
-    return [{
+export function buildPortfolioChartTargets(
+  portfolioTickers: TickerRecord[],
+  options: TickerInstrumentOptions = {},
+): PortfolioChartTarget[] {
+  return portfolioTickers.map((ticker) => {
+    const instrument = instrumentFromTicker(ticker, ticker.metadata.ticker, options);
+    return {
       ticker,
-      request: {
+      request: instrument ? {
         instrument,
         bufferRange: "1Y" as const,
         granularity: "range" as const,
-      },
-    }];
+      } : null,
+    };
   });
 }
 
@@ -111,6 +113,7 @@ export function buildPortfolioReturnSeries({
   let unsupportedReason = syntheticAccountUnsupportedReason(account);
   const historyIntegrity: PortfolioReturnSeriesResult["historyIntegrity"] = [];
   for (const { ticker, request } of chartTargets) {
+    if (!request) unsupportedReason ??= `Broker contract unavailable for ${ticker.metadata.ticker}`;
     unsupportedReason ??= syntheticPositionUnsupportedReason(
       ticker,
       financials.get(ticker.metadata.ticker)?.quote?.currency || ticker.metadata.currency || columnContext.baseCurrency,
@@ -121,8 +124,7 @@ export function buildPortfolioReturnSeries({
     const weight = value == null ? 0 : Math.abs(value);
     totalValue += weight;
 
-    const key = buildChartKey(request);
-    const entry = chartEntries.get(key);
+    const entry = request ? chartEntries.get(buildChartKey(request)) : undefined;
     const history = entry?.data ?? entry?.lastGoodData ?? null;
     const resolved = resolveDatedReturns(history ?? []);
     if (resolved.integrity) historyIntegrity.push({ symbol: ticker.metadata.ticker, integrity: resolved.integrity });

@@ -14,6 +14,7 @@ import {
   usePaneStateValue,
 } from "../../../state/app/context";
 import { useChartQueries, useFxRatesMap, useTickerFinancialsMap } from "../../../market-data/hooks";
+import { buildPortfolioFinancialsMap } from "../../../market-data/portfolio-financials";
 import { selectEffectiveExchangeRates } from "../../../utils/exchange-rate-map";
 import { usePortfolioAccountState } from "../portfolio-list/header";
 import { calculatePortfolioSummaryTotals, type ColumnContext } from "../portfolio-list/metrics";
@@ -101,13 +102,16 @@ function PortfolioAnalyticsPane({ focused, width, height }: PaneProps) {
       .filter((ticker) => ticker.metadata.portfolios.includes(activePortfolioId))
       .filter((ticker) => hasPortfolioPosition(ticker, activePortfolioId));
   }, [activePortfolioId, tickersBySymbol]);
+  const instrumentOptions = useMemo(() => ({
+    portfolioId: activePortfolioId || undefined,
+  }), [activePortfolioId]);
 
   const chartTargets = useMemo(
-    () => buildPortfolioChartTargets(portfolioTickers),
-    [portfolioTickers],
+    () => buildPortfolioChartTargets(portfolioTickers, instrumentOptions),
+    [portfolioTickers, instrumentOptions],
   );
   const chartRequests = useMemo(
-    () => chartTargets.map((target) => target.request),
+    () => chartTargets.flatMap((target) => target.request ? [target.request] : []),
     [chartTargets],
   );
   const chartEntries = useChartQueries(chartRequests);
@@ -123,14 +127,11 @@ function PortfolioAnalyticsPane({ focused, width, height }: PaneProps) {
   const spyChartRequests = useMemo(() => [spyRequest], [spyRequest]);
   const spyChartEntries = useChartQueries(spyChartRequests);
 
-  const marketFinancials = useTickerFinancialsMap(portfolioTickers);
-  const financials = useMemo(() => {
-    const merged = new Map(cachedFinancials);
-    for (const [symbol, data] of marketFinancials) {
-      merged.set(symbol, data);
-    }
-    return merged;
-  }, [cachedFinancials, marketFinancials]);
+  const marketFinancials = useTickerFinancialsMap(portfolioTickers, instrumentOptions);
+  const financials = useMemo(
+    () => buildPortfolioFinancialsMap(portfolioTickers, cachedFinancials, marketFinancials, instrumentOptions),
+    [portfolioTickers, cachedFinancials, marketFinancials, instrumentOptions],
+  );
   const brokerPerformance = useBrokerPortfolioPerformance(activePortfolio, config);
   const performanceChartPoints = useMemo(
     () => buildPerformanceChartPoints(brokerPerformance.performance),

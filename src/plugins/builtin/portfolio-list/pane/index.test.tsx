@@ -384,6 +384,13 @@ async function renderHiddenChangePctSortWarmup(options: { staleCachedSiveSnapsho
   setSharedMarketDataCoordinator(sharedCoordinator);
 
   const tickers = Array.from({ length: 29 }, (_, index) => makeSortWarmupBrokerTicker(portfolioId, `T${String(index).padStart(2, "0")}`, index));
+  sharedCoordinator.primeCachedFinancials(tickers.map((ticker, index) => ({
+    instrument: instrumentFromTicker(ticker, ticker.metadata.ticker, { portfolioId })!,
+    financials: {
+      annualStatements: [], quarterlyStatements: [], priceHistory: [],
+      quote: makeQuote({ symbol: ticker.metadata.ticker, price: 100 + index, change: index, changePercent: index, listingExchangeName: "NASDAQ" }),
+    },
+  })));
   const sive = makeSortWarmupBrokerTicker(portfolioId, "SIVE", 29);
   if (options.staleCachedSiveSnapshot) {
     const siveInstrument = instrumentFromTicker(sive, "SIVE", { portfolioId });

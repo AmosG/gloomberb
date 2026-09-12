@@ -82,15 +82,7 @@ function stableCurrencyList(currencies: Array<string | null | undefined>): strin
 function buildTickerFinancialsMapKey(tickers: TickerRecord[], options: TickerInstrumentOptions = {}): string {
   return tickers.map((ticker) => {
     const instrument = instrumentFromTicker(ticker, ticker.metadata.ticker, options);
-    return [
-      ticker.metadata.ticker,
-      ticker.metadata.exchange ?? "",
-      instrument?.brokerId ?? "",
-      instrument?.brokerInstanceId ?? "",
-      instrument?.instrument?.conId ?? "",
-      instrument?.instrument?.localSymbol ?? "",
-      instrument?.instrument?.symbol ?? "",
-    ].join("|");
+    return instrument ? buildSnapshotKey(instrument) : `unresolved:${ticker.metadata.ticker}`;
   }).join("::");
 }
 

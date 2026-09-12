@@ -224,3 +224,38 @@ test("portfolio exports retain missing cost and broker P&L basis without borrowi
   expect((await exportRecord(restored, true)).data[0]).toMatchObject({ costBasis: 1000, unrealizedPnl: 200, pnlBasis: "quote-and-cost" });
   expect((await exportRecord(restored, true)).metadata.complete).toBe(true);
 });
+
+test("portfolio CLI quote context follows the selected contract and unresolved identity retains only its own broker mark", async () => {
+  const config = createDefaultConfig("/unused-portfolio-identity");
+  config.portfolios = [{ id: "a", name: "A", currency: "USD" }, { id: "b", name: "B", currency: "USD" }];
+  const record: TickerRecord = { metadata: { ...ticker.metadata, ticker: "ACME", portfolios: ["a", "b"], positions: [
+    { portfolio: "a", shares: 10, avgCost: 80, markPrice: 100, currency: "USD", broker: "ibkr", brokerInstanceId: "feed-a", brokerContractId: 101 },
+    { portfolio: "b", shares: 10, avgCost: 160, markPrice: 200, currency: "USD", broker: "ibkr", brokerInstanceId: "feed-b", brokerContractId: 202 },
+  ], broker_contracts: [
+    { brokerId: "ibkr", brokerInstanceId: "feed-a", conId: 101, symbol: "ACME", currency: "USD", secType: "STK" },
+    { brokerId: "ibkr", brokerInstanceId: "feed-b", conId: 202, symbol: "ACME", currency: "USD", secType: "STK" },
+  ] } };
+  const calls: unknown[] = [];
+  const provider = createTestDataProvider({ getQuote: async (_symbol, _exchange, context) => {
+    calls.push(context);
+    return { ...quote, symbol: "ACME", price: context?.instrument?.conId === 202 ? 200 : 100 };
+  } });
+  let result: { data: any[]; metadata: any };
+  const ctx = { cliOptions: { ...DEFAULT_CLI_OPTIONS, format: "json" }, printResult: (value: typeof result) => { result = value; },
+    initMarketData: async () => ({ config, persistence: { close() {} }, store: { loadAllTickers: async () => [record] }, dataProvider: provider }),
+  } as unknown as CliCommandContext;
+  for (const id of ["a", "b"]) {
+    await showCollection(id, ctx);
+    expect(calls.at(-1)).toMatchObject({ brokerId: "ibkr", brokerInstanceId: `feed-${id}`, instrument: { conId: id === "a" ? 101 : 202 } });
+    expect(result!.data[0]).toMatchObject({ quotePrice: id === "a" ? 100 : 200, marketValue: id === "a" ? 1000 : 2000, unrealizedPnl: id === "a" ? 200 : 400 });
+  }
+  record.metadata.broker_contracts!.pop();
+  await showCollection("b", ctx);
+  expect(calls).toHaveLength(2);
+  expect(result!.data[0]).toMatchObject({ quotePrice: null, marketValue: 2000, unrealizedPnl: 400, pnlBasis: "broker-snapshot" });
+  expect(result!.metadata.complete).toBe(true);
+  const output: string[] = [], logger = spyOn(console, "log").mockImplementation((...args) => { output.push(args.join(" ")); });
+  try { await showCollection("b", { ...ctx, cliOptions: DEFAULT_CLI_OPTIONS }); } finally { logger.mockRestore(); }
+  expect(output.join("\n")).toContain("+$400");
+  expect(calls).toHaveLength(2);
+});

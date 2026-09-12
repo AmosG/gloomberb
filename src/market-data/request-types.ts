@@ -41,28 +41,43 @@ export interface SecFilingsRequest {
 function brokerContractForTicker(
   ticker: TickerRecord | null | undefined,
   options: TickerInstrumentOptions = {},
-): BrokerContractRef | null {
+): BrokerContractRef | null | undefined {
   const contracts = ticker?.metadata.broker_contracts ?? [];
-  if (contracts.length === 0) return null;
-
   const portfolioId = options.portfolioId;
   if (portfolioId) {
-    const positions = ticker?.metadata.positions.filter((position) => position.portfolio === portfolioId) ?? [];
+    const positions = ticker?.metadata.positions.filter((position) => position.portfolio === portfolioId && position.shares !== 0) ?? [];
+    const selected = new Map<string, BrokerContractRef>();
+    let hasPublicPosition = false;
     for (const position of positions) {
-      const matchingContract = contracts.find((contract) => (
+      const hasExplicitId = position.brokerContractId != null;
+      const hasLegacyScope = position.broker !== "manual" && !!position.broker && !!position.brokerInstanceId;
+      if (!hasExplicitId && !hasLegacyScope) {
+        hasPublicPosition = true;
+        continue;
+      }
+      const matches = contracts.filter((contract) => (
         (position.brokerContractId == null || contract.conId === position.brokerContractId)
         && (!position.brokerInstanceId || contract.brokerInstanceId === position.brokerInstanceId)
         && (!position.broker || contract.brokerId === position.broker)
       ));
-      if (matchingContract) return matchingContract;
+      if (matches.length === 0) {
+        if (hasExplicitId) return undefined;
+        hasPublicPosition = true;
+        continue;
+      }
+      for (const contract of matches) {
+        const definition = contract.conId != null ? contract.conId : [
+          contract.localSymbol, contract.symbol, contract.secType, contract.currency,
+          contract.exchange, contract.primaryExchange, contract.lastTradeDateOrContractMonth,
+          contract.right, contract.strike, contract.multiplier, contract.tradingClass,
+        ];
+        const key = JSON.stringify([contract.brokerId, contract.brokerInstanceId, definition]);
+        selected.set(key, contract);
+      }
     }
-    for (const position of positions) {
-      const matchingContract = contracts.find((contract) => (
-        (!position.brokerInstanceId || contract.brokerInstanceId === position.brokerInstanceId)
-        && (!position.broker || contract.brokerId === position.broker)
-      ));
-      if (matchingContract) return matchingContract;
-    }
+    // One ticker quote must identify every selected lot. Never choose by array order.
+    if (selected.size > 1 || (selected.size > 0 && hasPublicPosition)) return undefined;
+    return selected.values().next().value ?? null;
   }
 
   return contracts[0] ?? null;
@@ -76,6 +91,7 @@ export function instrumentFromTicker(
   const symbol = ticker?.metadata.ticker ?? fallbackSymbol ?? null;
   if (!symbol) return null;
   const instrument = brokerContractForTicker(ticker, options);
+  if (instrument === undefined) return null;
   return {
     symbol,
     exchange: ticker?.metadata.exchange ?? "",

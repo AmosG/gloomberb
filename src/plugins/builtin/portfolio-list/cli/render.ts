@@ -20,6 +20,8 @@ import type { AppConfig } from "../../../../types/config";
 import type { CliCommandContext } from "../../../../types/plugin";
 import type { MarketContext } from "../../../../cli/types";
 import type { TickerRecord } from "../../../../types/ticker";
+import { instrumentFromTicker } from "../../../../market-data/request-types";
+import { toMarketDataContext } from "../../../../market-data/selectors";
 
 export function renderCollectionOverview(config: AppConfig, tickers: TickerRecord[]): string {
   const blocks: string[] = [];
@@ -111,7 +113,10 @@ async function showCollectionWithMarketData(
   await Promise.all(
     filtered.map(async (ticker) => {
       try {
-        const quote = await dataProvider.getQuote(ticker.metadata.ticker, ticker.metadata.exchange);
+        const instrument = isPortfolio ? instrumentFromTicker(ticker, ticker.metadata.ticker, { portfolioId: id }) : null;
+        if (isPortfolio && !instrument) return;
+        const quote = await dataProvider.getQuote(ticker.metadata.ticker, ticker.metadata.exchange,
+          instrument ? toMarketDataContext(instrument) : undefined);
         quotes.set(ticker.metadata.ticker, quote);
       } catch {
         // Ignore partial quote failures so the rest of the table still renders.
