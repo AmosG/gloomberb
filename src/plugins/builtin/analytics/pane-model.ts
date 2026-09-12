@@ -19,6 +19,7 @@ import {
 import {
   resolveDatedReturns,
   alignedAssetReturns,
+  computeDatedBeta,
   computeWeightedPortfolioReturns,
   syntheticAccountUnsupportedReason,
   syntheticPositionUnsupportedReason,
@@ -28,6 +29,13 @@ import {
 } from "./metrics";
 import { getPortfolioPositionValue } from "./sector-model";
 import type { AnalyticsMetricRow } from "./view";
+import { qualifySharpeCadence, qualifyReturnTimestamps, type SharpeCadenceResult, type ReturnTimestampResult, type TimestampHistory } from "./sharpe-cadence";
+
+export const PORTFOLIO_BENCHMARK = {
+  symbol: "SPY", exchange: "ARCA", currency: "USD", isin: "US78462F1030",
+  source: "https://www.ssga.com/us/en/individual/etfs/state-street-spdr-sp-500-etf-trust-spy",
+  checkedAt: "2026-09-12",
+} as const;
 
 export interface PortfolioChartTarget {
   ticker: TickerRecord;
@@ -91,6 +99,9 @@ export interface PortfolioReturnSeriesResult {
   unvaluedCount: number;
   unsupportedReason: string | null;
   historyIntegrity: Array<{ symbol: string; integrity: PriceHistoryIntegrity }>;
+  sharpeCadence: SharpeCadenceResult;
+  returnTimestamps: ReturnTimestampResult;
+  timestampSources: readonly TimestampHistory[];
 }
 
 export function buildPortfolioReturnSeries({
@@ -107,6 +118,7 @@ export function buildPortfolioReturnSeries({
   account?: BrokerAccount | null;
 }): PortfolioReturnSeriesResult {
   const weightedSeries: WeightedReturnSeries[] = [];
+  const cadenceHoldings: Parameters<typeof qualifySharpeCadence>[1][number][] = [];
   let coveredValue = 0;
   let totalValue = 0;
   let missingCount = 0;
@@ -128,6 +140,7 @@ export function buildPortfolioReturnSeries({
 
     const entry = request ? chartEntries.get(buildChartKey(request)) : undefined;
     const history = entry?.data ?? entry?.lastGoodData ?? null;
+    cadenceHoldings.push({ symbol: ticker.metadata.ticker, exchange: request?.instrument.exchange ?? "", history: history ?? [] });
     const resolved = resolveDatedReturns(history ?? []);
     if (resolved.integrity) historyIntegrity.push({ symbol: ticker.metadata.ticker, integrity: resolved.integrity });
     const returns = resolved.returns;
@@ -141,6 +154,7 @@ export function buildPortfolioReturnSeries({
   }
 
   const returns = computeWeightedPortfolioReturns(weightedSeries);
+  const returnTimestamps = qualifyReturnTimestamps(returns, cadenceHoldings);
   return {
     returns: !unsupportedReason && unvaluedCount === 0 && historyIntegrity.length === 0 && returns.length > 0 ? returns : null,
     coverage: totalValue > 0 ? coveredValue / totalValue : chartTargets.length === 0 ? 1 : 0,
@@ -148,16 +162,44 @@ export function buildPortfolioReturnSeries({
     unvaluedCount,
     unsupportedReason,
     historyIntegrity,
+    sharpeCadence: qualifySharpeCadence(returns, cadenceHoldings, returnTimestamps),
+    returnTimestamps,
+    timestampSources: cadenceHoldings,
   };
+}
+
+export interface BenchmarkReturnSeriesResult extends ReturnHistoryResult {
+  timestamps: ReturnTimestampResult;
+  timestampSource: TimestampHistory;
+  identity?: typeof PORTFOLIO_BENCHMARK;
 }
 
 export function buildBenchmarkReturnSeries(
   request: ChartRequest,
   chartEntries: ChartEntryLookup,
-): ReturnHistoryResult {
+): BenchmarkReturnSeriesResult {
   const entry = chartEntries.get(buildChartKey(request));
   const history = entry?.data ?? entry?.lastGoodData ?? null;
-  return resolveDatedReturns(history ?? []);
+  const resolved = resolveDatedReturns(history ?? []);
+  const timestampSource = {
+    symbol: request.instrument.symbol, exchange: request.instrument.exchange ?? "", history: history ?? [],
+  };
+  return {
+    ...resolved, timestampSource, timestamps: qualifyReturnTimestamps(resolved.returns, [timestampSource]),
+    ...(request.instrument.symbol === PORTFOLIO_BENCHMARK.symbol && request.instrument.exchange === PORTFOLIO_BENCHMARK.exchange
+      ? { identity: PORTFOLIO_BENCHMARK } : {}),
+  };
+}
+
+/** Beta validates only the endpoint-aligned observations it actually uses. */
+export function buildPortfolioBetaResult(portfolio: PortfolioReturnSeriesResult, benchmark: BenchmarkReturnSeriesResult) {
+  const sample = alignedAssetReturns(portfolio.returns ?? [], benchmark.returns);
+  const holdingTimestamps = qualifyReturnTimestamps(sample, portfolio.timestampSources);
+  const benchmarkTimestamps = qualifyReturnTimestamps(sample, [benchmark.timestampSource]);
+  return {
+    value: holdingTimestamps.supported && benchmarkTimestamps.supported ? computeDatedBeta(sample, benchmark.returns) : null,
+    sample, holdingTimestamps, benchmarkTimestamps,
+  };
 }
 
 export function buildAnalyticsSummaryRows({
@@ -330,6 +372,10 @@ export function buildAnalyticsRiskRows({
   unsupportedReason = null,
   historyIntegrity = [],
   benchmarkIntegrity = null,
+  sharpeCadence,
+  returnTimestamps,
+  betaHoldingTimestamps,
+  benchmarkTimestamps,
   returns,
   benchmarkReturns,
 }: {
@@ -341,6 +387,10 @@ export function buildAnalyticsRiskRows({
   unsupportedReason?: string | null;
   historyIntegrity?: PortfolioReturnSeriesResult["historyIntegrity"];
   benchmarkIntegrity?: PriceHistoryIntegrity | null;
+  sharpeCadence?: SharpeCadenceResult;
+  returnTimestamps?: ReturnTimestampResult;
+  betaHoldingTimestamps?: ReturnTimestampResult;
+  benchmarkTimestamps?: ReturnTimestampResult;
   returns?: DatedReturn[] | null;
   benchmarkReturns?: DatedReturn[];
 }): AnalyticsMetricRow[] {
@@ -353,7 +403,11 @@ export function buildAnalyticsRiskRows({
     { id: "sharpe", label: "Est. Sharpe", value: sharpe },
     { id: "beta", label: "Est. Beta (SPY)", value: beta },
   ].map((row) => {
-    const reason = unavailable ?? (row.id === "beta" && benchmarkIntegrity ? "SPY benchmark: inconsistent OHLC history" : null);
+    const rowTimestamps = row.id === "beta" ? betaHoldingTimestamps ?? returnTimestamps : returnTimestamps;
+    const reason = unavailable ?? (rowTimestamps && !rowTimestamps.supported ? rowTimestamps.reason : null)
+      ?? (row.id === "beta" && benchmarkIntegrity ? "SPY benchmark: inconsistent OHLC history"
+      : row.id === "beta" && benchmarkTimestamps && !benchmarkTimestamps.supported ? "SPY timestamps unverified"
+      : row.id === "sharpe" && sharpeCadence && !sharpeCadence.supported ? sharpeCadence.reason : null);
     const sample = row.id === "beta" && returns && benchmarkReturns ? alignedAssetReturns(returns, benchmarkReturns) : returns;
     const compactDate = (value: string) => new Date(`${value}T00:00:00Z`).toLocaleDateString("en-GB", {
       day: "2-digit", month: "short", year: "2-digit", timeZone: "UTC",

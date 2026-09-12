@@ -24,7 +24,6 @@ import {
   useBrokerPortfolioPerformance,
 } from "./broker-performance";
 import {
-  computeDatedBeta,
   computeSharpeRatio,
   hasPortfolioPosition,
 } from "./metrics";
@@ -35,6 +34,8 @@ import {
   buildHistoryAxisLabel,
   buildPortfolioChartTargets,
   buildPortfolioReturnSeries,
+  buildPortfolioBetaResult,
+  PORTFOLIO_BENCHMARK,
   formatHistoryAxisValue,
   resolvePerformancePalette,
 } from "./pane-model";
@@ -118,7 +119,7 @@ function PortfolioAnalyticsPane({ focused, width, height }: PaneProps) {
 
   const spyRequest = useMemo(
     () => ({
-      instrument: { symbol: "SPY", exchange: "" },
+      instrument: { symbol: PORTFOLIO_BENCHMARK.symbol, exchange: PORTFOLIO_BENCHMARK.exchange },
       bufferRange: "1Y" as const,
       granularity: "range" as const,
     }),
@@ -187,14 +188,15 @@ function PortfolioAnalyticsPane({ focused, width, height }: PaneProps) {
   );
 
   const sharpe = useMemo(
-    () => (portfolioReturns ? computeSharpeRatio(portfolioReturns) : null),
-    [portfolioReturns],
+    () => (portfolioReturns && returnSeriesResult.sharpeCadence.supported ? computeSharpeRatio(portfolioReturns) : null),
+    [portfolioReturns, returnSeriesResult.sharpeCadence],
   );
 
-  const beta = useMemo(
-    () => (portfolioReturnSeries ? computeDatedBeta(portfolioReturnSeries, spyReturnSeries.returns) : null),
-    [portfolioReturnSeries, spyReturnSeries],
+  const betaResult = useMemo(
+    () => buildPortfolioBetaResult(returnSeriesResult, spyReturnSeries),
+    [returnSeriesResult, spyReturnSeries],
   );
+  const beta = betaResult.value;
 
   const sectorAllocation = useMemo(
     () => buildSectorRowsFromPortfolioColumns(portfolioTickers, financials, columnContext),
@@ -242,10 +244,14 @@ function PortfolioAnalyticsPane({ focused, width, height }: PaneProps) {
       unsupportedReason: returnSeriesResult.unsupportedReason,
       historyIntegrity: returnSeriesResult.historyIntegrity,
       benchmarkIntegrity: spyReturnSeries.integrity,
+      sharpeCadence: returnSeriesResult.sharpeCadence,
+      returnTimestamps: returnSeriesResult.returnTimestamps,
+      betaHoldingTimestamps: betaResult.holdingTimestamps,
+      benchmarkTimestamps: betaResult.benchmarkTimestamps,
       returns: portfolioReturnSeries,
       benchmarkReturns: spyReturnSeries.returns,
     }),
-    [beta, returnSeriesResult, spyReturnSeries, sharpe],
+    [beta, betaResult, returnSeriesResult, spyReturnSeries, sharpe],
   );
   const metricsHeight = summaryRows.length + riskRows.length + 5;
   const historyNote = performanceHistoryNote(brokerPerformance.performance);

@@ -93,8 +93,9 @@ test("does not publish portfolio risk from just the valued portion when FX is mi
     portfolios: ["main"], watchlists: [], custom: {}, tags: [],
   } }));
   const targets = buildPortfolioChartTargets(tickers);
+  const sessionDates = ["01", "02", "03", "04", "05", "08", "09", "10", "11", "12", "15", "16", "17", "18", "22", "23", "24", "25", "26", "29"];
   const chartEntries = new Map(targets.map(({ request }) => [buildChartKey(request), {
-    data: Array.from({ length: 20 }, (_, index) => ({ date: new Date(Date.UTC(2026, 0, index + 1)), close: 100 + index + index % 2 })),
+    data: sessionDates.map((day, index) => ({ date: new Date(`2026-06-${day}`), close: 100 + index + index % 2 })),
   }]));
   const input = {
     chartTargets: targets, chartEntries, financials: new Map(),
@@ -137,7 +138,16 @@ test("does not publish portfolio risk from just the valued portion when FX is mi
   expect(leveraged.returns).toBeNull();
   expect(leveraged.unsupportedReason).toContain("Leveraged account");
 
-  const supported = buildAnalyticsRiskRows({ ...buildPortfolioReturnSeries(input), sharpe: 2, beta: 1 });
+  const unknownCalendar = buildAnalyticsRiskRows({ ...buildPortfolioReturnSeries(input), sharpe: 2, beta: 1 });
+  expect(unknownCalendar.map((row) => row.value)).toEqual(["—", "1.00"]);
+  expect(unknownCalendar[0]!.detail).toBe("Daily calendar unavailable");
+  // A USD amount alone cannot establish a US listing calendar.
+  tickers[1]!.metadata.exchange = "NYSE";
+  const supportedTargets = buildPortfolioChartTargets(tickers);
+  const supported = buildAnalyticsRiskRows({ ...buildPortfolioReturnSeries({
+    ...input, chartTargets: supportedTargets,
+    chartEntries: new Map(supportedTargets.map((target, index) => [buildChartKey(target.request!), chartEntries.get(buildChartKey(targets[index]!.request!))])),
+  }), sharpe: 2, beta: 1 });
   expect(supported.map((row) => row.value)).toEqual(["2.00", "1.00"]);
 });
 
