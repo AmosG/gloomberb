@@ -170,7 +170,7 @@ export class ProviderRouterPrimaryRoutes {
     for (const provider of this.options.providersInPriorityOrder()) {
       try {
         const quote = await provider.getQuote(ticker, exchange, context);
-        if (!isProviderQuoteUsableForCurrentSession(quote, exchange)) continue;
+        if (!isProviderQuoteUsableForCurrentSession(quote, exchange, ticker)) continue;
         const sourceKey = this.options.providerSourceKey(provider);
         this.options.cacheResource(
           "quote",

@@ -972,7 +972,7 @@ describe("AssetDataRouter", () => {
       subscribeQuotes(targets, onQuote) {
         providerTargets.push(...targets);
         onQuote(targets[0]!, {
-          symbol: "MSFT",
+          symbol: targets[0]!.symbol,
           price: 456.78,
           currency: "USD",
           change: 2,

@@ -20,6 +20,7 @@ import {
 import { withBrokerTimeout } from "./brokers";
 import {
   hasMeaningfulProfile,
+  isProviderQuoteUsableForCurrentSession,
   hasShallowStatementHistory,
   mergeCachedFinancialRecords,
   mergeFinancials,
@@ -195,7 +196,7 @@ export class ProviderRouterFinancialRoutes {
     const rawCached = selectCachedResource<Quote>(this.deps.resources, "quote", entityKey, variantKeys, sourceKeys, false);
     const cachedIsStale = rawCached && (brokerSourceKeys.includes(rawCached.sourceKey)
       ? isQuoteContributionStaleForCurrentSession(quoteWithFreshnessExchange(rawCached.value, exchange))
-      : isQuoteStaleForCurrentSession(quoteWithFreshnessExchange(rawCached.value, exchange)));
+      : !isProviderQuoteUsableForCurrentSession(rawCached.value, exchange, ticker));
     const cached = rawCached && !cachedIsStale
       ? rawCached
       : null;
@@ -255,7 +256,7 @@ export class ProviderRouterFinancialRoutes {
       if (
         record
         && (includeStale || !record.stale)
-        && !isQuoteStaleForCurrentSession(quoteWithFreshnessExchange(record.value, exchange))
+        && isProviderQuoteUsableForCurrentSession(record.value, exchange, ticker)
       ) {
         return record.value;
       }

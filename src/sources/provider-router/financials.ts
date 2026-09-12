@@ -5,6 +5,8 @@ import { coalesceFinancialPeriodAliases, mergeFinancialStatementRows } from "../
 import { normalizePriceHistory, normalizeTickerFinancialsPriceHistory } from "../../utils/price-history";
 import { redactUnavailableFundamentals, RETRACTABLE_VALUATION_FIELDS } from "../../utils/fundamentals";
 import { isExtendedHoursExchange, isQuoteStaleForCurrentSession } from "../../market-data/quotes/freshness";
+import { quoteMetadataFromQuote, quoteMetadataMatchesTarget } from "../../market-data/quotes/metadata";
+import { parsePublicTickerKey } from "../../utils/exchanges";
 import { activeUsMarketSession } from "../../market-data/market/freshness";
 import {
   mergeQuoteContributionMaps,
@@ -126,11 +128,21 @@ function isActiveProviderQuoteTooOld(quote: Quote, now = Date.now()): boolean {
   return now - quote.lastUpdated > maxAge;
 }
 
-export function isProviderQuoteUsableForCurrentSession(quote: Quote | null | undefined, exchange?: string): quote is Quote {
+export function isProviderQuoteUsableForCurrentSession(quote: Quote | null | undefined, exchange?: string, symbol?: string): quote is Quote {
   if (!quote) return false;
+  if (symbol) {
+    const metadata = quoteMetadataFromQuote(quote);
+    // Older quote providers omit listing metadata. They must still return the
+    // requested symbol; when they do name a listing it must agree as well.
+    const hasListing = !!(metadata.listingExchangeName || parsePublicTickerKey(quote.symbol).exchange);
+    if (!quoteMetadataMatchesTarget(metadata, hasListing ? symbol : parsePublicTickerKey(symbol).symbol, hasListing ? exchange : undefined)) return false;
+  }
   const normalized = quoteWithFreshnessExchange(quote, exchange);
   if (isQuoteStaleForCurrentSession(normalized)) return false;
   if (isActiveProviderQuoteTooOld(normalized)) return false;
+  // Futures may trade or settle at zero or negative prices. Require explicit
+  // source type metadata; an alias alone cannot establish the price domain.
+  const futures = ["FUT", "FUTURE", "FUTURES"].includes(normalized.instrumentType?.trim().toUpperCase() ?? "");
   return [
     normalized.price,
     normalized.preMarketPrice,
@@ -138,7 +150,9 @@ export function isProviderQuoteUsableForCurrentSession(quote: Quote | null | und
     normalized.bid,
     normalized.ask,
     normalized.mark,
-  ].some(finitePositiveNumber);
+  ].some((value) => futures
+    ? typeof value === "number" && Number.isFinite(value)
+    : finitePositiveNumber(value));
 }
 
 export function dropUnusableProviderQuote(value: TickerFinancials, exchange?: string): TickerFinancials {
