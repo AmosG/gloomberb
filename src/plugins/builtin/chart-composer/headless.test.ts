@@ -3,7 +3,7 @@ import { createTestDataProvider } from "../../../test-support/data-provider";
 import { createDefaultConfig } from "../../../types/config";
 import type { HeadlessPaneContext } from "../../../types/headless";
 import { chartHeadless, type ChartPaneModel } from "./headless";
-import { buildIntradayPriceChartPreset } from "./presets";
+import { buildCustomChartPreset, buildIntradayPriceChartPreset, setPairStudies } from "./presets";
 
 const history = ["2026-08-27", "2026-08-28", "2026-08-31", "2026-09-01", "2026-09-02", "2026-09-03"]
   .flatMap((date, day) => [0, 1].map((bar) => ({
@@ -36,6 +36,31 @@ function fixture() {
     argument: "AAPL:NASDAQ", rawArgument: "AAPL:NASDAQ", symbols: ["AAPL:NASDAQ"], options,
   }, context) as ChartPaneModel };
 }
+
+test("an unavailable currency spread reaches headless errors even with normalized chart presentation", async () => {
+  for (const currency of ["EUR", ""]) for (const transform of ["raw", "percent"] as const) {
+    const quote = (symbol: string) => ({ symbol, price: 100, change: 0, changePercent: 0,
+      currency: symbol === "TARGET" ? "USD" : currency, instrumentType: "EQUITY" as const,
+      lastUpdated: Date.parse("2026-09-03T13:35:00Z") });
+    const provider = createTestDataProvider({
+      getTickerFinancials: async (symbol) => ({ quote: quote(symbol), annualStatements: [], quarterlyStatements: [], priceHistory: [] }),
+      getQuote: async (symbol) => quote(symbol),
+      getQuoteMetadata: async (symbol) => ({ symbol, currency: quote(symbol).currency, instrumentType: "EQUITY" }),
+      getDetailedPriceHistory: async () => history,
+      getPriceHistoryForResolution: async () => history,
+    });
+    const spec = setPairStudies(buildCustomChartPreset("TARGET:NASDAQ:market.close,ACQUIRER:NASDAQ:market.close"), ["spread", "ratio"]);
+    spec.viewport.dateWindow = { start: "2026-08-27", end: "2026-09-04" };
+    spec.series = spec.series.map((series) => ({ ...series, transform }));
+    const result = await chartHeadless("chart-composer-pane").load({
+      argument: "TARGET:NASDAQ,ACQUIRER:NASDAQ", rawArgument: "TARGET:NASDAQ,ACQUIRER:NASDAQ", symbols: ["TARGET:NASDAQ", "ACQUIRER:NASDAQ"], options: {},
+    }, { ...fixture().context, marketData: provider, settings: { chartSpec: spec } });
+    expect(result.errors).toEqual([expect.stringContaining("pair:spread: spread cannot subtract")]);
+    expect(result.unavailableSymbols).toEqual([]);
+    expect(result.series.map(({ id }) => id)).toEqual([...spec.series.map(({ id }) => id), "pair:ratio"]);
+    expect(result.series.every(({ points }) => points.length > 0)).toBe(true);
+  }
+});
 
 describe("GIP headless sessions", () => {
   test("selects the latest one/five sessions or a historical session, retaining its last bar without another history fetch", async () => {
