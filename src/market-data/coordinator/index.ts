@@ -315,8 +315,9 @@ export class MarketDataCoordinator {
     });
   }
 
-  async loadSecFilings(request: SecFilingsRequest): Promise<QueryEntry<SecFilingItem[]>> {
-    return this.loadCachedQuery("getSecFilings", [request.instrument.symbol, request.count ?? 50, request.instrument.exchange, toMarketDataContext(request.instrument)], buildSecFilingsKey(request), this.secFilingsStore, false, (value) => value.length === 0) ?? loadSecFilingsEntry({
+  async loadSecFilings(request: SecFilingsRequest, options: { forceRefresh?: boolean } = {}): Promise<QueryEntry<SecFilingItem[]>> {
+    return this.loadCachedQuery("getSecFilings", [request.instrument.symbol, request.count ?? 50, request.instrument.exchange, toMarketDataContext(request.instrument)], buildSecFilingsKey(request), this.secFilingsStore, options.forceRefresh, (value) => value.length === 0) ?? loadSecFilingsEntry({
+      forceRefresh: options.forceRefresh,
       dataProvider: this.dataProvider,
       request,
       store: this.secFilingsStore,
@@ -324,8 +325,9 @@ export class MarketDataCoordinator {
     });
   }
 
-  async loadSecFilingContent(filing: SecFilingItem): Promise<QueryEntry<string | null>> {
-    return this.loadCachedQuery("getSecFilingContent", [filing], buildSecContentKey(filing.accessionNumber), this.secContentStore) ?? loadSecFilingContentEntry({
+  async loadSecFilingContent(filing: SecFilingItem, options: { forceRefresh?: boolean } = {}): Promise<QueryEntry<string | null>> {
+    return this.loadCachedQuery("getSecFilingContent", [filing], buildSecContentKey(filing.accessionNumber), this.secContentStore, options.forceRefresh) ?? loadSecFilingContentEntry({
+      forceRefresh: options.forceRefresh,
       dataProvider: this.dataProvider,
       filing,
       store: this.secContentStore,
@@ -333,8 +335,9 @@ export class MarketDataCoordinator {
     });
   }
 
-  async loadSecFilingDocuments(filing: SecFilingItem): Promise<QueryEntry<SecFilingDocument[]>> {
-    return this.loadCachedQuery("getSecFilingDocuments", [filing], buildSecDocumentsKey(filing.accessionNumber), this.secDocumentsStore, false, (value) => value.length === 0) ?? loadSecFilingDocumentsEntry({
+  async loadSecFilingDocuments(filing: SecFilingItem, options: { forceRefresh?: boolean } = {}): Promise<QueryEntry<SecFilingDocument[]>> {
+    return this.loadCachedQuery("getSecFilingDocuments", [filing], buildSecDocumentsKey(filing.accessionNumber), this.secDocumentsStore, options.forceRefresh, (value) => value.length === 0) ?? loadSecFilingDocumentsEntry({
+      forceRefresh: options.forceRefresh,
       dataProvider: this.dataProvider,
       filing,
       store: this.secDocumentsStore,

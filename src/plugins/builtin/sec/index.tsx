@@ -1,7 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PluginModule } from "../plugin-module";
 import type { SecFilingDocument, SecFilingItem } from "../../../types/data-provider";
 import { useResolvedEntryValue, useSecFilingDocuments, useSecFilingsQuery } from "../../../market-data/hooks";
+import { getSharedMarketDataCoordinator } from "../../../market-data/coordinator";
+import { useShortcut } from "../../../react/input";
+import { isPlainKey } from "../../../utils/keyboard";
 import { instrumentFromTicker } from "../../../market-data/request-types";
 import { useDebouncedPluginPaneState } from "../../runtime";
 import { usePaneTicker } from "../../../state/app/context";
@@ -37,7 +40,6 @@ import {
   secFilingIssuers,
   secIssuerLabel,
   secReportedAcceptance,
-  SEC_ACCEPTANCE_NOTE,
 } from "./model";
 
 export { secHeadless } from "./headless";
@@ -66,18 +68,24 @@ function buildDetailBodyWithDocuments({
   filing,
   documents,
   documentsLoading,
+  documentsError,
   contentCache,
+  contentErrors,
   primaryContent,
 }: {
   filing: SecFilingItem;
   documents: SecFilingDocument[];
   documentsLoading: boolean;
+  documentsError: string | null;
+  contentErrors: Map<string, string>;
   contentCache: Map<string, string | null>;
   primaryContent: string;
 }): string {
   const lines: string[] = [];
   lines.push("Documents");
-  if (documentsLoading && documents.length === 0) {
+  if (documentsError && documents.length === 0) {
+    lines.push(`Filing documents unavailable: ${documentsError}`);
+  } else if (documentsLoading && documents.length === 0) {
     lines.push("Loading filing documents...");
   } else if (documents.length === 0) {
     lines.push("No filing documents were listed for this filing.");
@@ -96,8 +104,9 @@ function buildDetailBodyWithDocuments({
       const hasContent = contentCache.has(key);
       const content = contentCache.get(key);
       lines.push("", documentHeading(document));
-      lines.push(hasContent
-        ? content || "Readable document content was not available for this exhibit."
+      lines.push(contentErrors.has(key) && !content
+        ? `Exhibit content unavailable: ${contentErrors.get(key)}`
+        : hasContent ? content || "Readable document content was not available for this exhibit."
         : "Loading exhibit content...");
     }
   }
@@ -139,6 +148,8 @@ function toFeedItems(
   loadingContent: boolean,
   selectedDocuments: SecFilingDocument[],
   loadingDocuments: boolean,
+  documentsError: string | null,
+  contentErrors: Map<string, string>,
 ): FeedDataTableItem[] {
   return filings.map((filing) => {
     const displayTitle = getFilingDisplayTitle(filing);
@@ -161,13 +172,17 @@ function toFeedItems(
     const selected = filing.accessionNumber === selectedAccessionNumber;
     const primaryDetailBody = loadingContent && selected
       ? "Loading filing content..."
-      : form4Detail ?? fetchedContent ?? fallbackBody;
+      : contentErrors.has(filing.accessionNumber) && !fetchedContent
+        ? `Filing content unavailable: ${contentErrors.get(filing.accessionNumber)}`
+        : form4Detail ?? fetchedContent ?? fallbackBody;
     const detailBody = selected
       ? buildDetailBodyWithDocuments({
           filing,
           documents: selectedDocuments,
           documentsLoading: loadingDocuments,
+          documentsError,
           contentCache,
+          contentErrors,
           primaryContent: primaryDetailBody,
         })
       : form4Detail ?? fallbackBody;
@@ -185,7 +200,7 @@ function toFeedItems(
       detailMeta: [
         secIssuerLabel(filing),
         `Filed ${formatFiledAt(filing)}`,
-        ...(acceptedAt ? [`SEC-reported acceptance ${acceptedAt}`, SEC_ACCEPTANCE_NOTE] : []),
+        ...(acceptedAt ? [`SEC-reported acceptance ${acceptedAt}`] : []),
         `Accession ${filing.accessionNumber}`,
         ...(filing.items ? [`Items ${filing.items}`] : []),
         ...(filingPreviewTruncated(filing, selected ? selectedDocuments : [], contentCache)
@@ -220,14 +235,15 @@ function SecView({ width, height, focused }: { width: number; height: number; fo
   useEffect(() => {
     setVisibleCount(SEC_FILING_PAGE_SIZE);
   }, [ticker?.metadata.ticker, ticker?.metadata.exchange]);
-  const loading = filingsEntry?.phase === "loading" || (filingsEntry?.phase === "refreshing" && filings.length === 0);
-  const error = filingsEntry?.phase === "error" ? filingsEntry.error?.message ?? "Failed to load SEC filings" : null;
+  const loading = filingsEntry?.phase === "loading" || filingsEntry?.phase === "refreshing";
+  const error = filingsEntry?.error && filingsEntry.error.reasonCode !== "NO_DATA" ? filingsEntry.error.message : null;
 
   const openFiling = openItemId
     ? filings.find((filing) => filing.accessionNumber === openItemId) ?? null
     : null;
   const documentsEntry = useSecFilingDocuments(openFiling ?? null);
   const openDocuments = useResolvedEntryValue(documentsEntry) ?? [];
+  const documentsError = documentsEntry?.error && documentsEntry.error.reasonCode !== "NO_DATA" ? documentsEntry.error.message : null;
   const loadingDocuments = !!openFiling && (
     documentsEntry?.phase === "idle"
     || documentsEntry?.phase === "loading"
@@ -242,11 +258,26 @@ function SecView({ width, height, focused }: { width: number; height: number; fo
     ...buildInlineFilingContentTargets(openFiling, openDocuments),
     ...(selectedFiling && OWNERSHIP_FORMS.has(selectedFiling.form.trim()) ? [selectedFiling] : []),
   ], [openDocuments, openFiling, selectedFiling]);
-  const { contentCache } = useSecFilingContentCache({
+  const { contentCache, contentErrors, retry: retryContent, loadingKey } = useSecFilingContentCache({
     scopeKey: `${ticker?.metadata.ticker ?? "none"}:${ticker?.metadata.exchange ?? ""}:${eligibleTicker}`,
     targets: contentTargets,
   });
-  const loadingContent = !!openFiling && !contentCache.has(openFiling.accessionNumber);
+  const loadingContent = !!openFiling && (!contentCache.has(openFiling.accessionNumber) || loadingKey === openFiling.accessionNumber);
+  const activeContentError = [openFiling, ...buildInlineFilingContentTargets(openFiling, openDocuments)]
+    .filter((target): target is SecFilingItem => !!target)
+    .map((target) => contentErrors.get(target.accessionNumber)).find(Boolean);
+  const detailError = openFiling ? documentsError ?? activeContentError ?? null : null;
+
+  const refresh = useCallback(() => {
+    const coordinator = getSharedMarketDataCoordinator();
+    if (!coordinator || !instrument || !eligibleTicker) return;
+    void coordinator.loadSecFilings({ instrument, count: SEC_FILING_FETCH_LIMIT }, { forceRefresh: true });
+    if (openFiling && (documentsError || openDocuments.length === 0)) {
+      void coordinator.loadSecFilingDocuments(openFiling, { forceRefresh: true });
+    }
+    void retryContent();
+  }, [instrument, eligibleTicker, openFiling, documentsError, openDocuments.length, retryContent]);
+  useShortcut((event) => { if (isPlainKey(event, "r")) refresh(); }, { enabled: focused, scope: "sec" });
 
   useEffect(() => {
     if (visibleFilings.length > 0 && selectedIdx >= visibleFilings.length) {
@@ -257,12 +288,12 @@ function SecView({ width, height, focused }: { width: number; height: number; fo
   usePaneStatusLinkFooter({
     registrationId: "sec",
     focused,
-    url: error ? null : openFiling?.filingUrl,
+    url: openFiling?.filingUrl,
     source: openFiling?.form,
     label: "filing",
-    loading,
-    error,
-    showOpenHint: !error && !!openFiling?.filingUrl,
+    loading: loading || loadingDocuments || !!loadingKey,
+    error: error ?? detailError,
+    showOpenHint: !!openFiling?.filingUrl,
   });
 
   if (!ticker) {
@@ -270,7 +301,7 @@ function SecView({ width, height, focused }: { width: number; height: number; fo
   }
   if (!eligibleTicker) return renderFilingNotice("SEC filings are only shown for US equities.", width);
   if (loading && filings.length === 0) return <Spinner label="Loading SEC filings..." />;
-  if (error) return <EmptyState title="SEC filings unavailable." message={error} />;
+  if (error && filings.length === 0) return <EmptyState title="SEC filings unavailable." message={error} />;
   if (filings.length === 0) return renderFilingNotice(`No recent SEC filings for ${ticker.metadata.ticker}.`, width);
 
   return (
@@ -285,6 +316,8 @@ function SecView({ width, height, focused }: { width: number; height: number; fo
         loadingContent,
         openDocuments,
         loadingDocuments,
+        documentsError,
+        contentErrors,
       )}
       selectedIdx={selectedIdx}
       onSelect={setSelectedIdx}
