@@ -15,6 +15,7 @@ test("financial statements keep raw values, dated growth cells, and formatted co
       async getTickerFinancials(symbol, exchange) {
         requested.push(`${symbol}:${exchange}`);
         return {
+          financialCurrency: "USD",
           annualStatements: [
             { date: "2024-12-31", totalRevenue: 100, dilutedShares: 10 },
             { date: "2025-12-31", totalRevenue: 150, dilutedShares: 12 },

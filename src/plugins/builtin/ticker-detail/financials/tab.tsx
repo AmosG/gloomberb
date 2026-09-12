@@ -13,7 +13,6 @@ import {
   type DataTableColumn,
 } from "../../../../components";
 import { colors, priceColor } from "../../../../theme/colors";
-import type { FinancialStatement } from "../../../../types/financials";
 import { padTo } from "../../../../utils/format";
 import {
   FINANCIAL_COL_W,
@@ -22,6 +21,7 @@ import {
   FINANCIAL_SUB_TABS,
   FINANCIAL_SUB_TABS_WIDTH,
   buildFinancialRows,
+  canCompareFinancialRow,
   collectDefaultCollapsedGroupIds,
   collectGroupIds,
   computeGrowth,
@@ -39,10 +39,11 @@ import {
   type FinancialPeriod,
   type FinancialTableRow,
 } from "./model";
+import type { FinancialTableStatement } from "./aggregation";
 
 type FinancialTableColumn = DataTableColumn & (
   | { id: "metric"; kind: "metric" }
-  | { id: string; kind: "statement"; statement: FinancialStatement }
+  | { id: string; kind: "statement"; statement: FinancialTableStatement }
 );
 
 export function FinancialsTab({
@@ -83,6 +84,7 @@ export function ResolvedFinancialsTab({
 }) {
   const annualStatements = [...(financials?.annualStatements ?? [])].sort((a, b) => a.date.localeCompare(b.date));
   const quarterlyStatements = [...(financials?.quarterlyStatements ?? [])].sort((a, b) => a.date.localeCompare(b.date));
+  const comparisonCurrency = financialStatementCurrency(financials, [...annualStatements, ...quarterlyStatements]);
   const hasAnnualStatements = annualStatements.length > 0;
   const hasQuarterlyStatements = quarterlyStatements.length > 0;
   const fallbackPeriod: FinancialPeriod = hasAnnualStatements ? "annual" : "quarterly";
@@ -259,7 +261,7 @@ export function ResolvedFinancialsTab({
       id: `statement:${statement.date}:${index}`,
       kind: "statement",
       statement,
-      label: padTo(formatFinancialHeader(statement.date, statement.currency ?? financialStatementCurrency(financials, displayStatements), statement.dateSource, true), FINANCIAL_COL_W, "center"),
+      label: padTo(formatFinancialHeader(statement.date, statement.currency ?? financialStatementCurrency(financials, displayStatements), statement.dateSource, true, statement.aggregation?.periodEnd), FINANCIAL_COL_W, "center"),
       width: FINANCIAL_COL_W,
       align: "right",
       headerColor: statement.date === "TTM" ? colors.textBright : colors.textDim,
@@ -330,7 +332,9 @@ export function ResolvedFinancialsTab({
         ? previous[key!] as number | undefined
         : statementMetricValue(row, previous)
       : undefined;
-    const growth = row.kind === "metric" && !row.showGrowth ? undefined : computeGrowth(value, previousValue);
+    const growth = (row.kind === "metric" && !row.showGrowth)
+      || !canCompareFinancialRow(row, column.statement, previous, comparisonCurrency)
+      ? undefined : computeGrowth(value, previousValue);
     const formattedValue = formatFinancialValue(value, row);
     const cell = formatFinancialCell(formattedValue, growth);
     const growthColorValue = semanticGrowthValue(growth, row.growthDirection);

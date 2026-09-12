@@ -18,21 +18,27 @@ export const financialStatementsHeadless: HeadlessPaneDefinition<"rows"> = {
   async load({ symbols, options }, ctx) {
     const symbol = symbols[0]!;
     const financials = await loadHeadlessFinancials(ctx, symbol);
-    const table = buildFinancialTableModel(financials, {
-      period: options.period === "quarterly" ? "quarterly" : "annual",
+    const requestedPeriod = options.period === "quarterly" ? "quarterly" : "annual";
+    const hasRequestedStatements = (requestedPeriod === "quarterly"
+      ? financials.quarterlyStatements : financials.annualStatements).length > 0;
+    // The interactive tabs visibly select their fallback. A headless request
+    // has no such selection change, so it must keep the requested period.
+    const table = hasRequestedStatements ? buildFinancialTableModel(financials, {
+      period: requestedPeriod,
       statement: String(options.statement ?? "income"),
       expandAll: true,
-    });
+    }) : null;
     const statementCurrency = financialStatementCurrency(financials, table?.statements ?? []);
-    const dates = table?.statements.map(({ date, currency, dateSource, providerDate, dateEvidence, availableAt, fieldAvailability, epsBasis }) => ({
+    const dates = table?.statements.map(({ date, currency, dateSource, providerDate, dateEvidence, availableAt, fieldAvailability, epsBasis, aggregation }) => ({
       date, currency: currency ?? statementCurrency ?? null,
       availableAt: availableAt ?? null,
       fieldAvailability: fieldAvailability ? { ...fieldAvailability } : null,
       ...(epsBasis ? { epsBasis } : {}),
+      ...(aggregation ? { aggregation } : {}),
       dateSource: date === "TTM" ? "derived" : dateSource ?? "provider",
       providerDate: date === "TTM" ? null : providerDate ?? null,
       dateEvidence: date === "TTM" || dateSource !== "sec" ? null : dateEvidence ?? null,
-      label: formatFinancialHeader(date, currency ?? statementCurrency, dateSource).trim(),
+      label: formatFinancialHeader(date, currency ?? statementCurrency, dateSource, false, aggregation?.periodEnd).trim(),
     })) ?? [];
     const rows = table?.rows.map((row) => ({
       id: row.id, kind: row.kind, metric: row.unitLabel,
@@ -54,10 +60,11 @@ export const financialStatementsHeadless: HeadlessPaneDefinition<"rows"> = {
     ];
     return {
       rows, columns, unavailableSymbols: rows.length ? [] : [symbol],
+      ...(!hasRequestedStatements ? { errors: [`${symbol}: No ${requestedPeriod} financial statement coverage.`] } : {}),
       metadata: {
         symbol, name: financials.quote?.name ?? symbol, currency: statementCurrency ?? null, quoteCurrency: financials.quote?.currency ?? null,
         statement: table?.subTab.key ?? options.statement, statementLabel: table?.subTab.name ?? null,
-        period: table?.period ?? options.period, growthBasis: table?.period === "quarterly" ? "QoQ" : "YoY", columns: dates,
+        period: requestedPeriod, growthBasis: requestedPeriod === "quarterly" ? "QoQ" : "YoY", columns: dates,
         notices: rows.length ? [FINANCIAL_VINTAGE_NOTICE] : [],
         limitations: financialStatementLimitations(financials),
         dateProvenance: financialStatementDateNotice(table?.statements ?? []),
