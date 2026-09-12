@@ -18,7 +18,7 @@ import {
 } from "../../../../market-data/market/format";
 import type { PositionTableRow, StatField } from "./types";
 import { getPortfolioPositionMetrics, getPortfolioQuoteDisplay, resolvePortfolioMarketValue, resolvePortfolioPositionPnl, portfolioPnlPercent, signedPositionDirection } from "../../portfolio-list/position-metrics";
-import { resolveCurrencyUnit } from "../../../../utils/currency-units";
+import { formatReportedMoney } from "../../../../utils/reported-money";
 
 type CurrencyConverter = (value: number, fromCurrency: string) => number;
 
@@ -48,17 +48,7 @@ export function buildOverviewStats({
   marketCapExchangeRates?: ReadonlyMap<string, number>;
 }): StatField[] {
   const stats: StatField[] = [];
-  const financialCurrency = fundamentals?.financialCurrency?.trim();
-  const money = (value: number, perShare = false) => {
-    if (!Number.isFinite(value)) return "—";
-    const amount = perShare ? formatNumber(value, 2) : formatCompact(value);
-    if (!financialCurrency) return `${amount} (ccy?)`;
-    // Intl uppercases currency codes: GBp must not become GBP without scaling.
-    if (perShare && resolveCurrencyUnit(financialCurrency).divisor === 1) {
-      return formatCurrency(value, financialCurrency);
-    }
-    return `${amount} ${financialCurrency}`;
-  };
+  const money = (value: number, perShare = false) => formatReportedMoney(value, fundamentals?.financialCurrency, perShare);
 
   if (quote?.volume != null) {
     stats.push({ label: "Volume", value: formatCompact(quote.volume) });

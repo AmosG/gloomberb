@@ -1,3 +1,4 @@
+import { formatReportedMoney } from "../../utils/reported-money";
 import { formatPriceEarnings } from "../../utils/price-earnings";
 import { describeFundamentalMarketCap, selectMarketCapitalization } from "../../utils/market-capitalization";
 import {
@@ -32,7 +33,6 @@ import {
   formatPortfolioNames,
   formatSignedCurrency,
   formatSignedPercentRaw,
-  formatStatementValue,
   formatTimestamp,
   formatWatchlistNames,
 } from "../helpers";
@@ -58,22 +58,23 @@ function appendMetricSection(lines: string[], title: string, metrics: Array<[str
   }
 }
 
-function buildStatementMetrics(statement: FinancialStatement): Array<[string, string]> {
+function buildStatementMetrics(statement: FinancialStatement, currency?: string): Array<[string, string]> {
+  const money = (value: number | undefined, perShare = false) => formatReportedMoney(value, currency, perShare);
   return [
-    ["Revenue", formatStatementValue(statement.totalRevenue)],
-    ["Gross Profit", formatStatementValue(statement.grossProfit)],
-    ["Operating Income", formatStatementValue(statement.operatingIncome)],
-    ["Net Income", formatStatementValue(statement.netIncome)],
-    ["EBITDA", formatStatementValue(statement.ebitda)],
-    ["Operating Cash Flow", formatStatementValue(statement.operatingCashFlow)],
-    ["Free Cash Flow", formatStatementValue(statement.freeCashFlow)],
-    ["Cash", formatStatementValue(statement.cashAndCashEquivalents)],
-    ["Total Assets", formatStatementValue(statement.totalAssets)],
-    ["Total Liabilities", formatStatementValue(statement.totalLiabilities)],
-    ["Total Debt", formatStatementValue(statement.totalDebt)],
-    ["Equity", formatStatementValue(statement.totalEquity)],
-    ["Diluted EPS", formatStatementValue(statement.eps, "eps")],
-    ["Diluted Shares", formatStatementValue(statement.dilutedShares)],
+    ["Revenue", money(statement.totalRevenue)],
+    ["Gross Profit", money(statement.grossProfit)],
+    ["Operating Income", money(statement.operatingIncome)],
+    ["Net Income", money(statement.netIncome)],
+    ["EBITDA", money(statement.ebitda)],
+    ["Operating Cash Flow", money(statement.operatingCashFlow)],
+    ["Free Cash Flow", money(statement.freeCashFlow)],
+    ["Cash", money(statement.cashAndCashEquivalents)],
+    ["Total Assets", money(statement.totalAssets)],
+    ["Total Liabilities", money(statement.totalLiabilities)],
+    ["Total Debt", money(statement.totalDebt)],
+    ["Equity", money(statement.totalEquity)],
+    ["Diluted EPS", money(statement.eps, true)],
+    ["Diluted Shares", formatNullableCompact(statement.dilutedShares)],
   ];
 }
 
@@ -334,15 +335,12 @@ export async function buildTickerReport({
     ["P/E (TTM)", formatPriceEarnings(fundamentals?.trailingPE, 2)],
     ["Forward P/E", formatPriceEarnings(fundamentals?.forwardPE, 2)],
     ["PEG", fundamentals?.pegRatio != null ? formatNumber(fundamentals.pegRatio, 2) : "—"],
-    ["EPS", fundamentals?.eps != null && Number.isFinite(fundamentals.eps)
-      ? quote ? formatCurrency(fundamentals.eps, quote.currency)
-        : `${formatNumber(fundamentals.eps, 2)} ${fundamentals.financialCurrency?.trim() || "(ccy?)"}`
-      : "—"],
+    ["EPS", formatReportedMoney(fundamentals?.eps, fundamentals?.financialCurrency, true)],
     [`Dividend Yield${fundamentals?.dividendYieldBasis ? ` (${fundamentals.dividendYieldBasis})` : ""}`, fundamentals?.dividendYield != null ? formatPercent(fundamentals.dividendYield) : "—"],
-    ["Revenue", formatNullableCompact(fundamentals?.revenue)],
-    ["Net Income", formatNullableCompact(fundamentals?.netIncome)],
-    ["Operating Cash Flow", formatNullableCompact(fundamentals?.operatingCashFlow)],
-    ["Free Cash Flow", formatNullableCompact(fundamentals?.freeCashFlow)],
+    ["Revenue", formatReportedMoney(fundamentals?.revenue, fundamentals?.financialCurrency)],
+    ["Net Income", formatReportedMoney(fundamentals?.netIncome, fundamentals?.financialCurrency)],
+    ["Operating Cash Flow", formatReportedMoney(fundamentals?.operatingCashFlow, fundamentals?.financialCurrency)],
+    ["Free Cash Flow", formatReportedMoney(fundamentals?.freeCashFlow, fundamentals?.financialCurrency)],
     ["Operating Margin", fundamentals?.operatingMargin != null ? formatPercent(fundamentals.operatingMargin) : "—"],
     ["Profit Margin", fundamentals?.profitMargin != null ? formatPercent(fundamentals.profitMargin) : "—"],
     ["Revenue Growth", fundamentals?.revenueGrowth != null ? colorBySign(formatPercent(fundamentals.revenueGrowth), fundamentals.revenueGrowth) : "—"],
@@ -356,14 +354,19 @@ export async function buildTickerReport({
     lines.push(cliStyles.muted(`Market cap: ${describeFundamentalMarketCap(capitalization.provenance)}.`));
   }
 
+  const reportedCurrency = financials.financialCurrency?.trim();
+  const statements = [...financials.annualStatements, ...financials.quarterlyStatements];
+  const fallbackCurrency = reportedCurrency && statements.every((row) => !row.currency?.trim() || row.currency.trim() === reportedCurrency)
+    ? reportedCurrency : undefined;
+  const statementCurrency = (row: FinancialStatement) => row.currency?.trim() || fallbackCurrency;
   const latestAnnual = financials.annualStatements.at(-1);
   if (latestAnnual) {
-    appendMetricSection(lines, `Latest Annual (${latestAnnual.date})`, buildStatementMetrics(latestAnnual));
+    appendMetricSection(lines, `Latest Annual (${latestAnnual.date})`, buildStatementMetrics(latestAnnual, statementCurrency(latestAnnual)));
   }
 
   const latestQuarter = financials.quarterlyStatements.at(-1);
   if (latestQuarter) {
-    appendMetricSection(lines, `Latest Quarter (${latestQuarter.date})`, buildStatementMetrics(latestQuarter));
+    appendMetricSection(lines, `Latest Quarter (${latestQuarter.date})`, buildStatementMetrics(latestQuarter, statementCurrency(latestQuarter)));
   }
 
   const description = profile?.description?.trim();
@@ -462,6 +465,7 @@ function buildTickerStructuredData({
       ...priceReturns,
     } : undefined,
     profile: financials.profile,
+    financialCurrency: financials.financialCurrency ?? null,
     latestAnnual: financials.annualStatements.at(-1) ?? null,
     latestQuarter: financials.quarterlyStatements.at(-1) ?? null,
     annualStatementCount: financials.annualStatements.length,
