@@ -12,6 +12,7 @@ import {
 import type { QueryEntry } from "./result-types";
 import {
   buildArticleSummaryKey,
+  buildInstrumentKey,
   buildChartKey,
   buildFxKey,
   buildOptionsKey,
@@ -92,6 +93,7 @@ function useTickerInstrument(symbol: string | null | undefined, ticker: TickerRe
 
 export function useTickerFinancials(symbol: string | null | undefined, ticker: TickerRecord | null | undefined): TickerFinancials | null {
   const instrument = useTickerInstrument(symbol, ticker);
+  const instrumentKey = instrument ? buildInstrumentKey(instrument) : null;
   const keys = useMemo(() => (
     instrument
       ? [
@@ -100,7 +102,7 @@ export function useTickerFinancials(symbol: string | null | undefined, ticker: T
         buildChartKey(createBaselineChartRequest(instrument)),
       ]
       : []
-  ), [instrument?.brokerId, instrument?.brokerInstanceId, instrument?.exchange, instrument?.instrument?.conId, instrument?.symbol]);
+  ), [instrumentKey]);
   useCoordinatorKeysVersion(keys);
   const coordinator = getSharedMarketDataCoordinator();
   const financials = coordinator && instrument
@@ -114,7 +116,7 @@ export function useTickerFinancials(symbol: string | null | undefined, ticker: T
       void coordinator.loadSnapshot(instrument).catch(() => {});
     }, TICKER_FINANCIALS_LOAD_DELAY_MS);
     return () => clearTimeout(timeoutId);
-  }, [instrument?.brokerId, instrument?.brokerInstanceId, instrument?.exchange, instrument?.instrument?.conId, instrument?.symbol]);
+  }, [instrumentKey]);
 
   return financials;
 }
@@ -160,9 +162,10 @@ export function useTickerFinancialsMap(
 
 export function useQuoteEntry(symbol: string | null | undefined, ticker: TickerRecord | null | undefined): QueryEntry<Quote> | null {
   const instrument = useTickerInstrument(symbol, ticker);
+  const instrumentKey = instrument ? buildInstrumentKey(instrument) : null;
   const keys = useMemo(
     () => (instrument ? [buildQuoteKey(instrument)] : []),
-    [instrument?.brokerId, instrument?.brokerInstanceId, instrument?.exchange, instrument?.instrument?.conId, instrument?.symbol],
+    [instrumentKey],
   );
   useCoordinatorKeysVersion(keys);
   const coordinator = getSharedMarketDataCoordinator();
@@ -172,7 +175,7 @@ export function useQuoteEntry(symbol: string | null | undefined, ticker: TickerR
     const coordinator = getSharedMarketDataCoordinator();
     if (!coordinator || !instrument) return;
     void coordinator.loadQuote(instrument).catch(() => {});
-  }, [instrument?.brokerId, instrument?.brokerInstanceId, instrument?.exchange, instrument?.instrument?.conId, instrument?.symbol]);
+  }, [instrumentKey]);
 
   return entry;
 }

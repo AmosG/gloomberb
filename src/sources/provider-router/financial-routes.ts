@@ -246,7 +246,8 @@ export class ProviderRouterFinancialRoutes {
     includeStale = false,
   ): Quote | null {
     const entityKey = this.deps.getEntityKey(ticker, context?.instrument);
-    const entityKeys = [...new Set([entityKey, normalizeTicker(ticker)])];
+    const entityKeys = context?.instrument
+      ? [entityKey] : [...new Set([entityKey, normalizeTicker(ticker)])];
     const variantKeys = this.deps.getTickerVariantCandidates(exchange);
     const sourceKeys = this.deps.getProviderSourceKeys();
     for (const candidateEntityKey of entityKeys) {
@@ -290,6 +291,7 @@ export class ProviderRouterFinancialRoutes {
       ? { ...brokerRecord, value: sanitizeCachedFinancials(brokerRecord.value, { ...options, allowIncompleteSession: true }) }
       : null;
     const providerSourceKeys = this.deps.getProviderSourceKeys();
+    const requiresContractPrice = context?.instrument != null;
     const includeSymbolProviderFallback = options.includeSymbolProviderFallback !== false;
     const providerEntityKeys = includeSymbolProviderFallback
       ? [...new Set([entityKey, normalizeTicker(ticker)])]
@@ -303,8 +305,12 @@ export class ProviderRouterFinancialRoutes {
         providerSourceKeys,
         allowExpired,
       ).map((record) => {
-        const value = sanitizeShellFinancialHistory(record.value, { symbol: ticker, exchange }, record.sourceKey);
-        return value === record.value ? record : { ...record, value, stale: true };
+        // Public-symbol enrichment cannot establish the declared contract's price.
+        const independentFields = requiresContractPrice && providerEntityKey !== entityKey
+          ? { ...record.value, quote: undefined, quoteContributions: undefined, quoteMetadata: undefined, priceHistory: [] }
+          : record.value;
+        const value = sanitizeShellFinancialHistory(independentFields, { symbol: ticker, exchange }, record.sourceKey);
+        return value === record.value ? record : { ...record, value, stale: value !== independentFields || record.stale };
       })),
       variantKeys,
       providerSourceKeys,
@@ -315,7 +321,7 @@ export class ProviderRouterFinancialRoutes {
     );
     const quoteSourceKeys = [...brokerSourceKeys, ...providerSourceKeys];
     const quoteRecords = sortCachedRecords(
-      providerEntityKeys.flatMap((quoteEntityKey) => listCachedResources<Quote>(
+      (requiresContractPrice ? [entityKey] : providerEntityKeys).flatMap((quoteEntityKey) => listCachedResources<Quote>(
         this.deps.resources,
         "quote",
         quoteEntityKey,

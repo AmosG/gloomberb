@@ -3,6 +3,7 @@ import type { ManualChartResolution } from "../time-series/resolution";
 import type { QuoteSubscriptionTarget } from "../types/data-provider";
 import type { BrokerContractRef } from "../types/instrument";
 import type { TickerRecord } from "../types/ticker";
+import { brokerContractIdentityKey, scopedBrokerContractIdentityKey } from "../utils/instrument-identity";
 
 export interface InstrumentRef {
   symbol: string;
@@ -50,28 +51,25 @@ function brokerContractForTicker(
     let hasPublicPosition = false;
     for (const position of positions) {
       const hasExplicitId = position.brokerContractId != null;
+      const hasExplicitIdentity = position.brokerContractIdentity != null;
       const hasLegacyScope = position.broker !== "manual" && !!position.broker && !!position.brokerInstanceId;
-      if (!hasExplicitId && !hasLegacyScope) {
+      if (!hasExplicitId && !hasExplicitIdentity && !hasLegacyScope) {
         hasPublicPosition = true;
         continue;
       }
       const matches = contracts.filter((contract) => (
         (position.brokerContractId == null || contract.conId === position.brokerContractId)
+        && (hasExplicitId || !hasExplicitIdentity || brokerContractIdentityKey(contract) === position.brokerContractIdentity)
         && (!position.brokerInstanceId || contract.brokerInstanceId === position.brokerInstanceId)
         && (!position.broker || contract.brokerId === position.broker)
       ));
       if (matches.length === 0) {
-        if (hasExplicitId) return undefined;
+        if (hasExplicitId || hasExplicitIdentity) return undefined;
         hasPublicPosition = true;
         continue;
       }
       for (const contract of matches) {
-        const definition = contract.conId != null ? contract.conId : [
-          contract.localSymbol, contract.symbol, contract.secType, contract.currency,
-          contract.exchange, contract.primaryExchange, contract.lastTradeDateOrContractMonth,
-          contract.right, contract.strike, contract.multiplier, contract.tradingClass,
-        ];
-        const key = JSON.stringify([contract.brokerId, contract.brokerInstanceId, definition]);
+        const key = scopedBrokerContractIdentityKey(contract);
         selected.set(key, contract);
       }
     }

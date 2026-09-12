@@ -3,6 +3,7 @@ import type { BrokerPosition } from "../types/broker";
 import type { BrokerInstanceConfig } from "../types/config";
 import type { BrokerContractRef } from "../types/instrument";
 import type { TickerMetadata, TickerPosition, TickerRecord } from "../types/ticker";
+import { brokerContractIdentityKey, scopedBrokerContractIdentityKey } from "../utils/instrument-identity";
 
 export async function loadTickerMap(
   tickerRepository: AppTickerRepositoryPort,
@@ -19,7 +20,7 @@ export async function loadTickerMap(
 function mergeBrokerContracts(existing: BrokerContractRef[], next: BrokerContractRef[]): BrokerContractRef[] {
   const merged = new Map<string, BrokerContractRef>();
   for (const contract of [...existing, ...next]) {
-    const key = `${contract.brokerId}:${contract.brokerInstanceId ?? ""}:${contract.conId ?? contract.localSymbol ?? contract.symbol}:${contract.secType ?? ""}`;
+    const key = scopedBrokerContractIdentityKey(contract);
     merged.set(key, contract);
   }
   return [...merged.values()];
@@ -46,6 +47,7 @@ function buildPositionEntry(
     brokerInstanceId: instance.id,
     brokerAccountId: position.accountId,
     brokerContractId: brokerContract?.conId,
+    brokerContractIdentity: brokerContract && brokerContract.conId == null ? brokerContractIdentityKey(brokerContract) : undefined,
   };
 }
 

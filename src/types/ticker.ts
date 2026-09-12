@@ -18,6 +18,8 @@ export interface TickerPosition {
   brokerInstanceId?: string;
   brokerAccountId?: string;
   brokerContractId?: number;
+  /** Source-declared fallback contract identity when no canonical conId was supplied. */
+  brokerContractIdentity?: string;
 }
 
 export interface TickerMetadata {

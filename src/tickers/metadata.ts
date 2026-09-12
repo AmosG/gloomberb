@@ -26,6 +26,7 @@ function hydratePosition(raw: Record<string, unknown>): TickerPosition {
     brokerInstanceId: (raw.brokerInstanceId ?? raw.broker_instance_id) as string | undefined,
     brokerAccountId: (raw.brokerAccountId ?? raw.broker_account_id) as string | undefined,
     brokerContractId: (raw.brokerContractId ?? raw.broker_contract_id) as number | undefined,
+    brokerContractIdentity: typeof raw.brokerContractIdentity === "string" ? raw.brokerContractIdentity : undefined,
   };
 }
 
