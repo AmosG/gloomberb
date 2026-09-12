@@ -31,6 +31,7 @@ import {
   createOptionColumns,
   findNearestStrikeIndex,
   formatIv,
+  formatStrikeLabel,
   optionColumnColor,
   renderOptionCell,
   resolveDefaultStrikeTarget,
@@ -82,7 +83,7 @@ function OptionsSummaryStrip({ summary, secondary }: {
       <SummaryRow metrics={volatility} />
       {secondary && (
         <SummaryRow metrics={[
-          { label: "EXP VOL", value: summary ? formatCompact(summary.expirationVolume) : "—" },
+          { label: "EXP VOL", value: formatCompact(summary?.expirationVolume ?? undefined) },
           { label: "P/C VOL", value: formatRatio(summary?.putCallVolumeRatio) },
           { label: "P/C OI", value: formatRatio(summary?.putCallOpenInterestRatio) },
         ]} />
@@ -98,6 +99,9 @@ export function OptionsView({ width, height, focused, onCapture = () => {} }: Op
   const [expirySelection, setExpirySelection] = useState<{ targetKey: string; expiration: number } | null>(null);
   const [calcSide, setCalcSide] = useState<OptionSide | null>(null);
   const [strikeIdx, setStrikeIdx] = useState(0);
+  const [contractSelection, setContractSelection] = useState<{
+    context: string; strike: number; side: OptionSide; contractSymbol: string;
+  } | null>(null);
   const [autoScrollVersion, setAutoScrollVersion] = useState(0);
   const [scrollToIndexAlign, setScrollToIndexAlign] = useState<"nearest" | "center">("nearest");
   const [visibleStrikeViewport, setVisibleStrikeViewport] = useState<{
@@ -150,6 +154,8 @@ export function OptionsView({ width, height, focused, onCapture = () => {} }: Op
   const selectedExpiration = expirySelection?.targetKey === selectionTargetKey
     ? expirySelection.expiration : initialExpiration;
   const viewportKey = `${effectiveTicker}:${selectedExpiration ?? "initial"}`;
+  const strikeSelectionKey = `${selectionTargetKey}|${selectedExpiration ?? "initial"}`;
+  const selectedContract = contractSelection?.context === strikeSelectionKey ? contractSelection : null;
   const expirationChainEntry = useOptionsQuery(
     baseRequest && selectedExpiration != null
       ? { ...baseRequest, expirationDate: selectedExpiration }
@@ -228,6 +234,7 @@ export function OptionsView({ width, height, focused, onCapture = () => {} }: Op
     onCaptureRef.current(false);
     setStrikeIdx(0);
     setCalcSide(null);
+    setContractSelection(null);
   }, [selectionTargetKey]);
 
   useEffect(() => {
@@ -241,6 +248,7 @@ export function OptionsView({ width, height, focused, onCapture = () => {} }: Op
   }, [selectedExpiration]);
 
   const strikes = useMemo(() => strikeChain ? buildStrikeList(strikeChain) : [], [strikeChain]);
+  const selectedStrikeIdx = selectedContract ? strikes.indexOf(selectedContract.strike) : strikeIdx;
   const callsByStrike = useMemo(
     () => new Map(strikeChain?.calls.map((c) => [c.strike, c]) ?? []),
     [strikeChain],
@@ -260,7 +268,7 @@ export function OptionsView({ width, height, focused, onCapture = () => {} }: Op
         put,
         callGreeks: calculateOptionGreeks(call, "call", spot, dividendYield, now),
         putGreeks: calculateOptionGreeks(put, "put", spot, dividendYield, now),
-        isPositionStrike: !!parsed && Math.abs(strike - parsed.strike) < 0.01,
+        isPositionStrike: !!parsed && strike === parsed.strike,
       };
     });
   }, [callsByStrike, dividendYield, parsed, putsByStrike, spot, strikes]);
@@ -285,10 +293,10 @@ export function OptionsView({ width, height, focused, onCapture = () => {} }: Op
   const optionQuoteTargets = useMemo(
     () => buildOptionQuoteTargets(snapshotRows, {
       fallbackHeight: height,
-      selectedIndex: strikeIdx,
+      selectedIndex: selectedStrikeIdx,
       visibleRange: visibleStrikeRange,
     }),
-    [height, snapshotRows, strikeIdx, visibleStrikeRange],
+    [height, snapshotRows, selectedStrikeIdx, visibleStrikeRange],
   );
   const {
     entries: optionQuoteEntries,
@@ -322,9 +330,14 @@ export function OptionsView({ width, height, focused, onCapture = () => {} }: Op
     headerColor: optionColumnColor(column, colors.panel),
   })), [optionFieldIds]);
 
-  const selectedRow = rows[strikeIdx] ?? null;
-  const selectedSide = resolveCalcSide(calcSide, parsed?.side, selectedRow);
-  const selectedReference = optionMarketReference(selectedSide === "put" ? selectedRow?.put : selectedRow?.call);
+  const selectedRow = rows[selectedStrikeIdx] ?? null;
+  const selectedContractAvailable = !selectedContract || (selectedContract.side === "call"
+    ? selectedRow?.call : selectedRow?.put)?.contractSymbol === selectedContract.contractSymbol;
+  const selectedSide = selectedContract
+    ? selectedContractAvailable ? selectedContract.side : null
+    : resolveCalcSide(calcSide, parsed?.side, selectedRow);
+  const selectedReference = optionMarketReference(selectedSide === "put" ? selectedRow?.put
+    : selectedSide === "call" ? selectedRow?.call : undefined);
   const calcParams = useMemo(() => buildChainCalcParams({
     symbol: effectiveTicker,
     row: selectedRow,
@@ -345,6 +358,19 @@ export function OptionsView({ width, height, focused, onCapture = () => {} }: Op
     [calcParams, openCalculator],
   );
 
+  const selectContract = useCallback((row: OptionTableRow, index: number, side?: OptionSide, preservePointer = false) => {
+    userSelectedStrikeRef.current = true;
+    setScrollToIndexAlign("nearest");
+    setStrikeIdx(index);
+    const chosenSide = resolveCalcSide(side ?? calcSide, parsed?.side, row);
+    const contract = chosenSide === "put" ? row.put : chosenSide === "call" ? row.call : undefined;
+    if (contract && chosenSide) {
+      setContractSelection((current) => preservePointer && current?.context === strikeSelectionKey && current.strike === row.strike
+        ? current : { context: strikeSelectionKey, strike: row.strike,
+          side: chosenSide, contractSymbol: contract.contractSymbol });
+    }
+  }, [calcSide, parsed?.side, strikeSelectionKey]);
+
   const renderCell = useCallback((
     row: OptionTableRow,
     column: OptionColumn,
@@ -360,17 +386,17 @@ export function OptionsView({ width, height, focused, onCapture = () => {} }: Op
       ...cell,
       onMouseDown: () => {
         enterInteractive();
-        userSelectedStrikeRef.current = true;
-        setScrollToIndexAlign("nearest");
-        setStrikeIdx(index);
+        selectContract(row, index, side);
         setCalcSide(side);
       },
     };
-  }, [enterInteractive]);
+  }, [enterInteractive, selectContract]);
 
   useOptionsAccessFooter({
     chain,
     error: [error, underlyingStale ? "Underlying quote stale: Greeks and calculator unavailable" : null,
+      selectedContract && strikeChain && !selectedContractAvailable
+        ? `Selected ${formatStrikeLabel(selectedContract.strike)} ${selectedContract.side} unavailable` : null,
       summary?.historicalVolatilityUnavailableReason].filter(Boolean).join(" · ") || null,
     focused,
     hints: footerHints,
@@ -543,13 +569,14 @@ export function OptionsView({ width, height, focused, onCapture = () => {} }: Op
       <DataTableView<OptionTableRow, OptionColumn>
         focused={focused}
         selection={{
-          kind: "index",
-          selectedIndex: strikeIdx,
-          onChange: (index) => {
-            userSelectedStrikeRef.current = true;
-            setScrollToIndexAlign("nearest");
+          kind: "id",
+          selectedId: selectedContract ? String(selectedContract.strike) : selectedRow ? String(selectedRow.strike) : null,
+          getId: (row) => String(row.strike),
+          onChange: (_id, row, index, reason) => {
             enterInteractive();
-            setStrikeIdx(index);
+            // A side-cell handler owns its precise contract choice. A later
+            // row pointer callback must not replace it with the prior side.
+            selectContract(row, index, undefined, reason === "pointer");
           },
         }}
         onCursorChange={() => {
@@ -578,7 +605,7 @@ export function OptionsView({ width, height, focused, onCapture = () => {} }: Op
         rootHeight={tableHeight}
         columnGap={0}
         horizontalPadding={0}
-        scrollToIndex={strikeIdx}
+        scrollToIndex={selectedStrikeIdx >= 0 ? selectedStrikeIdx : undefined}
         scrollToIndexAlign={scrollToIndexAlign}
         scrollToIndexVersion={autoScrollVersion}
       />

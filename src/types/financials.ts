@@ -486,8 +486,9 @@ export interface OptionContract {
   lastPrice: number;
   change: number;
   percentChange: number;
-  volume: number;
-  openInterest: number;
+  /** Missing activity is unknown; an explicitly reported zero remains zero. */
+  volume?: number;
+  openInterest?: number;
   bid: number;
   ask: number;
   impliedVolatility: number;

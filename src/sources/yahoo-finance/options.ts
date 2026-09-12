@@ -49,6 +49,8 @@ function deriveOptionMarketState(underlyingMarketState?: MarketState): MarketSta
 }
 
 function mapYahooOptionContract(raw: Record<string, any>): OptionContract {
+  const activity = (value: unknown): number | undefined =>
+    typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
   return {
     contractSymbol: raw.contractSymbol ?? "",
     strike: raw.strike ?? 0,
@@ -56,8 +58,8 @@ function mapYahooOptionContract(raw: Record<string, any>): OptionContract {
     lastPrice: raw.lastPrice ?? 0,
     change: raw.change ?? 0,
     percentChange: raw.percentChange ?? 0,
-    volume: raw.volume ?? 0,
-    openInterest: raw.openInterest ?? 0,
+    volume: activity(raw.volume),
+    openInterest: activity(raw.openInterest),
     bid: raw.bid ?? 0,
     ask: raw.ask ?? 0,
     impliedVolatility: raw.impliedVolatility ?? 0,

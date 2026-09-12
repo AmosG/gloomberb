@@ -166,6 +166,10 @@ OVME values are per underlying unit, not a position or contract total. Rates and
 
 OMON retains the selected expiration date when a refreshed catalogue reorders or removes other dates. If that selected date is unavailable, its table and calculator remain unavailable until the date recovers or another date is selected.
 
+An explicit OMON row/cell selection retains its strike, side and contract symbol within the selected underlying and expiration. Adding other strikes cannot move that choice. If the chosen contract disappears, its calculator action remains unavailable until that contract returns or another contract is explicitly selected. Strike labels and table exports preserve fractional precision; wide values can still require horizontal scrolling.
+
+Missing or invalid option volume/open interest is unknown, not zero. A reported zero remains zero. Expiration volume and each put/call ratio require complete inputs for that metric across the returned contracts; missing open interest does not suppress complete volume or IV. These totals describe the supplied selected-expiration rows, not verified whole-market coverage. The existing `options` CLI retains the same source activity availability; OMON itself has no registered headless pane report.
+
 A calculator opened from a chain uses a saved contract observation. Its quote and last-trade timestamps are separate; neither makes a saved quote executable. The market reference identifies midpoint, last, or manual input. Crossed or one-sided quotes do not supply a valid midpoint.
 
 ## Earnings and corporate actions

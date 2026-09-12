@@ -3,7 +3,7 @@ import type { DataTableCell } from "../../../components";
 import type { OptionContract, OptionsChain } from "../../../types/financials";
 import { blendHex, colors } from "../../../theme/colors";
 import { blendForContrast, contrastRatio } from "../../../theme/color-utils";
-import { formatCompact, formatNumber } from "../../../utils/format";
+import { formatCompact } from "../../../utils/format";
 import { formatMarketPrice } from "../../../market-data/market/format";
 import type {
   OptionColumn,
@@ -106,8 +106,8 @@ export function findNearestStrikeIndex(strikes: number[], targetStrike: number):
 }
 
 export function formatStrikeLabel(strike: number): string {
-  const decimals = strike % 1 === 0 ? 0 : 2;
-  return formatNumber(strike, decimals).replace(/(\.\d*?[1-9])0+$/, "$1").replace(/\.0+$/, "");
+  return Number.isFinite(strike)
+    ? strike.toLocaleString("en-US", { maximumSignificantDigits: 21 }) : "—";
 }
 
 export function formatIv(value: number | undefined): string {
