@@ -58,3 +58,20 @@ test("mouse period changes keep active CSV and quarterly values aligned, includi
  await clickPeriod();const quarterly=await capture("navigation-quarterly",financials,"quarterly");expect(quarterly.csv).toContain("Quarterly · QoQ");expect(quarterly.csv).not.toContain("TTM");expect(setup.captureCharFrame()).toContain("Quarterly · QoQ");expect(quarterly.result.rows.find((r:any)=>r.id==="eps:1").cells[0].value).toBe(0);
  await clickPeriod();const annual=await capture("navigation-returned",financials);expect(annual.csv).toContain("TTM 2025-12-31 USD");expect(annual.csv).toContain("Annual · YoY");
 });
+
+for (const reportedCurrency of [undefined, "USD"]) {
+ test(`historical headers and exports retain ${reportedCurrency ?? "unknown"} units across an unrelated reporting-currency change`, async () => {
+  const financials={financialCurrency:"USD",annualStatements:[{date:"2024-12-31",currency:reportedCurrency,totalRevenue:100,basicShares:10},{date:"2025-12-31",currency:"USD",totalRevenue:200,basicShares:20}],quarterlyStatements:[{date:"2023-09-30",currency:"JPY",totalRevenue:50}],priceHistory:[]};
+  await mount(financials);const {result,csv,text}=await capture(`currency-header-${reportedCurrency ?? "unknown"}`,financials);
+  const header=result.metadata.columns.find((column:any)=>column.date==="2024-12-31");
+  const expectedHeader=reportedCurrency ? "2024-12-31 USD" : "2024-12-31 P";
+  expect(header.currency).toBe(reportedCurrency ?? null);
+  expect(result.metadata.currency).toBeNull();
+  expect(result.rows.find((row:any)=>row.id==="income:revenue").cells[0].growth).toBe(reportedCurrency ? 1 : null);
+  expect(result.rows.find((row:any)=>row.id==="basicShares:1").cells[0].growth).toBe(1);
+  expect(csv).toContain(expectedHeader);
+  expect(setup.captureCharFrame()).toContain(expectedHeader);
+  expect(text).toContain(reportedCurrency ? "2024-12-31 USD" : "2024-12-31 (PROVIDER DATE)");
+  expect(financials.annualStatements[0]!.currency).toBe(reportedCurrency);
+ });
+}

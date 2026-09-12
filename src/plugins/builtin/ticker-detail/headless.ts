@@ -28,7 +28,9 @@ export const financialStatementsHeadless: HeadlessPaneDefinition<"rows"> = {
       statement: String(options.statement ?? "income"),
       expandAll: true,
     }) : null;
-    const statementCurrency = financialStatementCurrency(financials, table?.statements ?? []);
+    const statementCurrency = financialStatementCurrency(financials, [
+      ...financials.annualStatements, ...financials.quarterlyStatements,
+    ]);
     const dates = table?.statements.map(({ date, currency, dateSource, providerDate, dateEvidence, availableAt, fieldAvailability, epsBasis, aggregation }) => ({
       date, currency: currency ?? statementCurrency ?? null,
       availableAt: availableAt ?? null,

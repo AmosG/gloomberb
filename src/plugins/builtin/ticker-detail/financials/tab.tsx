@@ -261,7 +261,7 @@ export function ResolvedFinancialsTab({
       id: `statement:${statement.date}:${index}`,
       kind: "statement",
       statement,
-      label: padTo(formatFinancialHeader(statement.date, statement.currency ?? financialStatementCurrency(financials, displayStatements), statement.dateSource, true, statement.aggregation?.periodEnd), FINANCIAL_COL_W, "center"),
+      label: padTo(formatFinancialHeader(statement.date, statement.currency ?? comparisonCurrency, statement.dateSource, true, statement.aggregation?.periodEnd), FINANCIAL_COL_W, "center"),
       width: FINANCIAL_COL_W,
       align: "right",
       headerColor: statement.date === "TTM" ? colors.textBright : colors.textDim,
