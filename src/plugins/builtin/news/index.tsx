@@ -49,7 +49,7 @@ function TickerNewsView({ width, height, focused }: { width: number; height: num
   const { readArticleIds, markArticleRead } = useNewsReadState();
   const { scrollRef, onBodyScrollActivity } = useNewsTableLoadMore(newsQuery, newsState);
   const loadNewsStory = useLoadNewsStory();
-  const { detailArticle, openArticle, closeDetail } = useNewsArticleDetail(news, loadNewsStory);
+  const { detailArticle, detailLoading, detailError, openArticle, closeDetail } = useNewsArticleDetail(news, loadNewsStory);
   const loading = newsState.phase === "loading"
     || (newsState.phase === "refreshing" && news.length === 0);
   const error = newsState.error;
@@ -70,8 +70,8 @@ function TickerNewsView({ width, height, focused }: { width: number; height: num
     article: detailArticle,
     // Stale rows stay on screen during a refresh or a failure, so the pane says
     // so in the footer instead of replacing them.
-    loading: loading && news.length > 0,
-    error,
+    loading: detailLoading || (loading && news.length > 0),
+    error: [error, detailError].filter(Boolean).join(" ") || null,
     info: loadingSummary
       ? [{ id: "summary", parts: [{ text: "summary loading", tone: "muted" as const }] }]
       : undefined,

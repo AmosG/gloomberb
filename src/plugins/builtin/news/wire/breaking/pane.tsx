@@ -25,15 +25,15 @@ export function BreakingPane({ focused, width, height }: PaneProps) {
   const [selectedArticleId, setSelectedArticleId] = useDebouncedPluginPaneState<string | null>("breaking:selectedArticleId", null);
   const [sortPreference, setSortPreference] = usePluginPaneState<NewsSortPreference>("breaking:sort", DEFAULT_SORT);
   const loadNewsStory = useLoadNewsStory();
-  const { detailArticle, openArticle, closeDetail } = useNewsArticleDetail(articles, loadNewsStory);
+  const { detailArticle, detailLoading, detailError, openArticle, closeDetail } = useNewsArticleDetail(articles, loadNewsStory);
   const { readArticleIds, markArticleRead } = useNewsReadState();
 
   useNewsArticleFooter({
     registrationId: "news-wire:breaking",
     focused,
     article: detailArticle,
-    loading: loading && articles.length > 0,
-    error,
+    loading: detailLoading || (loading && articles.length > 0),
+    error: [error, detailError].filter(Boolean).join(" ") || null,
   });
 
   const detailContent = detailArticle ? (

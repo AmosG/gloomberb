@@ -138,7 +138,22 @@ function selectDetailArticle(
   return null;
 }
 
+export function newsArticleRevision(article: NewsArticle): string {
+  return JSON.stringify([article.id, article.publishedAt.getTime(), article.title, article.summary, article.url, article.source]);
+}
+
 function mergeDuplicateArticle(existing: NewsArticle, item: NewsArticle): NewsArticle {
+  if (existing.id === item.id) {
+    // A story's newer publication supersedes its earlier importance score.
+    // For equal timestamps, the first (freshly fetched) correction wins;
+    // identical content can still carry a higher cross-source ranking.
+    const sameRevision = newsArticleRevision(existing) === newsArticleRevision(item);
+    const winner = item.publishedAt > existing.publishedAt || (sameRevision && item.importance > existing.importance) ? item : existing;
+    const other = winner === item ? existing : item;
+    return !hasStoryItems(winner) && sameRevision && hasStoryItems(other)
+      ? { ...winner, items: other.items }
+      : winner;
+  }
   const winner = shouldReplaceDuplicate(existing, item)
     ? { ...existing, ...item }
     : existing;

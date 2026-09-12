@@ -10,6 +10,7 @@ import {
   filterNewsArticlesForQuery,
   markDetailCapableArticle,
   mergeNewsArticle,
+  newsArticleRevision,
   normalizeNewsCategory,
   normalizeNewsFeed,
   normalizeNewsQuery,
@@ -216,6 +217,12 @@ export class NewsService {
     const sources = this.enabledSources({ feed: "latest" })
       .filter((source) => !!source.provider.fetchNewsStory);
 
+    const requestedRevisions = new Map<NewsQueryEntry, string>();
+    for (const entry of this.queries.values()) {
+      const article = entry.state.articles.find((article) => article.id === storyId);
+      if (article) requestedRevisions.set(entry, newsArticleRevision(article));
+    }
+    let failed = false;
     for (const source of sources) {
       try {
         const article = await this.trackSourceRequest(
@@ -224,13 +231,16 @@ export class NewsService {
           () => source.provider.fetchNewsStory?.(storyId) ?? Promise.resolve(null),
         );
         if (!article) continue;
-        this.mergeStoryDetail(article);
+        if (article.id !== storyId) throw new Error("Story detail identity mismatch.");
+        this.mergeStoryDetail(article, requestedRevisions);
         return article;
       } catch {
+        failed = true;
         // Continue to lower-priority sources.
       }
     }
 
+    if (failed) throw new Error("Story detail unavailable.");
     return null;
   }
 
@@ -486,12 +496,12 @@ export class NewsService {
     this.articles = dedupeNewsArticles([...this.queries.values()].flatMap((entry) => entry.state.articles));
   }
 
-  private mergeStoryDetail(article: NewsArticle): void {
+  private mergeStoryDetail(article: NewsArticle, requestedRevisions: Map<NewsQueryEntry, string>): void {
     let changed = false;
     for (const entry of this.queries.values()) {
       let stateChanged = false;
       const nextArticles = entry.state.articles.map((existing) => {
-        if (existing.id !== article.id) return existing;
+        if (existing.id !== article.id || requestedRevisions.get(entry) !== newsArticleRevision(existing)) return existing;
         stateChanged = true;
         changed = true;
         return mergeNewsArticle(existing, article);

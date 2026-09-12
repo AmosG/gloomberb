@@ -1,0 +1,7 @@
+# News research
+
+News feeds and story detail use the source's story ID. A detail response with a different ID is rejected and the next configured source is tried. Story source failures appear in the existing pane footer; the available headline and summary remain readable. Returning to the list and reopening a story retries an unavailable detail request.
+
+A refreshed story replaces the earlier headline and timeline when its publication time, headline, summary, URL or source changes. Unchanged feed entries retain their loaded timeline. A pending detail request for an earlier feed revision cannot overwrite the updated story. Multiple feed entries for the same story ID are ordered by publication time before importance; ranking across distinct stories still uses the selected table sort.
+
+A headline, source timestamp and available timeline are source reports, not a guarantee of complete event coverage. The terminal does not infer omitted updates, verify an issuer's transaction terms or backfill source outages. Use the existing Open action to inspect the original publication. News coverage, article-text availability and source timing vary by provider and access plan.
