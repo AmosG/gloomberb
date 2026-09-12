@@ -1,3 +1,4 @@
+import { nextResponseSequence } from "../../data/response-sequence";
 import { exchangeRateMetadata, isUsableCachedExchangeRate } from "../../utils/exchange-rate-snapshot";
 import type { DataProvider, SecFilingDocument, SecFilingItem } from "../../types/data-provider";
 import type { OptionsChain } from "../../types/financials";
@@ -69,7 +70,11 @@ export function loadOptionsEntry(options: {
         toMarketDataContext(request.instrument),
       );
       const attempts = [createAttempt(dataProvider.id, startedAt, data.expirationDates.length > 0 ? "success" : "empty", data.expirationDates.length === 0 ? "NO_DATA" : undefined)];
-      return store.update(key, (current) => readyEntry(current, data.expirationDates.length > 0 ? data : null, dataProvider.id, attempts, { keepLastGoodOnEmpty: true }));
+      return store.update(key, (current) => ({
+        ...readyEntry(current, data, dataProvider.id, attempts),
+        responseSequence: nextResponseSequence(),
+        error: data.expirationDates.length === 0 ? { reasonCode: "NO_DATA", message: "No data available" } : null,
+      }));
     },
   });
 }

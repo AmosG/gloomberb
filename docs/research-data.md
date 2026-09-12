@@ -92,6 +92,8 @@ OMON HV30 is the annualized sample standard deviation of 30 daily log returns fr
 
 OVME values are per underlying unit, not a position or contract total. Rates and continuous dividend yield are entered in percent; time uses calendar days, retaining fractional days. A chain expiry date is seeded at 16:00 New York with historical daylight-saving offsets. Verify and edit the time for other settlement schedules or early closes, especially index options. The calculator does not resolve adjusted deliverables or contract multipliers, model multi-leg payoffs, or compute assignment outcomes.
 
+OMON retains the selected expiration date when a refreshed catalogue reorders or removes other dates. If that selected date is unavailable, its table and calculator remain unavailable until the date recovers or another date is selected.
+
 A calculator opened from a chain uses a saved contract observation. Its quote and last-trade timestamps are separate; neither makes a saved quote executable. The market reference identifies midpoint, last, or manual input. Crossed or one-sided quotes do not supply a valid midpoint.
 
 ## Earnings and corporate actions

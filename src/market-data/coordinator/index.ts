@@ -375,7 +375,10 @@ export class MarketDataCoordinator {
     const update = () => {
       const { result, loading, error } = query.getSnapshot();
       const current = store.get(key);
-      const value = result && !isEmpty(result.value) ? result.value : null;
+      const empty = result != null && isEmpty(result.value);
+      // An empty options catalogue is itself a successful observation. Retain
+      // it through errors so old expirations cannot return via lastGoodData.
+      const value = result && (!empty || method === "getOptionsChain") ? result.value : null;
       const classified = error ? classifyError(error) : null;
       store.set(key, {
         phase: loading ? (result ? "refreshing" : "loading") : result ? "ready" : "error",
@@ -385,10 +388,11 @@ export class MarketDataCoordinator {
         lastGoodData: value ?? (method === "getExchangeRate" ? null : current.lastGoodData),
         source: result?.source ?? null,
         fetchedAt: result?.fetchedAt ?? null,
+        responseSequence: result?.responseSequence,
         asOf: result?.asOf,
         staleAt: result?.staleAt ?? null,
-        error: classified ?? (!loading && result && value == null ? { reasonCode: "NO_DATA", message: "No data available" } : null),
-        attempts: result ? [createAttempt(result.source, result.fetchedAt, error ? "fatal_error" : value == null ? "empty" : "success", classified?.reasonCode, classified?.message)] : [],
+        error: classified ?? (!loading && empty ? { reasonCode: "NO_DATA", message: "No data available" } : null),
+        attempts: result ? [createAttempt(result.source, result.fetchedAt, error ? "fatal_error" : empty ? "empty" : "success", classified?.reasonCode, classified?.message)] : [],
       });
     };
     const existing = this.cachedQueries.get(key);
