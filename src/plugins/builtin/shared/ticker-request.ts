@@ -1,6 +1,13 @@
 import { useCallback } from "react";
+import { ApiRequestError } from "../../../api-client/errors";
 import { useAsyncResource } from "../../../react/async-resource";
 import { usePaneTicker } from "../../../state/app/context";
+import { isCloudSessionRequired } from "./research-cloud-session";
+
+function discardDeniedResearch(error: unknown): boolean {
+  return (error instanceof ApiRequestError && [401, 402, 403].includes(error.status ?? 0))
+    || isCloudSessionRequired(error instanceof Error ? error.message : String(error));
+}
 
 export function useBoundTicker() {
   const { symbol, ticker } = usePaneTicker();
@@ -18,7 +25,7 @@ export function useTickerRequest<T>(
   exchange: string,
 ) {
   const request = useCallback((force: boolean) => loader(symbol!, exchange, force), [exchange, loader, symbol]);
-  const { data, loading, error, reload } = useAsyncResource(symbol ? request : null, { clearOnError: true });
+  const { data, loading, error, reload } = useAsyncResource(symbol ? request : null, { clearOnError: discardDeniedResearch });
   return { data, loading, error: symbol ? error : "No ticker selected", reload };
 }
 

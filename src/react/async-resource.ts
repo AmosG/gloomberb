@@ -10,7 +10,7 @@ interface ResourceState<T> {
 /** A stable loader owns a resource; null disables it and discards pending results. */
 export function useAsyncResource<T>(
   loader: ((force: boolean) => Promise<T>) | null,
-  options: { initialData?: () => T | null; clearOnError?: boolean } = {},
+  options: { initialData?: () => T | null; clearOnError?: boolean | ((error: unknown) => boolean) } = {},
 ) {
   const [state, setState] = useState<ResourceState<T> & { owner: typeof loader }>(() => ({
     owner: loader,
@@ -37,11 +37,14 @@ export function useAsyncResource<T>(
       }
     } catch (error) {
       if (generation.current === currentGeneration) {
+        const discardData = typeof clearOnError === "function" ? clearOnError(error) : clearOnError;
+        const message = error instanceof Error ? error.message : String(error);
         setState((current) => ({
           ...current,
-          data: clearOnError ? null : current.data,
+          data: discardData ? null : current.data,
+          updatedAt: discardData ? null : current.updatedAt,
           loading: false,
-          error: error instanceof Error ? error.message : String(error),
+          error: message.trim() ? message : "Request failed",
         }));
       }
     }

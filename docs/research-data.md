@@ -10,6 +10,8 @@ An explicitly selected public listing remains public even when the saved symbol 
 
 A quote needs a finite, positive observation timestamp that is no later than the current clock. Missing, invalid or future source times cannot establish a current price, chart update or quote-derived valuation. Receipt time does not replace source time. Retained observations keep their values and existing stale/error status until valid data arrives; historical statement-price observations remain separate.
 
+Earnings estimates, corporate actions, analyst research and historical prices retain the last successful response when a refresh fails, with the failure shown in the footer. A failed refresh does not advance the retrieval time. Changing the ticker, venue or request range clears the previous response; explicit account or access rejection clears denied research. A successful empty response also replaces old data.
+
 ## Charts, comparisons, and correlations
 
 Bond history currently has no source-declared price convention. Charts retain its raw observations with unknown price units and do not append a current bond quote: that quote's per-unit or percent-of-par declaration does not establish the basis of a separate historical series. Overview price returns also use the historical observations without appending that quote. A numeric ratio between a quote and an old close cannot establish compatible units. Historical values and current source quotes remain separate; this does not add bond historical coverage or reconstruct yield.

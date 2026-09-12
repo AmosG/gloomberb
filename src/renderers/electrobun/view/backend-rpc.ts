@@ -17,7 +17,7 @@ import {
   type ElectrobunDesktopRpcSchema,
   type UpdateProgressMessage,
 } from "../shared/protocol";
-import { decodeRpcValue, encodeRpcValue } from "./rpc-codec";
+import { decodeRpcResponse, decodeRpcValue, encodeRpcValue } from "./rpc-codec";
 import type { RemoteControlRequest, RemoteControlResponse } from "../../../remote/types";
 
 type ContextMenuSelectListener = (message: ContextMenuSelectMessage) => void;
@@ -175,7 +175,7 @@ export async function backendRequest(
     method,
     payload: encodeRpcValue(payload),
   });
-  return decodeRpcValue(result);
+  return decodeRpcResponse(result);
 }
 
 export async function initElectrobunBackend(payload?: { kind?: "main" | "detached"; paneId?: string }): Promise<ElectrobunBackendInit> {
