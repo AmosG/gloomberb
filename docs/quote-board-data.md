@@ -21,3 +21,17 @@ The futures board uses provider continuous/front-month aliases. These do not
 establish an explicit expiry curve, contract quantity, physical-unit conversion,
 or roll-adjusted investment return. Quote validation does not add those
 capabilities.
+
+Contract prices in Overview, quote reports and quote-monitor text retain up to
+eight decimal places; contract changes use the same price precision instead of
+rounding to currency cents. This ceiling preserves the supplied price, without
+declaring a minimum tick or converting the quote's currency. The futures board
+continues to use its existing catalog tick precision, with `c` for source `USX`
+prices. Quantity and cost formatting are separate from quote-price formatting.
+
+Historical Prices uses numeric observation formatting for its OHLC table and
+reports, including when history carries no instrument type. It retains up to
+eight decimal places, subject to the table's column width; tiny nonzero values
+can use scientific notation. Raw JSON observations remain unchanged. This
+formatting does not establish the history's units or a continuous future's roll
+convention.

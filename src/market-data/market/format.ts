@@ -136,7 +136,9 @@ function getBasePriceMaxFractionDigits(kind: AssetDisplayKind, value: number): n
     case "equity":
       return Math.abs(value) >= 1 ? 2 : 4;
     case "contract":
-      return 4;
+      // Currency futures include five- and seven-decimal prices. This is a
+      // display ceiling, not a declaration of the contract's minimum tick.
+      return 8;
     case "other":
     default:
       return Math.abs(value) >= 1 ? 2 : 4;
@@ -175,6 +177,16 @@ function formatPriceNumber(value: number, decimals: number, maxWidth: number | u
     if (fitsWidth(scientific, maxWidth)) return scientific;
   }
   return "…";
+}
+
+/** Dated OHLC values may have no instrument or unit metadata. Display their
+ * numeric precision without treating them as equity prices or assigning units. */
+export function formatPriceObservation(
+  value: number,
+  options: Pick<MarketFormatOptions, "maxWidth" | "minimumFractionDigits"> = {},
+): string {
+  if (!Number.isFinite(value)) return "—";
+  return formatPriceNumber(value, 8, options.maxWidth, Math.max(0, Math.min(8, options.minimumFractionDigits ?? 0)));
 }
 
 function getPriceMaxFractionDigits(
@@ -310,6 +322,11 @@ export function formatSignedMarketPrice(value: number | undefined, options: Mark
 export function formatMarketChangeWithCurrency(value: number | undefined, currency: string, options: MarketFormatOptions = {}): string {
   if (value == null || !Number.isFinite(value)) return "—";
   if (resolvePriceBasis(options.priceBasis, options.assetCategory) !== "per-unit") return formatSignedMarketPrice(value, options);
+  if (resolveAssetDisplayKind(options) === "contract") {
+    return `${value > 0 ? "+" : ""}${formatMarketPriceWithCurrency(value, currency, {
+      ...options, minimumFractionDigits: Math.max(2, options.minimumFractionDigits ?? 0),
+    })}`;
+  }
   return `${value > 0 ? "+" : ""}${formatCurrency(value, currency)}`;
 }
 

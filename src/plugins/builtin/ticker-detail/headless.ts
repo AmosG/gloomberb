@@ -3,7 +3,7 @@ import { hasValidQuoteObservationTime } from "../../../market-data/quotes/freshn
 import type { HeadlessPaneColumn, HeadlessPaneDefinition } from "../../../types/headless";
 import type { TimeRange } from "../../../time-series/range";
 import { formatNumber, formatPercentRaw } from "../../../utils/format";
-import { formatMarketPrice, formatMarketPriceWithCurrency } from "../../../market-data/market/format";
+import { formatMarketPrice, formatMarketPriceWithCurrency, formatPriceObservation } from "../../../market-data/market/format";
 import { pricePointValues, priceHistoryIntegrityNotice } from "../../../utils/price-history-integrity";
 import { buildFinancialTableModel, financialStatementCurrency, financialStatementDateNotice, financialStatementLimitations, formatFinancialHeader } from "./financials/model";
 import { paneSchemas } from "./headless-schema";
@@ -127,7 +127,7 @@ export const historicalPricesHeadless: HeadlessPaneDefinition<"rows"> = {
       key, header: key, align: "right" as const,
       format: (value: unknown) => value == null || !Number.isFinite(Number(value)) ? "-"
         : key === "volume" ? formatNumber(Number(value), 0)
-        : formatMarketPrice(Number(value), { minimumFractionDigits: 2 }),
+        : formatPriceObservation(Number(value), { minimumFractionDigits: 2 }),
     })),
   ],
   async load({ symbols, options }, ctx) {

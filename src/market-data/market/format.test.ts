@@ -6,6 +6,7 @@ import {
   formatMarketCostWithCurrency,
   formatCompactMarketPriceWithCurrency,
   formatMarketPrice,
+  formatPriceObservation,
   formatMarketPriceWithCurrency,
   formatMarketQuantity,
   formatSignedMarketPrice,
@@ -148,4 +149,35 @@ test("quote formatting uses metadata only to withhold unknown bond units", () =>
   expect(formatMarketChangeWithCurrency(-1, "USD", declared)).toBe("-$1.00");
   const par = quoteFormatOptions({ priceBasis: "percent-of-par" }, "STK");
   expect(formatMarketChangeWithCurrency(-1, "USD", par)).toBe("-1% par");
+});
+
+test("contract price precision does not change units, signed/zero/missing semantics, quantity or cost", () => {
+  for (const assetCategory of ["FUT", "FUTURE", "FUTURES", "FOP", "OPT"]) {
+    const options = { assetCategory };
+    expect(formatMarketPriceWithCurrency(1.17485, "USD", options)).toBe("$1.17485");
+    expect(formatMarketChangeWithCurrency(-0.0000005, "USD", options)).toBe("-$0.0000005");
+    expect(formatMarketChangeWithCurrency(0, "USD", options)).toBe("$0.00");
+    expect(formatMarketChangeWithCurrency(undefined, "USD", options)).toBe("—");
+    expect(formatMarketChangeWithCurrency(NaN, "USD", options)).toBe("—");
+    expect(formatMarketPriceWithCurrency(-37.63, "USD", options)).toBe("-$37.63");
+    expect(formatMarketChangeWithCurrency(.25, "USX", options)).toContain("USX");
+    expect(formatMarketQuantity(1.123456, options)).toBe("1.1235");
+    expect(formatMarketCost(1.123456, options)).toBe("1.1235");
+  }
+  expect(formatMarketPriceWithCurrency(259.7499, "USD", { assetCategory: "STK" })).toBe("$259.75");
+  expect(formatMarketChangeWithCurrency(1, "USD", { assetCategory: "STK" })).toBe("+$1.00");
+  expect(formatMarketChangeWithCurrency(.001, "USD", { assetCategory: "BOND" })).toBe("—");
+});
+
+test("untyped observations retain source decimals with bounded widths and missing/zero distinctions", () => {
+  expect(formatPriceObservation(-37.63001)).toBe("-37.63001");
+  expect(formatPriceObservation(0, { minimumFractionDigits: 2 })).toBe("0.00");
+  expect(formatPriceObservation(NaN)).toBe("—");
+  expect(formatPriceObservation(Infinity)).toBe("—");
+  expect(formatPriceObservation(.0123456)).toBe("0.0123456");
+  expect(formatPriceObservation(1.1602274179458618)).toBe("1.16022742");
+  expect(formatPriceObservation(.0062825, { maxWidth: 10 })).toBe("0.0062825");
+  expect(formatPriceObservation(.0000051, { maxWidth: 7 })).toBe("5.1e-6");
+  expect(formatPriceObservation(1.234e-25, { maxWidth: 10 })).toBe("1.234e-25");
+  expect(formatPriceObservation(1234567.891, { maxWidth: 8 }).length).toBeLessThanOrEqual(8);
 });
