@@ -126,6 +126,12 @@ One unit of the row currency buys the amount in the column currency. Indicative 
 
 The base-currency axis remains visible during horizontal scrolling; partially covered values are shortened with an ellipsis. CSV export retains the full matrix and appends each currency's raw USD leg, observation time, retrieval time, source, and current status. Each cross uses its row's leg divided by its column's leg; same-currency cells are identity. Exported provenance belongs to the displayed rates, and unknown observation times remain blank rather than being replaced by retrieval time.
 
+## Short interest
+
+Short interest is outstanding short positions at each settlement date, not daily short-sale trading volume. FINRA supplies settlement history, average daily volume and days to cover. Yahoo is a fallback with current and prior settlement shares; its supplied current days-to-cover ratio and percentage of float remain attached to the current record.
+
+An undated float cannot establish a historical settlement's denominator. Missing float percentages stay unavailable, including the prior settlement. Average daily volume is not reconstructed from Yahoo's reported ratio; FINRA's independently supplied volume remains available. Known zero values remain zero. The date column stays visible during horizontal scrolling, and exports retain every configured financial column.
+
 ## Credit spreads
 
 CRD shows daily closing option-adjusted spreads for the ICE BofA US Corporate (US IG), US High Yield (US HY), and AAA, AA, A, and BBB US Corporate indices from FRED. Source percentages are converted to basis points; 1D is the change from the previous available observation. These are spreads, not bond yields.

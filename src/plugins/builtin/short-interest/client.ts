@@ -35,21 +35,17 @@ function normalizeRecords(result: YahooQuoteSummaryResult): ShortInterestRecord[
   const currentShares = financeRawNumber(stats.sharesShort) ?? null;
   const shortRatio = financeRawNumber(stats.shortRatio) ?? null;
   const shortPercentFloat = financeRawNumber(stats.shortPercentOfFloat) ?? null;
-  const floatShares = financeRawNumber(stats.floatShares) ?? null;
 
   if (currentDate && currentShares != null) {
     records.push({
       settlementDate: currentDate,
       sharesShort: currentShares,
       shortRatio,
-      averageDailyVolume: shortRatio != null && shortRatio > 0
-        ? Math.round(currentShares / shortRatio)
-        : null,
+      // A reported ratio does not supply its original volume denominator.
+      averageDailyVolume: null,
       shortPercentFloat: shortPercentFloat != null
         ? shortPercentFloat * 100
-        : floatShares != null && floatShares > 0
-          ? (currentShares / floatShares) * 100
-          : null,
+        : null,
     });
   }
 
@@ -62,9 +58,8 @@ function normalizeRecords(result: YahooQuoteSummaryResult): ShortInterestRecord[
       sharesShort: priorShares,
       shortRatio: null,
       averageDailyVolume: null,
-      shortPercentFloat: floatShares != null && floatShares > 0
-        ? (priorShares / floatShares) * 100
-        : null,
+      // Yahoo's undated float cannot establish a prior settlement's percentage.
+      shortPercentFloat: null,
     });
   }
 
