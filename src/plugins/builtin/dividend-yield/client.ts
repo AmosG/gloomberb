@@ -14,6 +14,8 @@ import { dividendPriceAsOf } from "./reference-price";
 export const YAHOO_DIVIDENDS_CONNECTION_ID = "yahoo-dividends";
 export const INCOMPLETE_DIVIDEND_HISTORY = "Incomplete cash history; totals unavailable.";
 export const MISSING_DIVIDEND_CURRENCY = "Dividend currency is unavailable; cash amounts cannot be compared safely.";
+export const UNAVAILABLE_DIVIDEND_SUMMARY = "Dividend summary unavailable.";
+export const INVALID_DIVIDEND_SUMMARY_DATE = "Invalid dividend summary date.";
 const yahoo = new YahooHttpClient();
 
 let connectionHealth: ConnectionHealthRegistry | null = null;
@@ -108,6 +110,8 @@ export interface DividendData {
   /** False when reported records are missing or invalid, even if some rows remain usable. */
   historyAvailable?: boolean;
   historyError?: string;
+  /** Independent summary failures do not invalidate usable cash history. */
+  summaryError?: string;
   notes?: string[];
   providerId?: string;
   /** Source fetch time, not the last ex-date or this pane's cache-read time. */
@@ -157,9 +161,14 @@ async function fetchDividendDataForSymbol(
     ),
   ]);
 
-  const quoteFields = quoteResult.status === "fulfilled"
+  const summaryFailed = quoteResult.status === "rejected" || !!quoteResult.value?.quoteSummary?.error;
+  const quoteFields = quoteResult.status === "fulfilled" && !summaryFailed
     ? extractDividendFields(quoteResult.value)
     : null;
+  const summaryError = summaryFailed ? UNAVAILABLE_DIVIDEND_SUMMARY
+    : quoteFields && [quoteFields.exDividendDate, quoteFields.dividendDate]
+      .some((timestamp) => timestamp != null && reportedDividendDate(timestamp) === null)
+      ? INVALID_DIVIDEND_SUMMARY_DATE : undefined;
 
   // Cash events and chart prices need their own denomination. A summary's
   // currency cannot establish the units of a chart that omitted them.
@@ -209,6 +218,7 @@ async function fetchDividendDataForSymbol(
 
   return { payments, metrics, price: resolvedPrice, priceAsOf, priceStale, currency: currency || undefined, historyAvailable,
     ...(historyError ? { historyError } : {}),
+    ...(summaryError ? { summaryError } : {}),
     providerId: "yahoo", ...(chartResult.status === "fulfilled" ? { fetchedAt: new Date().toISOString() } : {}),
     notes: ["Cash yield excludes taxes and reinvestment. SEC yield, tax components and future payments are not modeled."],
   };
@@ -220,6 +230,14 @@ export function dividendReferencePrice(price: number | null, priceCurrency: stri
   const unit = resolveCurrencyUnit(priceCurrency);
   if (!unit.currency || unit.currency !== resolveCurrencyUnit(cashCurrency).currency) return null;
   return price / unit.divisor;
+}
+
+function reportedDividendDate(timestamp: number | null): Date | null {
+  if (timestamp == null || !Number.isFinite(timestamp)) return null;
+  const date = new Date(timestamp * 1000);
+  // Summary dates use the same four-digit calendar-year domain as history.
+  return Number.isFinite(date.getTime()) && date.getUTCFullYear() >= 0 && date.getUTCFullYear() <= 9999
+    ? date : null;
 }
 
 export function buildDividendMetrics(
@@ -239,12 +257,12 @@ export function buildDividendMetrics(
   const growth3Y = options.historyAvailable !== false ? computeGrowth(eligible, 3, now) : null;
 
   const exDividendDate = quoteFields?.exDividendDate != null
-    ? new Date(quoteFields.exDividendDate * 1000)
+    ? reportedDividendDate(quoteFields.exDividendDate)
     : payments.length > 0
       ? payments[0]!.exDate
       : null;
 
-  const reportedPayDate = quoteFields?.dividendDate != null ? new Date(quoteFields.dividendDate * 1000) : null;
+  const reportedPayDate = reportedDividendDate(quoteFields?.dividendDate ?? null);
   const today = new Date(now.toISOString().slice(0, 10));
   const nextPayDate = reportedPayDate && reportedPayDate >= today ? reportedPayDate : null;
 

@@ -212,7 +212,7 @@ export function DividendYieldPane({ focused, width, height, loadData = fetchDivi
   const priceStatus = dividendPriceStatus(currentPrice, priceAsOf, priceMetadata?.priceStale);
 
   usePaneFooter("dividend-yield", () => {
-    const active = loadingErrorFooterInfo(loading, authWall ? null : error ?? data?.historyError ?? null);
+    const active = loadingErrorFooterInfo(loading, authWall ? null : error ?? data?.historyError ?? data?.summaryError ?? null);
     if (active.length > 0) return { info: active };
     const priceText = priceStatus === "unknown-time" ? "Reference price time unavailable"
       : priceStatus === "stale" ? `Stale price${priceAsOf ? ` ${priceAsOf}` : ""}`
@@ -223,7 +223,7 @@ export function DividendYieldPane({ focused, width, height, loadData = fetchDivi
       ...(priceText ? [{ text: priceText, tone: priceStatus ? "warning" as const : "muted" as const }] : []),
       ...(showHistory ? [{ text: `${priceText ? " · " : ""}${historyText}`, tone: "muted" as const }] : []),
     ] }] : [] };
-  }, [authWall, currentPrice, historyData?.fetchedAt, data?.historyError, error, loading, priceAsOf, priceStatus, width]);
+  }, [authWall, currentPrice, historyData?.fetchedAt, data?.historyError, data?.summaryError, error, loading, priceAsOf, priceStatus, width]);
 
   const sourceWarnings = [
     ...(data?.stale ? ["Stale cash history; recent distributions may be missing."] : []),

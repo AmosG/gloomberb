@@ -25,6 +25,62 @@ async function frame() {
   return setup!.captureCharFrame();
 }
 
+test("summary failures retain cash and recover dated payment information through refresh", async () => {
+  const day = Math.floor(Date.now() / 86400_000) * 86400;
+  const exDate = day + 10 * 86400;
+  const payDate = day + 30 * 86400;
+  let mode: "valid" | "failed" | "invalid-ex" | "invalid-pay" = "valid";
+  let chartRequests = 0;
+  setHttpFetchTransport(async (url) => {
+    if (url.includes("fc.yahoo.com")) return new Response("", { headers: { "set-cookie": "test=fixture" } });
+    if (url.includes("getcrumb")) return new Response("fixture");
+    if (url.includes("/chart/")) {
+      chartRequests++;
+      return Response.json({ chart: { result: [{
+        meta: { currency: "USD", regularMarketPrice: 100, regularMarketTime: day, dataGranularity: "1mo" },
+        timestamp: [day], indicators: { quote: [{ close: [100] }] },
+        events: { dividends: { cash: { date: day - 86400, amount: 4 } } },
+      }] } });
+    }
+    if (url.includes("/quoteSummary/")) {
+      if (mode === "failed") throw new Error("Controlled summary unavailable");
+      return Response.json({ quoteSummary: { result: [{ summaryDetail: { currency: "USD", dividendRate: { raw: 20 },
+        exDividendDate: { raw: mode === "invalid-ex" ? 1e20 : exDate },
+        dividendDate: { raw: mode === "invalid-pay" ? 1e20 : payDate },
+      } }] } });
+    }
+    throw new Error(`Unexpected controlled request: ${url}`);
+  });
+  const id = "dividend-summary-refresh";
+  const state = createInitialState(createTestPaneConfig("/tmp/dividend-summary-refresh", {
+    instanceId: id, paneId: "dividend-yield", binding: { kind: "fixed", symbol: "INCOME" },
+  }));
+  state.tickers.set("INCOME", createTestTicker("INCOME"));
+  setup = await testRender(<TestPaneProvider state={state} paneId={id} pluginId="dividend-yield" runtime={createTestPluginRuntime()}>
+    <PaneFooterProvider>{(footer) => <Box width={80} height={24} flexDirection="column">
+      <Box height={23} flexShrink={0}><DividendYieldPane focused width={80} height={23}/></Box>
+      <PaneFooterBar footer={footer} focused width={80}/>
+    </Box>}</PaneFooterProvider>
+  </TestPaneProvider>, { width: 80, height: 24 });
+  expect(await frame()).toContain(new Date(payDate * 1000).toISOString().slice(0, 10));
+  for (const nextMode of ["failed", "invalid-ex", "invalid-pay", "valid"] as const) {
+    mode = nextMode;
+    const requestsBefore = chartRequests;
+    await emitKeypress(setup!, { name: "r", sequence: "r" });
+    const current = await frame();
+    expect(chartRequests).toBe(requestsBefore + 1);
+    expect(current).toContain("4.00%");
+    if (mode === "valid") {
+      expect(current).not.toContain("summary");
+      expect(current).toContain(new Date(payDate * 1000).toISOString().slice(0, 10));
+    } else {
+      expect(current.match(/Dividend summary unavailable|Invalid dividend summary date/g)).toHaveLength(1);
+      expect(current.trimEnd().split("\n").at(-1)).toContain("summary");
+      if (mode !== "failed") expect(current).toContain("$20.00");
+    }
+  }
+});
+
 test.each([48, 80, 120])("native dividend refresh keeps the selected price's time and status reachable at %d columns", async (width) => {
   const sourceTime = Math.floor(Date.now() / 1000);
   const oldTime = sourceTime - 10 * 86_400;

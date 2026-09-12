@@ -5,7 +5,7 @@ import { createTestDataProvider } from "../../../test-support/data-provider";
 import type { HeadlessBundleResult, HeadlessPaneContext } from "../../../types/plugin";
 import type { ChartResult } from "../../../sources/yahoo-finance/types";
 import { createDividendYieldHeadless } from "./headless";
-import { fetchDividendData, INCOMPLETE_DIVIDEND_HISTORY, MISSING_DIVIDEND_CURRENCY } from "./client";
+import { fetchDividendData, INCOMPLETE_DIVIDEND_HISTORY, MISSING_DIVIDEND_CURRENCY, INVALID_DIVIDEND_SUMMARY_DATE, UNAVAILABLE_DIVIDEND_SUMMARY } from "./client";
 import { fetchProviderDividendData } from "./provider-client";
 import { renderHeadlessPaneText, serializeHeadlessPaneResult } from "../../../cli/pane-functions/headless";
 
@@ -37,6 +37,60 @@ function metric(result: HeadlessBundleResult, label: string) {
   const section = result.sections[0]!;
   return "entries" in section ? section.entries.find((entry) => entry.label === label)?.value : undefined;
 }
+
+test("invalid summary dates cannot break reports or invalidate independent cash and forward rates", async () => {
+  const definition = createDividendYieldHeadless();
+  for (const field of ["exDividendDate", "dividendDate"] as const) {
+    for (const invalid of [1e20, -1e20, 8.64e12]) {
+      const validDate = day + 20 * 86400;
+      nativeSource("USD", { cash }, { currency: "USD", dividendRate: { raw: 20 },
+        exDividendDate: { raw: validDate }, dividendDate: { raw: validDate }, [field]: { raw: invalid } });
+      const result = await definition.load(request, context);
+      expect(result).toMatchObject({ complete: false, errors: [INVALID_DIVIDEND_SUMMARY_DATE],
+        metadata: { historyAvailable: true, historyError: null, summaryError: INVALID_DIVIDEND_SUMMARY_DATE } });
+      expect(metric(result, field === "exDividendDate" ? "Ex-dividend" : "Next pay")).toBeNull();
+      expect(metric(result, field === "exDividendDate" ? "Next pay" : "Ex-dividend")).toEqual(new Date(validDate * 1000));
+      expect(metric(result, "Trailing rate")).toBe(4);
+      expect(metric(result, "Forward rate")).toBe(20);
+      expect(renderHeadlessPaneText(definition, result, request, "DVD")).toContain(INVALID_DIVIDEND_SUMMARY_DATE);
+      expect(JSON.parse(JSON.stringify(serializeHeadlessPaneResult(definition, result)))).toMatchObject({
+        errors: [INVALID_DIVIDEND_SUMMARY_DATE], metadata: { summaryError: INVALID_DIVIDEND_SUMMARY_DATE },
+      });
+    }
+  }
+  nativeSource("USD", { cash }, { currency: "USD", exDividendDate: { raw: 0 } });
+  const epoch = await definition.load(request, context);
+  expect(metric(epoch, "Ex-dividend")).toEqual(new Date(0));
+  expect(epoch.metadata?.summaryError).toBeNull();
+});
+
+test("independent summary transport and provider-body failures keep known cash and mark the report incomplete", async () => {
+  let failure: "transport" | "provider-body" = "transport";
+  setHttpFetchTransport(async (url) => {
+    if (url.includes("fc.yahoo.com")) return new Response("", { headers: { "set-cookie": "test=fixture" } });
+    if (url.includes("getcrumb")) return new Response("fixture");
+    if (url.includes("/chart/")) return Response.json({ chart: { result: [{
+      meta: { currency: "USD", regularMarketPrice: 100, regularMarketTime: day, dataGranularity: "1mo" },
+      timestamp: [day], indicators: { quote: [{ close: [100] }] }, events: { dividends: { cash } },
+    }] } });
+    if (url.includes("/quoteSummary/")) {
+      if (failure === "transport") throw new Error("Controlled summary unavailable");
+      return Response.json({ quoteSummary: { result: null, error: { description: "Controlled provider failure" } } });
+    }
+    throw new Error(`Unexpected controlled request: ${url}`);
+  });
+  const definition = createDividendYieldHeadless();
+  for (const mode of ["transport", "provider-body"] as const) {
+    failure = mode;
+    const result = await definition.load(request, context);
+    expect(result).toMatchObject({ complete: false, errors: [UNAVAILABLE_DIVIDEND_SUMMARY],
+      metadata: { historyAvailable: true, summaryError: UNAVAILABLE_DIVIDEND_SUMMARY } });
+    expect(metric(result, "Trailing rate")).toBe(4);
+    expect(metric(result, "Next pay")).toBeNull();
+    expect(metric(result, "Forward rate")).toBeNull();
+    expect(renderHeadlessPaneText(definition, result, request, "DVD").split(UNAVAILABLE_DIVIDEND_SUMMARY)).toHaveLength(2);
+  }
+});
 
 test("native cash requires its own denomination, and summary rates retain independent currency coverage", async () => {
   const definition = createDividendYieldHeadless();

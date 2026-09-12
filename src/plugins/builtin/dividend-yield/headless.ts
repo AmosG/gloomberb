@@ -70,9 +70,10 @@ export function projectDividendYieldHeadless(
   const metrics = data.metrics;
   const currency = data.currency ?? data.payments[0]?.currency ?? "";
   const priceStatus = dividendPriceStatus(data.price, data.priceAsOf, data.priceStale);
+  const errors = [data.historyError, data.summaryError].filter((error): error is string => !!error);
 
   return {
-    ...(data.historyError ? { complete: false, errors: [data.historyError] } : {}),
+    ...(errors.length > 0 ? { complete: false, errors } : {}),
     sections: [
       {
         title: "Dividend metrics",
@@ -110,6 +111,7 @@ export function projectDividendYieldHeadless(
       currency: data.currency ?? data.payments[0]?.currency ?? null,
       historyAvailable: data.historyAvailable ?? true,
       historyError: data.historyError ?? null,
+      summaryError: data.summaryError ?? null,
       providerId: data.providerId ?? null,
       historyFetchedAt: data.fetchedAt ?? null,
       historyStale: data.stale ?? null,
