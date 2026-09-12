@@ -178,39 +178,41 @@ function shouldFetchSecFilings(tickerFile: TickerRecord | null, financials: Tick
 
 async function appendTickerPositions(lines: string[], tickerFile: TickerRecord | null, quote: TickerFinancials["quote"],
   config: AppConfig, toBase: (value: number, currency: string) => Promise<number>): Promise<void> {
-  const quoteCurrency = quote?.currency || tickerFile?.metadata.currency || config.baseCurrency;
+  const quoteCurrency = quote?.currency?.trim() || tickerFile?.metadata.currency?.trim() || "";
   if (tickerFile && tickerFile.metadata.positions.length > 0) {
     lines.push("");
     lines.push(renderSection("Positions"));
     const positions = tickerFile.metadata.positions.filter((position) => position.shares !== 0);
     const activeQuote = getActiveQuoteDisplay(quote);
     const currentPrice = activeQuote && Number.isFinite(activeQuote.price) ? activeQuote.price : null;
+    const currentPriceBase = currentPrice != null && quoteCurrency ? await toBase(currentPrice, quoteCurrency) : null;
     for (const [index, position] of positions.entries()) {
       const portfolioName = config.portfolios.find((portfolio) => portfolio.id === position.portfolio)?.name ?? position.portfolio;
       const multiplier = position.multiplier ?? 1;
-      const positionCurrency = position.currency ?? quoteCurrency;
+      const positionCurrency = position.currency?.trim() || quoteCurrency;
       const metrics = getPortfolioPositionMetrics({ ...tickerFile, metadata: { ...tickerFile.metadata, positions: [position] } }, undefined, quoteCurrency);
-      const costBasisBase = await toBase(metrics.signedCost, positionCurrency);
-      const positionRate = await toBase(1, positionCurrency);
+      const costBasisBase = positionCurrency ? await toBase(metrics.signedCost, positionCurrency) : Number.NaN;
+      const positionRate = positionCurrency ? await toBase(1, positionCurrency) : Number.NaN;
       const baseMetrics = getPortfolioPositionMetrics({ ...tickerFile, metadata: { ...tickerFile.metadata, positions: [position] } }, undefined, quoteCurrency,
         { currency: config.baseCurrency, convert: value => value * positionRate });
       const brokerValue = resolveBrokerFallbackMarketValue(baseMetrics);
-      const marketValueBase = currentPrice != null ? await toBase(metrics.totalPriceUnits * currentPrice, quoteCurrency)
+      const marketValueBase = currentPriceBase != null ? metrics.totalPriceUnits * currentPriceBase
         : brokerValue != null ? baseMetrics.brokerNetMktValue : Number.NaN;
-      const selectedPnl = resolvePortfolioPositionPnl(baseMetrics, currentPrice != null ? await toBase(currentPrice, quoteCurrency) : null);
+      const selectedPnl = resolvePortfolioPositionPnl(baseMetrics, currentPriceBase);
       const pnl = selectedPnl.value;
 
       lines.push(cliStyles.bold(`${portfolioName} (${position.broker})`));
+      if (!positionCurrency) lines.push(cliStyles.muted("Currency unavailable."));
       lines.push(renderStat(
         "Position",
-        `${formatMarketQuantity(metrics.totalShares, { assetCategory: tickerFile.metadata.assetCategory, multiplier: position.multiplier })} ${multiplier > 1 ? "contracts" : "shares"} @ ${formatMarketCostWithCurrency(position.avgCost, positionCurrency, { assetCategory: tickerFile.metadata.assetCategory, multiplier: position.multiplier })}`,
+        `${formatMarketQuantity(metrics.totalShares, { assetCategory: tickerFile.metadata.assetCategory, multiplier: position.multiplier })} ${multiplier > 1 ? "contracts" : "shares"} @ ${positionCurrency ? formatMarketCostWithCurrency(position.avgCost, positionCurrency, { assetCategory: tickerFile.metadata.assetCategory, multiplier: position.multiplier }) : "—"}`,
       ));
       lines.push(renderStat("Cost Basis", formatCurrency(costBasisBase, config.baseCurrency)));
       lines.push(renderStat("Market Value", formatCurrency(marketValueBase, config.baseCurrency)));
       lines.push(renderStat(selectedPnl.basis === "broker-snapshot" ? "Broker P&L" : "P&L",
         pnl === null ? "—" : colorBySign(formatSignedCurrency(pnl, config.baseCurrency), pnl)));
       if (position.markPrice != null) {
-        lines.push(renderStat("Mark", formatMarketPriceWithCurrency(position.markPrice, positionCurrency, { assetCategory: tickerFile.metadata.assetCategory, multiplier: position.multiplier })));
+        lines.push(renderStat("Broker Mark", positionCurrency ? formatMarketPriceWithCurrency(position.markPrice, positionCurrency, { assetCategory: tickerFile.metadata.assetCategory, multiplier: position.multiplier }) : "—"));
       }
       if (index < positions.length - 1) {
         lines.push(cliStyles.muted("-".repeat(24)));

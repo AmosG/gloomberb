@@ -78,6 +78,7 @@ test("ticker, portfolio and overview select the same current or broker P&L acros
       const expected = avgCost === 100 && Number.isFinite(currentQuote.price) ? 100 : 90;
       const expectedBasis = expected === 100 ? "quote-and-cost" : "broker-snapshot";
       const report = await buildTickerReport({ symbol: "AAPL", tickerFile: record, financials, config, toBase: async (value, currency) => toBase(value, currency) });
+      expect(report).toMatch(/Broker Mark[^\n]*115/);
       expect(report).toMatch(new RegExp(`${expectedBasis === "broker-snapshot" ? "Broker P&L" : "P&L"}[^\\n]*\\+\\$${expected}`));
       const overview = buildPositionRows({ ticker: record, quote: currentQuote, quoteCurrency: "USD", baseCurrency: "USD", toBase })[0]!;
       expect(overview).toMatchObject({ pnlValue: expected, pnlBasis: expectedBasis });
@@ -119,6 +120,46 @@ test("actual ticker command preserves stored positions and structured research w
   expect(json.data.ticker.positions[0].avgCost).toBeUndefined();
   expect(json.data.ticker.positions[0].unrealizedPnl).toBe(150);
   expect(closes).toBe(2);
+});
+
+test("no-quote ticker command does not assign display currency to untyped broker values", async () => {
+  const config = createDefaultConfig("/unused-no-source-currency");
+  const record: TickerRecord = { metadata: { ...ticker.metadata, currency: "", positions: [{ portfolio: "main", broker: "demo", shares: 10,
+    marketValue: 1200, unrealizedPnl: 150, markPrice: 120 }] } };
+  const financials = { annualStatements: [], quarterlyStatements: [], priceHistory: [] };
+  let conversions = 0;
+  const dependencies = {
+    initMarketData: async () => ({ config, dataDir: "/unused-no-source-currency", persistence: { close() {} },
+      store: { loadTicker: async () => record }, dataProvider: { ...createTestDataProvider({
+        getTickerFinancials: async () => financials,
+        getExchangeRate: async (currency) => { conversions++; return currency === "EUR" ? 1.2 : 1; },
+      }), getNews: async () => [] },
+    }) as any,
+    fail: (message: string): never => { throw new Error(message); },
+  };
+  const output: string[] = [];
+  const logger = spyOn(console, "log").mockImplementation((...args) => { output.push(args.join(" ")); });
+  try { await runTickerCommand("AAPL", dependencies); }
+  finally { logger.mockRestore(); }
+  expect(output.join("\n")).toContain("Currency unavailable.");
+  expect(output.join("\n")).toMatch(/Position[^\n]*10 shares @ —/);
+  for (const label of ["Market Value", "P&L", "Broker Mark"]) expect(output.join("\n")).toMatch(new RegExp(`${label}[^\\n]*—`));
+  expect(conversions).toBe(0);
+  let result: CliResult | undefined;
+  await runTickerCommand("AAPL", { ...dependencies, printResult: value => { result = value; } });
+  const rawPosition = JSON.parse(serializeCliResult(result!, { ...DEFAULT_CLI_OPTIONS, format: "json" })).data.ticker.positions[0];
+  expect(rawPosition).toMatchObject({ shares: 10, marketValue: 1200, unrealizedPnl: 150, markPrice: 120 });
+  expect(rawPosition.currency).toBeUndefined();
+  for (const sourceCurrency of ["position", "metadata"] as const) {
+    const declared: TickerRecord = { metadata: { ...record.metadata, currency: sourceCurrency === "metadata" ? "EUR" : "",
+      positions: [{ ...record.metadata.positions[0]!, currency: sourceCurrency === "position" ? "EUR" : undefined }] } };
+    const report = await buildTickerReport({ symbol: "AAPL", tickerFile: declared, financials, config,
+      toBase: async (value, currency) => currency === "EUR" ? value * 1.2 : Number.NaN });
+    expect(report).toMatch(/Market Value[^\n]*\$1,440/);
+    expect(report).toMatch(/Broker P&L[^\n]*\+\$180/);
+    expect(report).toMatch(/Broker Mark[^\n]*€120/);
+    expect(report).not.toContain("Currency unavailable");
+  }
 });
 
 test("portfolio JSON and CSV exports preserve signed positions, currencies and unknown totals", async () => {
