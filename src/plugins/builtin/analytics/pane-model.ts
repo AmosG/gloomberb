@@ -18,6 +18,7 @@ import {
 } from "./display";
 import {
   resolveDatedReturns,
+  alignedAssetReturns,
   computeWeightedPortfolioReturns,
   syntheticAccountUnsupportedReason,
   syntheticPositionUnsupportedReason,
@@ -123,19 +124,20 @@ export function buildPortfolioReturnSeries({
     if (value == null) unvaluedCount += 1;
     const weight = value == null ? 0 : Math.abs(value);
     totalValue += weight;
+    if (value === 0) continue;
 
     const entry = request ? chartEntries.get(buildChartKey(request)) : undefined;
     const history = entry?.data ?? entry?.lastGoodData ?? null;
     const resolved = resolveDatedReturns(history ?? []);
     if (resolved.integrity) historyIntegrity.push({ symbol: ticker.metadata.ticker, integrity: resolved.integrity });
     const returns = resolved.returns;
+    if (value != null) weightedSeries.push({ weight: value, returns });
     if (value == null || returns.length < 10) {
       missingCount += 1;
       continue;
     }
 
     coveredValue += weight;
-    weightedSeries.push({ weight: value, returns });
   }
 
   const returns = computeWeightedPortfolioReturns(weightedSeries);
@@ -328,6 +330,8 @@ export function buildAnalyticsRiskRows({
   unsupportedReason = null,
   historyIntegrity = [],
   benchmarkIntegrity = null,
+  returns,
+  benchmarkReturns,
 }: {
   sharpe: number | null;
   beta: number | null;
@@ -337,22 +341,30 @@ export function buildAnalyticsRiskRows({
   unsupportedReason?: string | null;
   historyIntegrity?: PortfolioReturnSeriesResult["historyIntegrity"];
   benchmarkIntegrity?: PriceHistoryIntegrity | null;
+  returns?: DatedReturn[] | null;
+  benchmarkReturns?: DatedReturn[];
 }): AnalyticsMetricRow[] {
   const unavailable = unvaluedCount > 0
     ? `${unvaluedCount} holding${unvaluedCount === 1 ? "" : "s"} unvalued; check prices and FX`
     : historyIntegrity.length > 0 ? `Inconsistent OHLC history: ${historyIntegrity.map((entry) => entry.symbol).join(", ")}`
-    : unsupportedReason;
+    : unsupportedReason ?? (missingCount > 0 ? "Incomplete holding history" : null);
   const partial = formatRiskCoverage(coverage, missingCount);
   return [
     { id: "sharpe", label: "Est. Sharpe", value: sharpe },
     { id: "beta", label: "Est. Beta (SPY)", value: beta },
   ].map((row) => {
     const reason = unavailable ?? (row.id === "beta" && benchmarkIntegrity ? "SPY benchmark: inconsistent OHLC history" : null);
+    const sample = row.id === "beta" && returns && benchmarkReturns ? alignedAssetReturns(returns, benchmarkReturns) : returns;
+    const compactDate = (value: string) => new Date(`${value}T00:00:00Z`).toLocaleDateString("en-GB", {
+      day: "2-digit", month: "short", year: "2-digit", timeZone: "UTC",
+    }).replaceAll(" ", "");
+    const window = sample?.length
+      ? `${compactDate(sample[0]!.startDateKey)}–${compactDate(sample.at(-1)!.dateKey)} ·${sample.length}` : undefined;
     return {
       id: row.id,
       label: row.label,
       value: reason ? "—" : formatNumber(row.value ?? undefined, 2),
-      detail: reason ?? (row.value == null ? "Insufficient history for basket estimate" : partial ? `Partial: ${partial}` : undefined),
+      detail: reason ?? (row.value == null ? "Insufficient history for basket estimate" : window ?? (partial ? `Partial: ${partial}` : undefined)),
       color: colors.textMuted,
     };
   });

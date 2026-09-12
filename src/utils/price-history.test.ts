@@ -56,7 +56,7 @@ describe("normalizePriceHistory", () => {
     expect(history.map((point) => point.close)).toEqual([101, 102, 103]);
   });
 
-  test("drops zero-price bars instead of treating missing upstream prices as real data", () => {
+  test("retains dated missing closes and explicit zero without advancing freshness on missing values", () => {
     const history = normalizePriceHistory([
       { date: new Date("2026-05-13T13:30:00Z"), close: 64 },
       { date: new Date("2026-05-13T13:45:00Z"), close: 0 },
@@ -64,7 +64,12 @@ describe("normalizePriceHistory", () => {
       { date: new Date("2026-05-13T14:15:00Z"), close: 65 },
     ]);
 
-    expect(history.map((point) => point.close)).toEqual([64, 65]);
+    expect(history.map((point) => point.close)).toEqual([64, 0, Number.NaN, 65]);
+    expect(normalizePriceHistory([{ date: history[0]!.date, close: -10 }, { date: history[3]!.date, close: 0 }])
+      .map((point) => point.close)).toEqual([-10, 0]);
+    expect(normalizePriceHistory(history.slice(2, 3))).toEqual(history.slice(2, 3));
+    expect(isPriceHistoryStaleForCurrentWindow([history[0]!, { date: history[3]!.date, close: Number.NaN }],
+      Date.parse("2026-05-13T14:15:00Z"), { exchange: "NASDAQ", intervalMs: 60_000 })).toBe(true);
   });
 
   test("detects intraday history that is old even when the cache record is fresh", () => {

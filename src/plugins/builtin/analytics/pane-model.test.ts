@@ -148,8 +148,8 @@ test("risk row detail reflects partial or unavailable inputs while retaining val
     ["Est. Sharpe", "0.00", undefined], ["Est. Beta (SPY)", "0.00", undefined],
   ]);
   const partial = buildAnalyticsRiskRows({ sharpe: 0, beta: null, coverage: .7, missingCount: 2 });
-  expect(partial[0]).toMatchObject({ value: "0.00", detail: "Partial: +70.00% of value, 2 holdings pending" });
-  expect(partial[1]).toMatchObject({ value: "—", detail: "Insufficient history for basket estimate" });
+  expect(partial[0]).toMatchObject({ value: "—", detail: "Incomplete holding history" });
+  expect(partial[1]).toMatchObject({ value: "—", detail: "Incomplete holding history" });
   const unavailable = buildAnalyticsRiskRows({ sharpe: 0, beta: 0, coverage: .7, missingCount: 2, unvaluedCount: 1 });
   expect(unavailable.every((row) => row.value === "—" && row.detail?.includes("check prices and FX"))).toBe(true);
 });

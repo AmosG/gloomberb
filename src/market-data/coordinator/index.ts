@@ -20,7 +20,7 @@ import {
 } from "../selectors";
 import { resolveTickerFinancialsQuoteState } from "../quotes/resolution";
 import { hasLikelyQuoteUnitMismatch } from "../../utils/currency-units";
-import { normalizePriceHistory } from "../../utils/price-history";
+import { hasUsablePriceHistory, normalizePriceHistory } from "../../utils/price-history";
 import {
   createBaselineChartRequest,
   createChartLoadingEntry,
@@ -35,6 +35,7 @@ import {
   errorEntry,
   hasFreshEntryData,
   readyEntry,
+  readyChartEntry,
   readyQuoteEntry,
 } from "./entries";
 import {
@@ -239,7 +240,7 @@ export class MarketDataCoordinator {
     if (!options.forceRefresh && currentData.length > 0 && hasFreshEntryData(current, CHART_CACHE_TTL_MS)) {
       if (currentData !== resolveEntryData(current)) {
         return this.chartStore.update(key, (entry) =>
-          readyEntry(entry, currentData, entry.source ?? this.dataProvider.id, entry.attempts, { keepLastGoodOnEmpty: true })
+          readyChartEntry(entry, currentData, entry.source ?? this.dataProvider.id, entry.attempts)
         );
       }
       return current;
@@ -290,9 +291,9 @@ export class MarketDataCoordinator {
               },
             ),
         );
-        const status = data.length > 0 ? "success" : "empty";
-        const attempts = [createAttempt(this.dataProvider.id, startedAt, status, data.length === 0 ? "NO_DATA" : undefined)];
-        return this.chartStore.update(key, (current) => readyEntry(current, data.length > 0 ? data : null, this.dataProvider.id, attempts, { keepLastGoodOnEmpty: true }));
+        const status = hasUsablePriceHistory(data) ? "success" : "empty";
+        const attempts = [createAttempt(this.dataProvider.id, startedAt, status, status === "empty" ? "NO_DATA" : undefined)];
+        return this.chartStore.update(key, (current) => readyChartEntry(current, data.length > 0 ? data : null, this.dataProvider.id, attempts));
       } catch (error) {
         const classified = classifyError(error);
         const attempt = createAttempt(this.dataProvider.id, startedAt, EXPECTED_EMPTY.test(classified.message) ? "empty" : "fatal_error", classified.reasonCode, classified.message);

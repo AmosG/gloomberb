@@ -5,6 +5,7 @@ import { getPricePointTimestamp } from "../../../utils/price-history";
 import { mergePriceHistoryIntegrity, pricePointIntegrity, type PriceHistoryIntegrity } from "../../../utils/price-history-integrity";
 
 export interface DatedReturn {
+  startDateKey: string;
   dateKey: string;
   value: number;
 }
@@ -43,10 +44,7 @@ export function syntheticPositionUnsupportedReason(ticker: TickerRecord, quoteCu
 }
 
 function toDateKey(timestamp: number): string {
-  const date = new Date(timestamp);
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${date.getFullYear()}-${month}-${day}`;
+  return new Date(timestamp).toISOString().slice(0, 10);
 }
 
 export function computeSharpeRatio(returns: number[], riskFreeRate = 0.05): number | null {
@@ -99,22 +97,22 @@ export function resolveDatedReturns(history: PricePoint[]): ReturnHistoryResult 
   // Dropping the rejected day would silently change the risk sample and bridge
   // its neighbors. Quarantine the sample until corrected source data arrives.
   if (issues.length > 0) return { returns: [], integrity: mergePriceHistoryIntegrity(...issues) };
-  const points = reported
-    .filter(({ point, timestamp }) => (
-      Number.isFinite(timestamp)
-      && Number.isFinite(point.close)
-      && point.close > 0
-    ))
-    .sort((left, right) => left.timestamp - right.timestamp);
+  const points = reported.sort((left, right) => left.timestamp - right.timestamp);
 
   const returns: DatedReturn[] = [];
   for (let i = 1; i < points.length; i++) {
     const previous = points[i - 1]!;
     const current = points[i]!;
+    if (!Number.isFinite(previous.point.close) || previous.point.close <= 0
+      || !Number.isFinite(current.point.close) || current.point.close <= 0) continue;
+    const startDateKey = toDateKey(previous.timestamp);
+    const dateKey = toDateKey(current.timestamp);
+    if (startDateKey === dateKey) continue;
     const value = (current.point.close - previous.point.close) / previous.point.close;
     if (!Number.isFinite(value)) continue;
     returns.push({
-      dateKey: toDateKey(current.timestamp),
+      startDateKey,
+      dateKey,
       value,
     });
   }
@@ -125,45 +123,44 @@ export function computeDatedReturns(history: PricePoint[]): DatedReturn[] {
   return resolveDatedReturns(history).returns;
 }
 
-export function computeWeightedPortfolioReturns(series: WeightedReturnSeries[]): DatedReturn[] {
-  const totals = new Map<string, { weightedReturn: number; weight: number }>();
-
-  for (const entry of series) {
-    if (!Number.isFinite(entry.weight) || entry.weight <= 0) continue;
-    for (const point of entry.returns) {
-      if (!Number.isFinite(point.value)) continue;
-      const current = totals.get(point.dateKey) ?? { weightedReturn: 0, weight: 0 };
-      current.weightedReturn += point.value * entry.weight;
-      current.weight += entry.weight;
-      totals.set(point.dateKey, current);
-    }
-  }
-
-  return [...totals.entries()]
-    .filter(([, total]) => total.weight > 0)
-    .map(([dateKey, total]) => ({
-      dateKey,
-      value: total.weightedReturn / total.weight,
-    }))
-    .sort((left, right) => left.dateKey.localeCompare(right.dateKey));
+function validReturnInterval(point: DatedReturn): boolean {
+  return typeof point.startDateKey === "string" && point.startDateKey < point.dateKey && Number.isFinite(point.value);
 }
 
-function alignReturnSeries(
-  assetReturns: DatedReturn[],
-  marketReturns: DatedReturn[],
-): { asset: number[]; market: number[] } {
-  const marketByDate = new Map(marketReturns.map((point) => [point.dateKey, point.value]));
-  const asset: number[] = [];
-  const market: number[] = [];
+function returnIntervalKey(point: DatedReturn): string {
+  return `${point.startDateKey}/${point.dateKey}`;
+}
 
-  for (const point of assetReturns) {
-    const marketValue = marketByDate.get(point.dateKey);
-    if (marketValue == null) continue;
-    asset.push(point.value);
-    market.push(marketValue);
+export function computeWeightedPortfolioReturns(series: WeightedReturnSeries[]): DatedReturn[] {
+  const holdings = series.filter((entry) => Number.isFinite(entry.weight) && entry.weight > 0);
+  const totalWeight = holdings.reduce((sum, entry) => sum + entry.weight, 0);
+  if (!holdings.length || !Number.isFinite(totalWeight) || totalWeight <= 0) return [];
+  const samples = holdings.map((entry) => new Map(entry.returns
+    .filter(validReturnInterval)
+    .map((point) => [returnIntervalKey(point), point])));
+  const returns: DatedReturn[] = [];
+  for (const [key, first] of samples[0]!) {
+    let value = 0;
+    let complete = true;
+    for (let index = 0; index < holdings.length; index++) {
+      const point = samples[index]!.get(key);
+      if (!point) { complete = false; break; }
+      value += point.value * (holdings[index]!.weight / totalWeight);
+    }
+    if (complete && Number.isFinite(value)) returns.push({ ...first, value });
   }
+  return returns.sort((left, right) => left.dateKey.localeCompare(right.dateKey));
+}
 
-  return { asset, market };
+export function alignedAssetReturns(assetReturns: DatedReturn[], marketReturns: DatedReturn[]): DatedReturn[] {
+  const marketIntervals = new Set(marketReturns.filter(validReturnInterval).map(returnIntervalKey));
+  return assetReturns.filter((point) => validReturnInterval(point) && marketIntervals.has(returnIntervalKey(point)));
+}
+
+function alignReturnSeries(assetReturns: DatedReturn[], marketReturns: DatedReturn[]): { asset: number[]; market: number[] } {
+  const marketByInterval = new Map(marketReturns.filter(validReturnInterval).map((point) => [returnIntervalKey(point), point.value]));
+  const aligned = alignedAssetReturns(assetReturns, marketReturns);
+  return { asset: aligned.map((point) => point.value), market: aligned.map((point) => marketByInterval.get(returnIntervalKey(point))!) };
 }
 
 export function computeDatedBeta(assetReturns: DatedReturn[], marketReturns: DatedReturn[]): number | null {

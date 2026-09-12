@@ -27,10 +27,10 @@ describe("AssetDataRouter chart history", () => {
     const sourceKey = "provider:gloomberb-cloud";
     for (const symbol of ["SHIB-USD", "OFFLINE-USD"]) {
       persistence.resources.set({ namespace: "market", kind: "price-history", entityKey: symbol,
-        variantKey: "exchange=CCC;range=ALL;resolution=1mo;version=4;calendar=1", sourceKey }, wrong, { cachePolicy: policy });
+        variantKey: "exchange=CCC;range=ALL;resolution=1mo;version=5;calendar=1", sourceKey }, wrong, { cachePolicy: policy });
     }
     persistence.resources.set({ namespace: "market", kind: "price-history", entityKey: "FINITE-USD",
-      variantKey: "exchange=CCC;range=5Y;resolution=1mo;version=4;calendar=1", sourceKey }, corrected, { cachePolicy: policy });
+      variantKey: "exchange=CCC;range=5Y;resolution=1mo;version=5;calendar=1", sourceKey }, corrected, { cachePolicy: policy });
     persistence.close();
     persistence = new AppPersistence(path);
     let calls = 0;
@@ -222,7 +222,7 @@ describe("AssetDataRouter chart history", () => {
         namespace: "market",
         kind: "price-history",
         entityKey: "META",
-        variantKey: "exchange=NASDAQ;range=1M;resolution=5m;version=3",
+        variantKey: "exchange=NASDAQ;range=1M;resolution=5m;version=4",
         sourceKey: "provider:gloomberb-cloud",
       },
       [
@@ -257,8 +257,8 @@ describe("AssetDataRouter chart history", () => {
       .query("SELECT variant_key FROM resource_cache WHERE namespace = ? AND kind = ? AND entity_key = ? ORDER BY variant_key")
       .all("market", "price-history", "META") as Array<{ variant_key: string }>;
     expect(cachedRows.map((row) => row.variant_key)).toEqual([
-      "exchange=NASDAQ;range=1M;resolution=5m;version=3",
       "exchange=NASDAQ;range=1M;resolution=5m;version=4",
+      "exchange=NASDAQ;range=1M;resolution=5m;version=5",
     ]);
 
     persistence.close();
@@ -309,7 +309,7 @@ describe("AssetDataRouter chart history", () => {
       .all("market", "price-history", "FTC") as Array<{ variant_key: string }>;
     expect(cachedRows.map((row) => row.variant_key)).toEqual([
       "exchange=LSE;range=ALL;resolution=1wk",
-      "exchange=LSE;range=ALL;resolution=1wk;version=4;granularity=1;unit=GBP",
+      "exchange=LSE;range=ALL;resolution=1wk;version=5;granularity=1;unit=GBP",
     ]);
 
     persistence.close();

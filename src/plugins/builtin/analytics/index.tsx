@@ -242,8 +242,10 @@ function PortfolioAnalyticsPane({ focused, width, height }: PaneProps) {
       unsupportedReason: returnSeriesResult.unsupportedReason,
       historyIntegrity: returnSeriesResult.historyIntegrity,
       benchmarkIntegrity: spyReturnSeries.integrity,
+      returns: portfolioReturnSeries,
+      benchmarkReturns: spyReturnSeries.returns,
     }),
-    [beta, returnSeriesResult, spyReturnSeries.integrity, sharpe],
+    [beta, returnSeriesResult, spyReturnSeries, sharpe],
   );
   const metricsHeight = summaryRows.length + riskRows.length + 5;
   const historyNote = performanceHistoryNote(brokerPerformance.performance);

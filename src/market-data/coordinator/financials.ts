@@ -22,6 +22,7 @@ import {
   hasFreshEntryData,
   loadingEntry,
   readyEntry,
+  readyChartEntry,
 } from "./entries";
 
 export interface FinancialCacheStores {
@@ -69,7 +70,7 @@ export function primeFinancialsCache(
     if (stores.chartStore.get(chartKey).phase === "idle") {
       stores.chartStore.set(
         chartKey,
-        readyEntry(stores.chartStore.get(chartKey), normalized.priceHistory, source, [], { keepLastGoodOnEmpty: true }),
+        readyChartEntry(stores.chartStore.get(chartKey), normalized.priceHistory, source, []),
       );
     }
   }
