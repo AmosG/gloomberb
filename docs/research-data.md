@@ -58,6 +58,14 @@ Relative Valuation excludes explicitly stale quote prices, changes, and quote ma
 
 Bank capital metrics and REIT FFO/AFFO depend on source coverage. Operating cash flow is not a substitute for FFO/AFFO. Missing measures are identified in the financial view.
 
+## Insider filings
+
+INS retains Form 4 and Form 4/A disclosures separately, with their filing accession, source filing date, transaction dates, reporting owners and explanations. An amendment is labeled in the list; opening it retains its declared original filing date, footnotes and remarks. The existing filing action opens the SEC source. Reports preserve those fields and the transaction's footnote references.
+
+[SEC Form 4, General Instruction 9](https://www.sec.gov/files/form4.pdf) permits amendments that add lines, correct particular lines or explain other changes. Unchanged original lines need not be repeated. The original filing date and owner CIKs can narrow the potentially affected filings, but do not identify transaction lines to replace. INS therefore keeps the disclosures as filed without inventing replacement or additive transactions. Affected security/side totals are unavailable; independent filings remain usable. Missing amendment identity broadens the uncertain scope. Unknown prices remain unknown, and the 90-day summary still covers only loaded non-derivative purchases and sales.
+
+Amendment status uses the existing footer. Headless reports retain the candidate original accessions and mark affected output incomplete, including an amendment that contains explanations without transaction lines. Owner filtering preserves amendment context for the selected owner's original filings. The loaded window is limited; this is disclosure history, not a reconstructed position ledger or a guarantee that every later amendment has been loaded.
+
 ## Treasury curve
 
 GC plots constant-maturity Treasury yields against elapsed maturity, with month/year axis and cursor labels. The table retains each tenor's published observation date. The 10Y−2Y spread is measured in basis points; a negative value indicates inversion. Missing tenors remain unavailable, and a curve requires matching dates.
