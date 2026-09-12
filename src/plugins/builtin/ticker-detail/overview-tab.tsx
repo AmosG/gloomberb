@@ -4,7 +4,7 @@ import { CompanyLogo } from "../../../components/company-logo";
 import { PriceReturnStrip } from "../../../components/price-performance";
 import { t } from "../../../i18n";
 import { useFxRatesMap } from "../../../market-data/hooks";
-import { formatMarketPriceWithCurrency, formatSignedMarketPrice } from "../../../market-data/market/format";
+import { formatMarketPriceWithCurrency, formatSignedMarketPrice, quoteFormatOptions } from "../../../market-data/market/format";
 import { exchangeShortName, marketStateColor, marketStateLabel } from "../../../market-data/market/status";
 import { appendQuoteToPriceReturnHistory, buildPriceReturnFields } from "../../../market-data/performance";
 import { useViewport } from "../../../react/input";
@@ -86,8 +86,9 @@ export function OverviewTab({
   const quoteBookInline = hasBidAsk && contentWidth >= 68;
   const quoteBookWidth = quoteBookInline ? Math.min(32, Math.max(24, Math.floor(contentWidth * 0.3))) : Math.min(contentWidth, 32);
   const quoteSummaryWidth = quoteBookInline ? Math.max(20, contentWidth - quoteBookWidth - 2) : contentWidth;
-  const quotePriceText = quote ? formatMarketPriceWithCurrency(quote.price, quote.currency, { assetCategory: ticker.metadata.assetCategory }) : "";
-  const quoteChangeText = quote ? formatSignedMarketPrice(quote.change, { assetCategory: ticker.metadata.assetCategory }) : "";
+  const quoteOptions = quoteFormatOptions(quote, ticker.metadata.assetCategory, financials?.quoteMetadata?.instrumentType);
+  const quotePriceText = quote ? formatMarketPriceWithCurrency(quote.price, quote.currency, quoteOptions) : "";
+  const quoteChangeText = quote ? formatSignedMarketPrice(quote.change, quoteOptions) : "";
   const quotePercentText = quote ? `(${formatPercentRaw(quote.changePercent)})` : "";
   const quoteTextWidth = Math.max(1, quoteSummaryWidth - (nativePaneChrome ? 6 : 0));
   const stackQuoteChange = displayWidth(quoteChangeText) + 1 + displayWidth(quotePercentText) > quoteTextWidth;
@@ -178,10 +179,10 @@ export function OverviewTab({
               <Box flexDirection="row" gap={2}>
                 <Text fg={colors.textDim}>{t("Pre-Market")}:</Text>
                 <Text fg={priceColor(quote.preMarketChange ?? 0)}>
-                  {formatMarketPriceWithCurrency(quote.preMarketPrice, quote.currency, { assetCategory: ticker.metadata.assetCategory })}
+                  {formatMarketPriceWithCurrency(quote.preMarketPrice, quote.currency, quoteOptions)}
                 </Text>
                 <Text fg={priceColor(quote.preMarketChange ?? 0)}>
-                  {formatSignedMarketPrice(quote.preMarketChange, { assetCategory: ticker.metadata.assetCategory })} ({formatPercentRaw(quote.preMarketChangePercent)})
+                  {formatSignedMarketPrice(quote.preMarketChange, quoteOptions)} ({formatPercentRaw(quote.preMarketChangePercent)})
                 </Text>
               </Box>
             )}
@@ -189,10 +190,10 @@ export function OverviewTab({
               <Box flexDirection="row" gap={2}>
                 <Text fg={colors.textDim}>{t("After-Hours")}:</Text>
                 <Text fg={priceColor(quote.postMarketChange ?? 0)}>
-                  {formatMarketPriceWithCurrency(quote.postMarketPrice, quote.currency, { assetCategory: ticker.metadata.assetCategory })}
+                  {formatMarketPriceWithCurrency(quote.postMarketPrice, quote.currency, quoteOptions)}
                 </Text>
                 <Text fg={priceColor(quote.postMarketChange ?? 0)}>
-                  {formatSignedMarketPrice(quote.postMarketChange, { assetCategory: ticker.metadata.assetCategory })} ({formatPercentRaw(quote.postMarketChangePercent)})
+                  {formatSignedMarketPrice(quote.postMarketChange, quoteOptions)} ({formatPercentRaw(quote.postMarketChangePercent)})
                 </Text>
               </Box>
             )}
@@ -203,7 +204,7 @@ export function OverviewTab({
           </Box>
 
           {quote && hasBidAsk && (
-            <QuoteBook quote={quote} assetCategory={ticker.metadata.assetCategory} width={quoteBookWidth} />
+            <QuoteBook quote={quote} assetCategory={quoteOptions.assetCategory} width={quoteBookWidth} />
           )}
         </Box>
 
@@ -221,7 +222,8 @@ export function OverviewTab({
                 label="Day Range"
                 width={rangeWidth}
                 currency={quoteCurrency}
-                assetCategory={ticker.metadata.assetCategory}
+                priceBasis={quote.priceBasis}
+                assetCategory={quoteOptions.assetCategory}
                 markerColor={rangeMarkerColor}
               />
             )}
@@ -233,7 +235,8 @@ export function OverviewTab({
                 label="52W Range"
                 width={rangeWidth}
                 currency={quoteCurrency}
-                assetCategory={ticker.metadata.assetCategory}
+                priceBasis={quote.priceBasis}
+                assetCategory={quoteOptions.assetCategory}
                 markerColor={rangeMarkerColor}
               />
             )}

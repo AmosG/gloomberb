@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
+  quoteFormatOptions,
+  formatMarketChangeWithCurrency,
   formatMarketCost,
   formatMarketCostWithCurrency,
   formatCompactMarketPriceWithCurrency,
@@ -125,4 +127,25 @@ describe("formatMarketPriceWithCurrency", () => {
     expect(formatMarketCostWithCurrency(119.3687, "HKD", { assetCategory: "STK" })).toBe("HK$119.37");
     expect(formatMarketCostWithCurrency(50.9507, "USD", { assetCategory: "OPT", multiplier: 100 })).toBe("$50.9507");
   });
+});
+
+test("nominal quantity and percent-of-par prices retain their units in narrow existing cells", () => {
+  const options = { assetCategory: "BOND", priceBasis: "percent-of-par" as const };
+  expect(formatMarketQuantity(1000, { ...options, quantityCurrency: "EUR", maxWidth: 11 })).toBe("1k EUR face");
+  expect(formatMarketQuantity(1000, { ...options, maxWidth: 8 })).toBe("1k face");
+  expect(formatMarketPriceWithCurrency(86.359375, "EUR", { ...options, maxWidth: 9 })).toBe("86.4% par");
+  expect(formatMarketCostWithCurrency(87.742, "USD", options)).toBe("87.74% par");
+  expect(formatMarketPriceWithCurrency(86.359375, "EUR", { assetCategory: "BOND" })).toBe("—");
+});
+
+// Metadata is descriptive, while the quote declares the price convention.
+test("quote formatting uses metadata only to withhold unknown bond units", () => {
+  const unknown = quoteFormatOptions({}, "BOND", "STK");
+  expect(formatMarketPriceWithCurrency(87, "USD", unknown)).toBe("—");
+  expect(formatMarketChangeWithCurrency(1, "USD", unknown)).toBe("—");
+  const declared = quoteFormatOptions({ instrumentType: "STK" }, "BOND", "BOND");
+  expect(formatMarketPriceWithCurrency(87, "USD", declared)).toBe("$87");
+  expect(formatMarketChangeWithCurrency(-1, "USD", declared)).toBe("-$1.00");
+  const par = quoteFormatOptions({ priceBasis: "percent-of-par" }, "STK");
+  expect(formatMarketChangeWithCurrency(-1, "USD", par)).toBe("-1% par");
 });

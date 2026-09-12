@@ -15,6 +15,7 @@ function hydratePosition(raw: Record<string, unknown>): TickerPosition {
     portfolio: (raw.portfolio as string) ?? "",
     shares: (raw.shares as number) ?? 0,
     avgCost: typeof avgCost === "number" && Number.isFinite(avgCost) ? avgCost : undefined,
+    priceBasis: raw.priceBasis === "per-unit" || raw.priceBasis === "percent-of-par" ? raw.priceBasis : undefined,
     currency: (raw.currency as string) ?? undefined,
     dateAcquired: (raw.dateAcquired ?? raw.date_acquired) as string | undefined,
     broker: (raw.broker as string) ?? "manual",

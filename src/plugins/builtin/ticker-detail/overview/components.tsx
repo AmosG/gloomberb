@@ -1,5 +1,6 @@
+import type { PriceBasis } from "../../../../types/instrument";
 import { t } from "../../../../i18n";
-import { formatMarketPriceWithCurrency } from "../../../../market-data/market/format";
+import { formatMarketPriceWithCurrency, quoteFormatOptions } from "../../../../market-data/market/format";
 import { colors, priceColor } from "../../../../theme/colors";
 import type { Quote } from "../../../../types/financials";
 import { Box, Text, useUiHost } from "../../../../ui";
@@ -14,7 +15,7 @@ const RANGE_ENDPOINT_WIDTH = 11;
 const POSITION_COLUMN_GAP = 1;
 
 interface PositionColumn {
-  key: keyof Omit<PositionTableRow, "pnlValue" | "pnlBasis">;
+  key: keyof Omit<PositionTableRow, "pnlValue" | "pnlBasis" | "quantityUnit">;
   label: string;
   width: number;
   align?: "left" | "right";
@@ -82,6 +83,7 @@ export function CompactRangeBar({
   width,
   currency,
   assetCategory,
+  priceBasis,
   markerColor,
 }: {
   current: number;
@@ -91,6 +93,7 @@ export function CompactRangeBar({
   width: number;
   currency: string;
   assetCategory?: string;
+  priceBasis?: PriceBasis;
   markerColor: string;
 }) {
   const range = high - low;
@@ -101,8 +104,8 @@ export function CompactRangeBar({
     RANGE_ENDPOINT_WIDTH,
     Math.max(7, Math.floor((width - 8) / 3)),
   );
-  const lowText = formatMarketPriceWithCurrency(low, currency, { assetCategory, maxWidth: endpointWidth });
-  const highText = formatMarketPriceWithCurrency(high, currency, { assetCategory, maxWidth: endpointWidth });
+  const lowText = formatMarketPriceWithCurrency(low, currency, { assetCategory, priceBasis, maxWidth: endpointWidth });
+  const highText = formatMarketPriceWithCurrency(high, currency, { assetCategory, priceBasis, maxWidth: endpointWidth });
   const barWidth = Math.max(5, width - endpointWidth * 2 - 2);
   const markerIndex = Math.max(0, Math.min(barWidth - 1, Math.round(position * (barWidth - 1))));
   const labelWidth = Math.max(0, width - displayWidth(pctLabel));
@@ -154,10 +157,10 @@ function BookRow({
 
 export function QuoteBook({ quote, assetCategory, width }: { quote: Quote; assetCategory?: string; width: number }) {
   const bidPrice = quote.bid != null
-    ? formatMarketPriceWithCurrency(quote.bid, quote.currency, { assetCategory })
+    ? formatMarketPriceWithCurrency(quote.bid, quote.currency, quoteFormatOptions(quote, assetCategory))
     : "—";
   const askPrice = quote.ask != null
-    ? formatMarketPriceWithCurrency(quote.ask, quote.currency, { assetCategory })
+    ? formatMarketPriceWithCurrency(quote.ask, quote.currency, quoteFormatOptions(quote, assetCategory))
     : "—";
   const bidText = quote.bidSize != null && quote.bidSize > 0 ? `${formatNumber(quote.bidSize, 0)} x ${bidPrice}` : bidPrice;
   const askText = quote.askSize != null && quote.askSize > 0 ? `${formatNumber(quote.askSize, 0)} x ${askPrice}` : askPrice;
@@ -166,7 +169,7 @@ export function QuoteBook({ quote, assetCategory, width }: { quote: Quote; asset
     const spread = quote.ask - quote.bid;
     const mid = (quote.ask + quote.bid) / 2;
     const spreadPercent = mid > 0 ? ` (${((spread / mid) * 100).toFixed(2)}%)` : "";
-    spreadText = `${formatMarketPriceWithCurrency(spread, quote.currency, { assetCategory })}${spreadPercent}`;
+    spreadText = `${formatMarketPriceWithCurrency(spread, quote.currency, quoteFormatOptions(quote, assetCategory))}${spreadPercent}`;
   }
 
   return (
@@ -236,8 +239,10 @@ const POSITION_COLUMNS: readonly PositionColumn[] = [
   { key: "ret", label: "Ret", width: 7, align: "right", color: (row) => priceColor(row.pnlValue ?? 0), minPaneWidth: 84 },
 ];
 
-function createPositionColumns(width: number): PositionColumn[] {
-  const columns = POSITION_COLUMNS.filter((column) => width >= (column.minPaneWidth ?? 0)).map((column) => ({ ...column }));
+function createPositionColumns(width: number, hasFaceQuantity: boolean): PositionColumn[] {
+  const columns = POSITION_COLUMNS.filter((column) => width >= (column.minPaneWidth ?? 0)).map((column) => ({
+    ...column, width: column.key === "qty" && hasFaceQuantity ? 11 : column.width,
+  }));
   const fixedWidth = columns.reduce((sum, column) => sum + column.width, 0) + POSITION_COLUMN_GAP * (columns.length - 1);
   const accountColumn = columns[0]!;
   accountColumn.width = Math.max(8, width - fixedWidth);
@@ -245,7 +250,7 @@ function createPositionColumns(width: number): PositionColumn[] {
 }
 
 export function PositionTable({ rows, width }: { rows: PositionTableRow[]; width: number }) {
-  const columns = createPositionColumns(width);
+  const columns = createPositionColumns(width, rows.some(row => row.quantityUnit === "face"));
   const pnlLabel = portfolioPnlLabel(rows.map((row) => row.pnlBasis));
 
   return (

@@ -1,4 +1,9 @@
 import type { TickerRecord } from "../../../types/ticker";
+import type { Quote } from "../../../types/financials";
+import type { PriceBasis } from "../../../types/instrument";
+import { resolvePriceBasis } from "../../../market-data/market/price-basis";
+import { getActiveQuoteDisplay, type ActiveQuoteDisplay } from "../../../market-data/market/status";
+import { resolveCurrencyUnit } from "../../../utils/currency-units";
 
 export interface PortfolioPositionMetrics {
   positionCurrency: string;
@@ -8,6 +13,8 @@ export interface PortfolioPositionMetrics {
   totalCost: number;
   /** Every nonzero lot has a finite source cost, independently of FX conversion. */
   hasCostBasis: boolean;
+  /** Common source convention for displaying raw cost/mark; null is unknown or mixed. */
+  priceBasis: PriceBasis | null;
   /** Signed cost basis, for net market value minus cost P&L. */
   signedCost: number;
   totalCostUnits: number;
@@ -20,7 +27,7 @@ export interface PortfolioPositionMetrics {
   brokerPnl: number;
   hasBrokerPnl: boolean;
   brokerMarkPrice: number | undefined;
-  pnlLots: { signedCost: number; priceUnits: number; brokerPnl: number | null }[];
+  pnlLots: { signedCost: number; priceUnits: number; direction: 1 | -1; brokerMarketValue: number | null; brokerPnl: number | null }[];
 }
 
 function normalizePositionMultiplier(multiplier: number | undefined): number {
@@ -54,45 +61,68 @@ export function getPortfolioPositionMetrics(
   activeTab: string | undefined,
   fallbackCurrency: string,
   valuation?: { currency: string; convert: (value: number, currency: string) => number },
+  /** Independent candidate quote: its convention must not come from stored cost/mark. */
+  quote?: Quote | null,
 ): PortfolioPositionMetrics {
   const positions = ticker.metadata.positions.filter((position) =>
     (!activeTab || position.portfolio === activeTab) && position.shares !== 0,
   );
-  const currencies = new Set(positions.map((position) => position.currency || fallbackCurrency));
-  const positionCurrency = valuation?.currency ?? (currencies.size > 1 ? "Mixed" : [...currencies][0] || fallbackCurrency);
-  const convert = (value: number, position: typeof positions[number]) => valuation
-    ? valuation.convert(value, position.currency || fallbackCurrency)
-    : currencies.size > 1 ? Number.NaN : value;
+  const currencyFor = (position: typeof positions[number]) =>
+    position.priceBasis === "percent-of-par" || ticker.metadata.assetCategory?.trim().toUpperCase() === "BOND"
+      ? position.currency?.trim() || ticker.metadata.currency?.trim() || ""
+      : position.currency || fallbackCurrency;
+  const currencies = new Set(positions.map(currencyFor));
+  const bases = new Set(positions.map(position => resolvePriceBasis(position.priceBasis, ticker.metadata.assetCategory)));
+  const priceBasis = bases.size === 0 ? resolvePriceBasis(undefined, ticker.metadata.assetCategory) : bases.size === 1 ? [...bases][0]! : null;
+  const positionCurrency = valuation?.currency ?? (currencies.size > 1 ? "Mixed" : [...currencies][0] ?? fallbackCurrency);
+  const convert = (value: number, position: typeof positions[number]) => {
+    const currency = currencyFor(position);
+    if (!currency) return Number.NaN;
+    return valuation ? valuation.convert(value, currency) : currencies.size > 1 ? Number.NaN : value;
+  };
   const metrics: PortfolioPositionMetrics = {
     positionCurrency, positionCount: positions.length, hasShorts: false,
-    totalShares: 0, totalCost: 0, hasCostBasis: positions.length > 0, signedCost: 0, totalCostUnits: 0,
+    totalShares: 0, totalCost: 0, hasCostBasis: positions.length > 0, priceBasis, signedCost: 0, totalCostUnits: 0,
     totalPriceUnits: 0, grossPriceUnits: 0, multiplierHint: 1,
     brokerMktValue: 0, brokerNetMktValue: 0, hasBrokerMktValue: positions.length > 0,
     brokerPnl: 0, hasBrokerPnl: positions.length > 0,
-    brokerMarkPrice: positions.length === 1 ? positions[0]?.markPrice : undefined,
+    brokerMarkPrice: positions.length === 1 && priceBasis ? positions[0]?.markPrice : undefined,
     pnlLots: [],
   };
   for (const position of positions) {
     const direction = signedPositionDirection(position);
     const magnitude = Math.abs(position.shares);
-    const priceMultiplier = normalizePositionMultiplier(position.multiplier);
-    const costMultiplier = resolvePositionCostMultiplier(position);
-    const hasCost = typeof position.avgCost === "number" && Number.isFinite(position.avgCost);
+    const basis = resolvePriceBasis(position.priceBasis, ticker.metadata.assetCategory);
+    const contractMultiplier = normalizePositionMultiplier(position.multiplier);
+    // Nominal face already includes the amount held. Keep the supplied contract
+    // multiplier as metadata; it must not scale percent-of-par money again.
+    const priceMultiplier = basis === "percent-of-par" ? .01 : basis === "per-unit" ? contractMultiplier : Number.NaN;
+    const costMultiplier = basis === "percent-of-par" ? .01 : basis === "per-unit" ? resolvePositionCostMultiplier(position) : Number.NaN;
+    const quoteBasis = quote ? resolvePriceBasis(quote.priceBasis,
+      basis === "percent-of-par" || ticker.metadata.assetCategory?.toUpperCase() === "BOND" ? "BOND" : quote.instrumentType) : basis;
+    const nominalCurrency = resolveCurrencyUnit(currencyFor(position));
+    const quoteCurrency = resolveCurrencyUnit(quote?.currency || "");
+    const compatiblePar = !quote || quoteBasis !== "percent-of-par"
+      || basis === "percent-of-par" && !!nominalCurrency.currency
+        && nominalCurrency.currency === quoteCurrency.currency && nominalCurrency.divisor === quoteCurrency.divisor;
+    const quoteMultiplier = basis === null || quoteBasis === null || !compatiblePar ? Number.NaN
+      : quoteBasis === "percent-of-par" ? .01 : basis === "percent-of-par" ? 1 : contractMultiplier;
+    const hasCost = basis !== null && !!currencyFor(position) && typeof position.avgCost === "number" && Number.isFinite(position.avgCost);
     const cost = hasCost ? magnitude * position.avgCost! * costMultiplier : Number.NaN;
     metrics.hasCostBasis &&= hasCost;
     metrics.hasShorts ||= direction < 0;
-    metrics.multiplierHint = Math.max(metrics.multiplierHint, priceMultiplier, costMultiplier);
+    metrics.multiplierHint = Math.max(metrics.multiplierHint, contractMultiplier);
     metrics.totalShares += magnitude * direction;
     metrics.totalCost += convert(cost, position);
     metrics.signedCost += direction * convert(cost, position);
     metrics.totalCostUnits += magnitude * costMultiplier;
-    metrics.totalPriceUnits += magnitude * priceMultiplier * direction;
-    metrics.grossPriceUnits += magnitude * priceMultiplier;
+    metrics.totalPriceUnits += magnitude * quoteMultiplier * direction;
+    metrics.grossPriceUnits += magnitude * quoteMultiplier;
 
     // Normalize each lot before summing: broker values may be signed, and a
     // complete snapshot for one account cannot stand in for another missing lot.
     const marketValue = Number.isFinite(position.marketValue) ? Math.abs(position.marketValue!)
-      : Number.isFinite(position.markPrice) ? magnitude * priceMultiplier * position.markPrice!
+      : Number.isFinite(position.markPrice) && Number.isFinite(priceMultiplier) ? magnitude * priceMultiplier * position.markPrice!
       : Number.isFinite(position.unrealizedPnl) && Number.isFinite(cost) ? cost + direction * position.unrealizedPnl!
       : null;
     const pnl = Number.isFinite(position.unrealizedPnl) ? position.unrealizedPnl!
@@ -106,11 +136,36 @@ export function getPortfolioPositionMetrics(
     else metrics.brokerPnl += convert(pnl, position);
     metrics.pnlLots.push({
       signedCost: direction * convert(cost, position),
-      priceUnits: magnitude * priceMultiplier * direction,
+      priceUnits: magnitude * quoteMultiplier * direction,
+      direction,
+      brokerMarketValue: marketValue != null && Number.isFinite(marketValue) ? convert(marketValue, position) : null,
       brokerPnl: pnl != null && Number.isFinite(pnl) ? convert(pnl, position) : null,
     });
   }
   return metrics;
+}
+
+/** Only a compatible, finite quote may replace independently usable broker totals. */
+export function getPortfolioQuoteDisplay(metrics: PortfolioPositionMetrics, quote: Quote | null | undefined): ActiveQuoteDisplay | null {
+  const active = getActiveQuoteDisplay(quote);
+  return active && Number.isFinite(active.price)
+    && (metrics.positionCount === 0 || metrics.pnlLots.some(lot => Number.isFinite(lot.priceUnits))) ? active : null;
+}
+
+/** Select compatible current prices or independent snapshot totals per lot. */
+export function resolvePortfolioMarketValue(metrics: PortfolioPositionMetrics, currentUnitPrice?: number | null): { gross: number; net: number } | null {
+  if (metrics.positionCount === 0) return null;
+  let gross = 0;
+  let net = 0;
+  for (const lot of metrics.pnlLots) {
+    const current = currentUnitPrice != null && Number.isFinite(currentUnitPrice)
+      ? Math.abs(lot.priceUnits) * currentUnitPrice : Number.NaN;
+    const value = Number.isFinite(current) ? current : lot.brokerMarketValue;
+    if (value === null || !Number.isFinite(value)) return null;
+    gross += value;
+    net += lot.direction * value;
+  }
+  return Number.isFinite(gross) && Number.isFinite(net) ? { gross, net } : null;
 }
 
 export function resolveBrokerFallbackMarketValue(metrics: PortfolioPositionMetrics): number | null {

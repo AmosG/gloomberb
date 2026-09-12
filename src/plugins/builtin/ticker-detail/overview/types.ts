@@ -7,6 +7,7 @@ export interface StatField {
 export interface PositionTableRow {
   account: string;
   qty: string;
+  quantityUnit?: "face";
   avg: string;
   mark: string;
   cost: string;

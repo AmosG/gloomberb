@@ -4,7 +4,8 @@ import { convertCurrency } from "../../../../utils/format";
 import { getActiveQuoteDisplay } from "../../../../market-data/market/status";
 import {
   getPortfolioPositionMetrics,
-  resolveBrokerFallbackMarketValue,
+  getPortfolioQuoteDisplay,
+  resolvePortfolioMarketValue,
   resolvePortfolioPositionPnl,
   portfolioPnlPercent,
   type PortfolioPositionPnl,
@@ -63,7 +64,7 @@ export function calculatePortfolioSummaryTotals(
     const financials = financialsMap.get(ticker.metadata.ticker);
     const quote = financials?.quote;
     const displayedQuote = getActiveQuoteDisplay(quote);
-    const activeQuote = displayedQuote && Number.isFinite(displayedQuote.price) ? displayedQuote : null;
+    let activeQuote = displayedQuote && Number.isFinite(displayedQuote.price) ? displayedQuote : null;
     const quoteCurrency = quote?.currency || ticker.metadata.currency || "USD";
 
     if (!isPortfolio) {
@@ -76,14 +77,15 @@ export function calculatePortfolioSummaryTotals(
 
     const positionMetrics = getPortfolioPositionMetrics(ticker, collectionId ?? undefined, quoteCurrency, {
       currency: baseCurrency, convert: toBase,
-    });
+    }, quote);
+    activeQuote = getPortfolioQuoteDisplay(positionMetrics, quote);
     const { totalPriceUnits, grossPriceUnits, totalCost } = positionMetrics;
     if (positionMetrics.positionCount === 0) continue;
     hasPositions = true;
     hasShorts ||= positionMetrics.hasShorts;
     totalCostBasis += totalCost;
     if (!positionMetrics.hasCostBasis) unavailableCostSymbols.add(ticker.metadata.ticker);
-    const brokerFallbackMktValue = resolveBrokerFallbackMarketValue(positionMetrics);
+
     const toBaseQuote = (value: number) => toBase(value, quoteCurrency);
     const positionPnl = resolvePortfolioPositionPnl(positionMetrics,
       activeQuote ? toBaseQuote(activeQuote.price) : null);
@@ -91,18 +93,19 @@ export function calculatePortfolioSummaryTotals(
     pnlBases.add(positionPnl.basis);
     if (positionPnl.basis === "broker-snapshot" || positionPnl.basis === "mixed") brokerPnlSymbols.add(ticker.metadata.ticker);
 
-    if (quote && activeQuote) {
-      const previousClose = activeQuote.change != null ? activeQuote.price - activeQuote.change : Number.NaN;
-      totalMktValue += toBaseQuote(grossPriceUnits * activeQuote.price);
-      netMktValue += toBaseQuote(totalPriceUnits * activeQuote.price);
-      totalPrevValue += toBaseQuote(grossPriceUnits * previousClose);
-      signedDailyPnl += toBaseQuote(totalPriceUnits * (activeQuote.price - previousClose));
-    } else if (brokerFallbackMktValue != null) {
-      totalMktValue += brokerFallbackMktValue;
-      netMktValue += positionMetrics.brokerNetMktValue;
-      // A broker mark is not evidence of an unchanged day.
-      signedDailyPnl = Number.NaN;
-      totalPrevValue = Number.NaN;
+    const marketValue = resolvePortfolioMarketValue(positionMetrics, activeQuote ? toBaseQuote(activeQuote.price) : null);
+    if (marketValue) {
+      totalMktValue += marketValue.gross;
+      netMktValue += marketValue.net;
+      if (activeQuote && Number.isFinite(grossPriceUnits)) {
+        const previousClose = activeQuote.change != null ? activeQuote.price - activeQuote.change : Number.NaN;
+        totalPrevValue += toBaseQuote(grossPriceUnits * previousClose);
+        signedDailyPnl += toBaseQuote(totalPriceUnits * (activeQuote.price - previousClose));
+      } else {
+        // A broker mark is not evidence of an unchanged day.
+        signedDailyPnl = Number.NaN;
+        totalPrevValue = Number.NaN;
+      }
     } else {
       unavailableSymbols.add(ticker.metadata.ticker);
       totalMktValue = netMktValue = totalPrevValue = signedDailyPnl = Number.NaN;

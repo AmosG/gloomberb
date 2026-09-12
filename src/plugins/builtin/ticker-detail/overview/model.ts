@@ -17,9 +17,8 @@ import {
   formatMarketQuantity,
 } from "../../../../market-data/market/format";
 import type { PositionTableRow, StatField } from "./types";
-import { getPortfolioPositionMetrics, resolvePortfolioPositionPnl, portfolioPnlPercent, signedPositionDirection } from "../../portfolio-list/position-metrics";
+import { getPortfolioPositionMetrics, getPortfolioQuoteDisplay, resolvePortfolioMarketValue, resolvePortfolioPositionPnl, portfolioPnlPercent, signedPositionDirection } from "../../portfolio-list/position-metrics";
 import { resolveCurrencyUnit } from "../../../../utils/currency-units";
-import { getActiveQuoteDisplay } from "../../../../market-data/market/status";
 
 type CurrencyConverter = (value: number, fromCurrency: string) => number;
 
@@ -132,42 +131,48 @@ export function buildPositionRows({
   baseCurrency: string;
   toBase: CurrencyConverter;
 }): PositionTableRow[] {
-  const activeQuote = getActiveQuoteDisplay(quote);
-  const currentPrice = activeQuote && Number.isFinite(activeQuote.price) ? activeQuote.price : null;
   return ticker.metadata.positions.filter((position) => position.shares !== 0).map((position) => {
-    const positionCurrency = position.currency || quoteCurrency;
+    const positionCurrency = getPortfolioPositionMetrics(
+      { ...ticker, metadata: { ...ticker.metadata, positions: [position] } }, undefined, quoteCurrency, undefined, quote,
+    ).positionCurrency;
     const metrics = getPortfolioPositionMetrics(
       { ...ticker, metadata: { ...ticker.metadata, positions: [position] } },
       undefined,
       quoteCurrency,
       { currency: baseCurrency, convert: toBase },
+      quote,
     );
+    const activeQuote = getPortfolioQuoteDisplay(metrics, quote);
+    const currentPrice = activeQuote?.price ?? null;
     const finiteValue = (value: number | null): number | null => value != null && Number.isFinite(value) ? value : null;
     const costBasisBase = finiteValue(metrics.totalCost);
-    const hasBrokerMark = Number.isFinite(position.markPrice);
+    const hasBrokerMark = metrics.brokerMarkPrice != null && Number.isFinite(metrics.brokerMarkPrice);
     const fallbackMarkPrice = currentPrice ?? (hasBrokerMark ? position.markPrice : undefined);
     const fallbackMarkCurrency = currentPrice != null ? quoteCurrency : positionCurrency;
-    const marketValueBase = finiteValue(currentPrice != null
-      ? toBase(metrics.grossPriceUnits * currentPrice, quoteCurrency)
-      : metrics.hasBrokerMktValue ? metrics.brokerMktValue : null);
+    const marketValueBase = resolvePortfolioMarketValue(metrics, currentPrice != null ? toBase(currentPrice, quoteCurrency) : null)?.gross ?? null;
     const selectedPnl = resolvePortfolioPositionPnl(metrics,
       currentPrice != null ? toBase(currentPrice, quoteCurrency) : null);
     const pnlValue = selectedPnl.value;
     const percent = portfolioPnlPercent(pnlValue, costBasisBase != null ? Math.abs(costBasisBase) : Number.NaN);
     const returnPercent = percent === null ? "—" : formatPercentRaw(percent);
-    const unit = metrics.multiplierHint > 1 ? " ct" : " sh";
+    const unit = metrics.priceBasis === "percent-of-par" ? "" : ticker.metadata.assetCategory === "BOND" ? " units" : metrics.multiplierHint > 1 ? " ct" : " sh";
 
     return {
       account: compactPositionAccount(position),
-      qty: `${formatMarketQuantity(metrics.totalShares, { assetCategory: ticker.metadata.assetCategory, multiplier: position.multiplier })}${unit}`,
+      qty: `${formatMarketQuantity(metrics.totalShares, { assetCategory: ticker.metadata.assetCategory, multiplier: position.multiplier, priceBasis: metrics.priceBasis, quantityCurrency: positionCurrency, maxWidth: metrics.priceBasis === "percent-of-par" ? 11 : undefined })}${unit}`,
+      quantityUnit: metrics.priceBasis === "percent-of-par" ? "face" : undefined,
       avg: formatMarketCostWithCurrency(position.avgCost, positionCurrency, {
         assetCategory: ticker.metadata.assetCategory,
         multiplier: position.multiplier,
+        priceBasis: metrics.priceBasis,
+        maxWidth: metrics.priceBasis === "percent-of-par" ? 9 : undefined,
       }),
       mark: fallbackMarkPrice != null && Number.isFinite(fallbackMarkPrice)
         ? formatMarketPriceWithCurrency(fallbackMarkPrice, fallbackMarkCurrency, {
             assetCategory: ticker.metadata.assetCategory,
             multiplier: position.multiplier,
+            priceBasis: currentPrice != null ? quote?.priceBasis : metrics.priceBasis,
+            maxWidth: (currentPrice != null ? quote?.priceBasis : metrics.priceBasis) === "percent-of-par" ? 9 : undefined,
           })
         : "—",
       cost: costBasisBase != null ? formatCurrency(costBasisBase, baseCurrency) : "—",

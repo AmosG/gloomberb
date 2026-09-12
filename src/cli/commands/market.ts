@@ -10,7 +10,7 @@ import type {
   PricePoint,
   TickerFinancials,
 } from "../../types/financials";
-import { formatMarketPriceWithCurrency } from "../../market-data/market/format";
+import { formatMarketPriceWithCurrency, quoteFormatOptions } from "../../market-data/market/format";
 import { formatCompact } from "../../utils/format";
 import { withCliServices, withMarketData } from "../context";
 import { createBaseConverter } from "../base-converter";
@@ -65,8 +65,10 @@ function quoteRows(results: QuoteCliRecord[]) {
     return {
       symbol: result.target.symbol,
       name: quote?.name ?? "",
-      price: quote ? formatMarketPriceWithCurrency(quote.price, quote.currency) : "",
+      price: quote ? formatMarketPriceWithCurrency(quote.price, quote.currency, quoteFormatOptions(quote)) : "",
       rawPrice: quote?.price ?? null,
+      priceBasis: quote?.priceBasis ?? null,
+      instrumentType: quote?.instrumentType ?? null,
       change: quote?.change ?? null,
       changePercent: quote?.changePercent == null ? null : Number(quote.changePercent.toFixed(2)),
       currency: quote?.currency ?? "",

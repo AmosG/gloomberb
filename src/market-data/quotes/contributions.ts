@@ -1,3 +1,4 @@
+import { resolvePriceBasis } from "../market/price-basis";
 import type {
   Quote,
   QuoteContribution,
@@ -126,11 +127,23 @@ export function mergeQuoteContribution(
   }
   if (!current) return next;
 
+  const priorBasis = resolvePriceBasis(current.priceBasis, current.instrumentType);
+  const samePriceBasis = priorBasis !== null && priorBasis === resolvePriceBasis(next.priceBasis, next.instrumentType || current.instrumentType);
   const merged: QuoteContribution = {
     ...current,
     ...reconcileQuoteDayRange(next, current),
     // Close provenance belongs to this observation; never borrow an anchor
     // from another session, listing or currency when a new quote omits it.
+    ...(!samePriceBasis ? {
+      previousClose: next.previousClose, bid: next.bid, ask: next.ask,
+      open: next.open, mark: next.mark, high52w: next.high52w, low52w: next.low52w,
+      lastTradePrice: next.lastTradePrice, lastTradeTime: next.lastTradeTime,
+      preMarketPrice: next.preMarketPrice, preMarketChange: next.preMarketChange,
+      preMarketChangePercent: next.preMarketChangePercent,
+      postMarketPrice: next.postMarketPrice, postMarketChange: next.postMarketChange,
+      postMarketChangePercent: next.postMarketChangePercent,
+    } : {}),
+    priceBasis: next.priceBasis,
     regularClose: next.regularClose,
     regularCloseSessionDate: next.regularClose != null ? next.regularCloseSessionDate : undefined,
   };
@@ -142,7 +155,8 @@ export function mergeQuoteContribution(
     merged.sessionConfidence = current.sessionConfidence;
   }
 
-  if ((current.marketState === "PRE" || current.marketState === "POST") && next.marketState == null) {
+  if ((current.marketState === "PRE" || current.marketState === "POST") && next.marketState == null
+    && samePriceBasis) {
     const canProjectNextSessionPrice = shouldProjectSessionPrice(next);
     merged.marketState = current.marketState;
     if (current.marketState === "PRE") {

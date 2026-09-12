@@ -98,10 +98,13 @@ export function PortfolioTickerTable({
   const pnlColumn = columns.find((column) => column.id === "pnl" || column.id === "pnl_pct");
   const pnlLabel = pnlColumn ? portfolioPnlLabel(sortedTickers.map((ticker) =>
     resolveCell({ ...pnlColumn, id: "pnl" }, ticker, financialsMap.get(ticker.metadata.ticker)).pnlBasis ?? "unavailable")) : "P&L";
-  const displayColumns = pnlLabel !== "P&L" ? columns.map((column) => column.id === "pnl" || column.id === "pnl_pct" ? {
+  const hasNonShareQuantity = sortedTickers.some(ticker => ticker.metadata.positions.some(position =>
+    (!columnContext.activeTab || position.portfolio === columnContext.activeTab) && position.shares !== 0 && (position.priceBasis === "percent-of-par" || ticker.metadata.assetCategory?.toUpperCase() === "BOND")));
+  const displayColumns = columns.map((column) => column.id === "shares" && hasNonShareQuantity ? { ...column, label: "QTY" }
+    : pnlLabel !== "P&L" && (column.id === "pnl" || column.id === "pnl_pct") ? {
     ...column,
     label: column.id === "pnl_pct" ? pnlLabel.replace("P&L", "%") : pnlLabel,
-  } : column) : columns;
+  } : column);
 
   return (
     <TickerListTableView

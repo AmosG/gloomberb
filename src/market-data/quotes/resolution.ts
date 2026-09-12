@@ -8,6 +8,7 @@ import type {
   SessionConfidence,
   TickerFinancials,
 } from "../../types/financials";
+import { resolvePriceBasis } from "../market/price-basis";
 import { hasLikelyQuoteUnitMismatch } from "../../utils/currency-units";
 import { debugLog } from "../../utils/debug-log";
 import { hasValidQuoteObservationTime, isExtendedHoursExchange, isQuoteStaleForCurrentSession } from "./freshness";
@@ -387,15 +388,22 @@ export function resolveCanonicalQuote(
   };
 
   const priceProvider = pickField(resolved, provenance, "price", acceptedPriceCandidates);
+  // The selected response owns the price convention; metadata enrichment must
+  // not declare units for another provider's price or supply incompatible anchors.
+  assignField(resolved, provenance, "priceBasis", priceProvider);
+  const selectedBasis = resolvePriceBasis(priceProvider?.priceBasis, priceProvider?.instrumentType);
+  const compatiblePrice = (candidate: QuoteContribution) => candidate === priceProvider
+    || selectedBasis !== null && resolvePriceBasis(candidate.priceBasis, candidate.instrumentType) === selectedBasis;
+  const compatiblePriceCandidates = acceptedPriceCandidates.filter(compatiblePrice);
   for (const field of PRICE_FIELD_KEYS) {
     if (field === "price") continue;
-    pickField(resolved, provenance, field, acceptedPriceCandidates);
+    pickField(resolved, provenance, field, compatiblePriceCandidates);
   }
   if (priceProvider && typeof priceProvider.lastTradePrice === "number" && Number.isFinite(priceProvider.lastTradePrice)) {
     assignField(resolved, provenance, "lastTradePrice", priceProvider);
     if (finitePositiveNumber(priceProvider.lastTradeTime)) assignField(resolved, provenance, "lastTradeTime", priceProvider);
   }
-  assignDailyChangeFields(resolved, provenance, priceProvider, acceptedPriceCandidates);
+  assignDailyChangeFields(resolved, provenance, priceProvider, compatiblePriceCandidates);
   provenance.price = toProvenance(priceProvider);
 
   const sessionProvider = sessionCandidates[0];
@@ -406,12 +414,12 @@ export function resolveCanonicalQuote(
     provenance.session = toProvenance(sessionProvider);
   }
 
-  const preSessionCandidates = sessionCandidates.filter((quote) => matchesPreMarketState(quote.marketState));
+  const preSessionCandidates = sessionCandidates.filter((quote) => compatiblePrice(quote) && matchesPreMarketState(quote.marketState));
   for (const field of PRE_SESSION_FIELD_KEYS) {
     pickField(resolved, provenance, field, preSessionCandidates);
   }
 
-  const postSessionCandidates = sessionCandidates.filter((quote) => matchesPostMarketState(quote.marketState));
+  const postSessionCandidates = sessionCandidates.filter((quote) => compatiblePrice(quote) && matchesPostMarketState(quote.marketState));
   for (const field of POST_SESSION_FIELD_KEYS) {
     pickField(resolved, provenance, field, postSessionCandidates);
   }
@@ -441,15 +449,21 @@ export function resolveCanonicalQuote(
 
   let descriptiveProvider: QuoteContribution | undefined;
   for (const field of DESCRIPTIVE_FIELD_KEYS) {
-    const provider = pickField(resolved, provenance, field, descriptiveCandidates);
+    const provider = pickField(resolved, provenance, field, field === "high52w" || field === "low52w" ? descriptiveCandidates.filter(compatiblePrice) : descriptiveCandidates);
     descriptiveProvider ??= provider;
   }
   provenance.descriptive = toProvenance(descriptiveProvider);
+  // Descriptive enrichment cannot turn an unknown-unit bond observation into
+  // an ordinary share price by replacing its source-reported security type.
+  if (priceProvider?.instrumentType?.trim().toUpperCase() === "BOND") {
+    assignField(resolved, provenance, "instrumentType", priceProvider);
+  }
 
   const canonical = finalizeSessionFields({
     symbol: String(resolved.symbol ?? priceProvider?.symbol ?? contributions[0]!.symbol ?? ""),
     providerId: priceProvider?.providerId ?? contributions[0]!.providerId,
     price: Number(resolved.price ?? priceProvider?.price ?? 0),
+    priceBasis: priceProvider?.priceBasis,
     currency: String(resolved.currency ?? priceProvider?.currency ?? contributions[0]!.currency ?? ""),
     change: Number(resolved.change ?? priceProvider?.change ?? 0),
     changePercent: Number(resolved.changePercent ?? priceProvider?.changePercent ?? 0),

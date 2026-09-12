@@ -3,7 +3,7 @@ import type { TimeRange } from "../time-series/range";
 import type { ChartResolutionSupport, ManualChartResolution } from "../time-series/resolution";
 import type { BrokerInstanceConfig } from "./config";
 import type { QuoteSubscriptionTarget } from "./data-provider";
-import type { BrokerContractRef, InstrumentSearchResult } from "./instrument";
+import type { BrokerContractRef, InstrumentSearchResult, PriceBasis } from "./instrument";
 import type {
   BrokerAccount,
   BrokerExecution,
@@ -19,6 +19,7 @@ export interface BrokerPosition {
   exchange: string;
   shares: number;
   avgCost?: number;
+  priceBasis?: PriceBasis;
   currency: string;
   dateAcquired?: string;
   /** Optional account/portfolio identifier from the broker */

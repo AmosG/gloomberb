@@ -1,10 +1,11 @@
-import type { BrokerContractRef } from "./instrument";
+import type { BrokerContractRef, PriceBasis } from "./instrument";
 
 export interface TickerPosition {
   portfolio: string;
   shares: number;
   /** Absent when the source did not provide a finite cost; explicit zero is retained. */
   avgCost?: number;
+  priceBasis?: PriceBasis;
   currency?: string;
   dateAcquired?: string;
   broker: string; // "manual" | future broker plugin IDs

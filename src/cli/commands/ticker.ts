@@ -5,21 +5,21 @@ import {
   formatNumber,
   formatPercent,
 } from "../../utils/format";
-import { formatMarketCostWithCurrency, formatMarketPriceWithCurrency, formatMarketQuantity } from "../../market-data/market/format";
+import { formatMarketCostWithCurrency, formatMarketPriceWithCurrency, formatMarketQuantity, formatMarketChangeWithCurrency, quoteFormatOptions } from "../../market-data/market/format";
 import {
   cliStyles,
   colorBySign,
   renderSection,
   renderStat,
 } from "../../utils/cli-output";
-import { exchangeShortName, marketStateLabel, getActiveQuoteDisplay } from "../../market-data/market/status";
+import { exchangeShortName, marketStateLabel } from "../../market-data/market/status";
 import type { AppConfig } from "../../types/config";
 import type { FinancialStatement, TickerFinancials } from "../../types/financials";
 import type { SecFilingItem } from "../../types/data-provider";
 import type { NewsArticle } from "../../news/types";
 import type { TickerRecord } from "../../types/ticker";
 import type { CliCommandContext } from "../../types/plugin";
-import { getPortfolioPositionMetrics, resolvePortfolioPositionPnl, resolveBrokerFallbackMarketValue } from "../../plugins/builtin/portfolio-list/position-metrics";
+import { getPortfolioPositionMetrics, getPortfolioQuoteDisplay, resolvePortfolioMarketValue, resolvePortfolioPositionPnl } from "../../plugins/builtin/portfolio-list/position-metrics";
 import { createBaseConverter } from "../base-converter";
 import { initMarketData, withMarketData } from "../context";
 import { fail } from "../errors";
@@ -183,21 +183,19 @@ async function appendTickerPositions(lines: string[], tickerFile: TickerRecord |
     lines.push("");
     lines.push(renderSection("Positions"));
     const positions = tickerFile.metadata.positions.filter((position) => position.shares !== 0);
-    const activeQuote = getActiveQuoteDisplay(quote);
-    const currentPrice = activeQuote && Number.isFinite(activeQuote.price) ? activeQuote.price : null;
-    const currentPriceBase = currentPrice != null && quoteCurrency ? await toBase(currentPrice, quoteCurrency) : null;
+
     for (const [index, position] of positions.entries()) {
       const portfolioName = config.portfolios.find((portfolio) => portfolio.id === position.portfolio)?.name ?? position.portfolio;
       const multiplier = position.multiplier ?? 1;
-      const positionCurrency = position.currency?.trim() || quoteCurrency;
-      const metrics = getPortfolioPositionMetrics({ ...tickerFile, metadata: { ...tickerFile.metadata, positions: [position] } }, undefined, quoteCurrency);
+      const metrics = getPortfolioPositionMetrics({ ...tickerFile, metadata: { ...tickerFile.metadata, positions: [position] } }, undefined, quoteCurrency, undefined, quote);
+      const positionCurrency = metrics.positionCurrency;
+      const currentPrice = getPortfolioQuoteDisplay(metrics, quote)?.price ?? null;
+      const currentPriceBase = currentPrice != null && quoteCurrency ? await toBase(currentPrice, quoteCurrency) : null;
       const costBasisBase = positionCurrency ? await toBase(metrics.signedCost, positionCurrency) : Number.NaN;
       const positionRate = positionCurrency ? await toBase(1, positionCurrency) : Number.NaN;
       const baseMetrics = getPortfolioPositionMetrics({ ...tickerFile, metadata: { ...tickerFile.metadata, positions: [position] } }, undefined, quoteCurrency,
-        { currency: config.baseCurrency, convert: value => value * positionRate });
-      const brokerValue = resolveBrokerFallbackMarketValue(baseMetrics);
-      const marketValueBase = currentPriceBase != null ? metrics.totalPriceUnits * currentPriceBase
-        : brokerValue != null ? baseMetrics.brokerNetMktValue : Number.NaN;
+        { currency: config.baseCurrency, convert: value => value * positionRate }, quote);
+      const marketValueBase = resolvePortfolioMarketValue(baseMetrics, currentPriceBase)?.net ?? Number.NaN;
       const selectedPnl = resolvePortfolioPositionPnl(baseMetrics, currentPriceBase);
       const pnl = selectedPnl.value;
 
@@ -205,14 +203,14 @@ async function appendTickerPositions(lines: string[], tickerFile: TickerRecord |
       if (!positionCurrency) lines.push(cliStyles.muted("Currency unavailable."));
       lines.push(renderStat(
         "Position",
-        `${formatMarketQuantity(metrics.totalShares, { assetCategory: tickerFile.metadata.assetCategory, multiplier: position.multiplier })} ${multiplier > 1 ? "contracts" : "shares"} @ ${positionCurrency ? formatMarketCostWithCurrency(position.avgCost, positionCurrency, { assetCategory: tickerFile.metadata.assetCategory, multiplier: position.multiplier }) : "—"}`,
+        `${formatMarketQuantity(metrics.totalShares, { assetCategory: tickerFile.metadata.assetCategory, multiplier: position.multiplier, priceBasis: metrics.priceBasis, quantityCurrency: positionCurrency })} ${metrics.priceBasis === "percent-of-par" ? "@" : `${tickerFile.metadata.assetCategory === "BOND" ? "units" : multiplier > 1 ? "contracts" : "shares"} @`} ${positionCurrency ? formatMarketCostWithCurrency(position.avgCost, positionCurrency, { assetCategory: tickerFile.metadata.assetCategory, multiplier: position.multiplier, priceBasis: metrics.priceBasis }) : "—"}`,
       ));
       lines.push(renderStat("Cost Basis", formatCurrency(costBasisBase, config.baseCurrency)));
       lines.push(renderStat("Market Value", formatCurrency(marketValueBase, config.baseCurrency)));
       lines.push(renderStat(selectedPnl.basis === "broker-snapshot" ? "Broker P&L" : "P&L",
         pnl === null ? "—" : colorBySign(formatSignedCurrency(pnl, config.baseCurrency), pnl)));
       if (position.markPrice != null) {
-        lines.push(renderStat("Broker Mark", positionCurrency ? formatMarketPriceWithCurrency(position.markPrice, positionCurrency, { assetCategory: tickerFile.metadata.assetCategory, multiplier: position.multiplier }) : "—"));
+        lines.push(renderStat("Broker Mark", positionCurrency ? formatMarketPriceWithCurrency(position.markPrice, positionCurrency, { assetCategory: tickerFile.metadata.assetCategory, multiplier: position.multiplier, priceBasis: metrics.priceBasis }) : "—"));
       }
       if (index < positions.length - 1) {
         lines.push(cliStyles.muted("-".repeat(24)));
@@ -244,6 +242,7 @@ export async function buildTickerReport({
   const fundamentals = financials.fundamentals;
   const profile = financials.profile;
   const name = quote?.name || tickerFile?.metadata.name || symbol;
+  const quoteOptions = quoteFormatOptions(quote, tickerFile?.metadata.assetCategory, financials.quoteMetadata?.instrumentType);
   const lines: string[] = [];
 
   if (!quote) {
@@ -293,16 +292,16 @@ export async function buildTickerReport({
     : "—";
 
   appendMetricSection(lines, "Quote", [
-    ["Last", colorBySign(formatMarketPriceWithCurrency(quote.price, quote.currency, { assetCategory: tickerFile?.metadata.assetCategory }), quote.change)],
-    ["Change", colorBySign(`${formatSignedCurrency(quote.change, quote.currency)} (${formatSignedPercentRaw(quote.changePercent)})`, quote.change)],
-    ["Open", quote.open != null ? formatMarketPriceWithCurrency(quote.open, quote.currency, { assetCategory: tickerFile?.metadata.assetCategory }) : "—"],
+    ["Last", colorBySign(formatMarketPriceWithCurrency(quote.price, quote.currency, quoteOptions), quote.change)],
+    ["Change", colorBySign(`${formatMarketChangeWithCurrency(quote.change, quote.currency, quoteOptions)} (${formatSignedPercentRaw(quote.changePercent)})`, quote.change)],
+    ["Open", quote.open != null ? formatMarketPriceWithCurrency(quote.open, quote.currency, quoteOptions) : "—"],
     ["Day Range", quote.low != null || quote.high != null
-      ? `${quote.low != null ? formatMarketPriceWithCurrency(quote.low, quote.currency, { assetCategory: tickerFile?.metadata.assetCategory }) : "—"} - ${quote.high != null ? formatMarketPriceWithCurrency(quote.high, quote.currency, { assetCategory: tickerFile?.metadata.assetCategory }) : "—"}`
+      ? `${quote.low != null ? formatMarketPriceWithCurrency(quote.low, quote.currency, quoteOptions) : "—"} - ${quote.high != null ? formatMarketPriceWithCurrency(quote.high, quote.currency, quoteOptions) : "—"}`
       : "—"],
     ["52W Range", quote.low52w != null || quote.high52w != null
-      ? `${quote.low52w != null ? formatMarketPriceWithCurrency(quote.low52w, quote.currency, { assetCategory: tickerFile?.metadata.assetCategory }) : "—"} - ${quote.high52w != null ? formatMarketPriceWithCurrency(quote.high52w, quote.currency, { assetCategory: tickerFile?.metadata.assetCategory }) : "—"}`
+      ? `${quote.low52w != null ? formatMarketPriceWithCurrency(quote.low52w, quote.currency, quoteOptions) : "—"} - ${quote.high52w != null ? formatMarketPriceWithCurrency(quote.high52w, quote.currency, quoteOptions) : "—"}`
       : "—"],
-    ["Bid / Ask", formatBidAsk(quote.bid, quote.ask, quote.bidSize, quote.askSize, quote.currency, tickerFile?.metadata.assetCategory)],
+    ["Bid / Ask", formatBidAsk(quote.bid, quote.ask, quote.bidSize, quote.askSize, quote.currency, quoteOptions.assetCategory, quote.priceBasis)],
     ["Volume", quote.volume != null ? formatNumber(quote.volume, 0) : "—"],
     ["Updated", formatTimestamp(quote.lastUpdated)],
   ]);
@@ -310,13 +309,13 @@ export async function buildTickerReport({
   appendMetricSection(lines, "Extended Hours", [
     ["Pre-Market", quote.preMarketPrice != null
       ? colorBySign(
-        `${formatMarketPriceWithCurrency(quote.preMarketPrice, quote.currency, { assetCategory: tickerFile?.metadata.assetCategory })} (${quote.preMarketChangePercent != null ? formatSignedPercentRaw(quote.preMarketChangePercent) : "—"})`,
+        `${formatMarketPriceWithCurrency(quote.preMarketPrice, quote.currency, quoteOptions)} (${quote.preMarketChangePercent != null ? formatSignedPercentRaw(quote.preMarketChangePercent) : "—"})`,
         quote.preMarketChange ?? 0,
       )
       : "—"],
     ["After Hours", quote.postMarketPrice != null
       ? colorBySign(
-        `${formatMarketPriceWithCurrency(quote.postMarketPrice, quote.currency, { assetCategory: tickerFile?.metadata.assetCategory })} (${quote.postMarketChangePercent != null ? formatSignedPercentRaw(quote.postMarketChangePercent) : "—"})`,
+        `${formatMarketPriceWithCurrency(quote.postMarketPrice, quote.currency, quoteOptions)} (${quote.postMarketChangePercent != null ? formatSignedPercentRaw(quote.postMarketChangePercent) : "—"})`,
         quote.postMarketChange ?? 0,
       )
       : "—"],
@@ -417,6 +416,7 @@ function buildTickerStructuredData({
       symbol: quote.symbol,
       name: quote.name,
       price: quote.price,
+      priceBasis: quote.priceBasis ?? null,
       change: quote.change,
       changePercent: quote.changePercent,
       currency: quote.currency,

@@ -68,11 +68,12 @@ export const financialStatementsHeadless: HeadlessPaneDefinition<"rows"> = {
 
 function quoteAmount(value: unknown, row: Record<string, unknown>, signed = false): string {
   if (typeof value !== "number" || !Number.isFinite(value)) return "—";
-  const options = { assetCategory: typeof row.instrumentType === "string" ? row.instrumentType : undefined, minimumFractionDigits: 2 };
+  const options = { assetCategory: typeof row.instrumentType === "string" ? row.instrumentType : undefined,
+    priceBasis: row.priceBasis === "per-unit" || row.priceBasis === "percent-of-par" ? row.priceBasis : undefined, minimumFractionDigits: 2 } as const;
   const amount = typeof row.currency === "string" && row.currency.trim()
     ? formatMarketPriceWithCurrency(value, row.currency, options)
     : formatMarketPrice(value, options);
-  return `${signed && value >= 0 ? "+" : ""}${amount}`;
+  return amount === "—" ? amount : `${signed && value >= 0 ? "+" : ""}${amount}`;
 }
 
 export const quoteComparisonHeadless: HeadlessPaneDefinition<"rows"> = {
@@ -98,6 +99,7 @@ export const quoteComparisonHeadless: HeadlessPaneDefinition<"rows"> = {
       rows: loaded.entries.map(({ symbol, data: quote }) => ({
         symbol, name: quote.name ?? "", price: quote.price, currency: quote.currency,
         ...(quote.instrumentType ? { instrumentType: quote.instrumentType } : {}),
+        ...(quote.priceBasis ? { priceBasis: quote.priceBasis } : {}),
         change: quote.change, changePercent: quote.changePercent,
         marketCap: quote.marketCap ?? null, updatedAt: quote.lastUpdated,
       })),
