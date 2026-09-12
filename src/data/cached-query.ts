@@ -88,8 +88,9 @@ export class CachedQuery<T> implements CachedQueryHandle<T> {
         return accepted;
       }, (error: unknown) => {
         const fallback = this.usable(cached) ?? this.usable(this.options.read(true));
-        if (generation === this.generation) this.publish({ result: fallback, loading: false, error });
-        if (fallback) return { ...fallback, refreshError: error };
+        const retained = fallback ? { ...fallback, refreshError: error } : null;
+        if (generation === this.generation) this.publish({ result: retained, loading: false, error });
+        if (retained) return retained;
         throw error;
       }).finally(() => {
         if (this.active === request) this.active = null;

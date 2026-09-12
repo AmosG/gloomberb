@@ -43,6 +43,18 @@ describe("term ordering", () => {
     expect(termLengthDays("Cash Management")).toBe(Number.MAX_SAFE_INTEGER);
     expect(termLengthDays("")).toBe(Number.MAX_SAFE_INTEGER);
   });
+
+  test("both directions compare every reopening component and keep unknown terms last", () => {
+    const rows = ["1-Year 11-Month", "1-Year 8-Month", "1-Year 10-Month", "Unknown"].map((securityTerm, index) =>
+      auction({ secType: "Note", securityTerm, auctionDate: `2026-09-0${9 - index}` }));
+    for (const direction of ["asc", "desc"] as const) {
+      const sorted = visibleAuctions(rows, { filter: "all", query: "", sort: { columnId: "term", direction } });
+      expect(sorted.map((row) => row.securityTerm)).toEqual(direction === "asc"
+        ? ["1-Year 8-Month", "1-Year 10-Month", "1-Year 11-Month", "Unknown"]
+        : ["1-Year 11-Month", "1-Year 10-Month", "1-Year 8-Month", "Unknown"]);
+    }
+    expect(termLengthDays("1-Year unknown suffix")).toBe(Number.MAX_SAFE_INTEGER);
+  });
 });
 
 describe("auction metrics", () => {
@@ -135,6 +147,16 @@ describe("visibleAuctions", () => {
       sort: { columnId: "rate", direction: "desc" },
     });
     expect(byRate.at(-1)?.securityTerm).toBe("20-Year");
+  });
+
+  test("ascending and descending rates preserve negative zero and unknown values", () => {
+    const input = [null, 0, -0.125, 2, null].map((highYield, index) => auction({
+      secType: "Note", securityTerm: `${index + 1}-Year`, highYield, auctionDate: `2026-09-0${index + 1}`,
+    }));
+    const sorted = (direction: "asc" | "desc") => visibleAuctions(input, { filter: "all", query: "", sort: { columnId: "rate", direction } });
+    expect(sorted("asc").map((row) => row.highYield)).toEqual([-0.125, 0, 2, null, null]);
+    expect(sorted("desc").map((row) => row.highYield)).toEqual([2, 0, -0.125, null, null]);
+    expect(sorted("asc").slice(-2).map((row) => row.auctionDate)).toEqual(["2026-09-05", "2026-09-01"]);
   });
 });
 

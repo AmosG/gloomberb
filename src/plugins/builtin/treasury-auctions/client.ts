@@ -128,6 +128,21 @@ export async function fetchAuctionPages(
   for (let page = 1; page <= Math.min(pages, MAX_PAGES); page += 1) {
     const body = await loadPage(page);
     if (page === 1) pages = totalPages(body);
+    if (pages > MAX_PAGES) {
+      throw new Error(`Treasury auction history exceeds the ${MAX_PAGES}-page limit`);
+    }
+    const data = (body as { data?: unknown } | null)?.data;
+    if (!Array.isArray(data)) {
+      throw new Error(`Treasury auction page ${page} has invalid data`);
+    }
+    if ((page > 1 || pages > 1) && data.length === 0) {
+      throw new Error(`Treasury auction page ${page} is missing`);
+    }
+    // A declared page must be usable in full before any of the walk can be
+    // cached. Missing metrics are valid; missing auction identities are not.
+    if (data.some((raw) => !normalizeAuction(raw))) {
+      throw new Error(`Treasury auction page ${page} has invalid records`);
+    }
     for (const auction of parseTreasuryAuctionsPayload(body)) {
       if (seen.has(auction.id)) continue;
       seen.add(auction.id);

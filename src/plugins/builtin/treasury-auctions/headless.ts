@@ -75,6 +75,8 @@ export function createTreasuryAuctionsHeadless(
         sort: DEFAULT_AUCTION_SORT,
       });
       return {
+        complete: !result.refreshError,
+        errors: result.refreshError ? [result.refreshError] : [],
         rows: auctions.map((auction) => ({
           ...auction,
           rate: rateValue(auction),

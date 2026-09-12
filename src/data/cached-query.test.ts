@@ -24,14 +24,53 @@ test("hydration, cache reads and failed refreshes retain successful response ide
   const refresh = query.load({ force: true });
   expect(query.getSnapshot().result).toBe(first);
   expect(query.getSnapshot().loading).toBe(true);
-  expect((await refresh).responseSequence).toBe(first.responseSequence);
-  expect(query.getSnapshot().result).toBe(first);
+  const retained = await refresh;
+  expect(retained.responseSequence).toBe(first.responseSequence);
+  expect(query.getSnapshot().result).toBe(retained);
+  expect(retained).toMatchObject({ ...first, refreshError: expect.any(Error) });
+  expect(await query.load()).toBe(retained);
   expect(query.getSnapshot().error).toBeInstanceOf(Error);
   fail = false;
   const recovered = await query.load({ force: true });
   expect(recovered.fetchedAt).toBe(first.fetchedAt);
   expect(recovered.responseSequence).toBeGreaterThan(first.responseSequence!);
   expect(query.getSnapshot().error).toBeNull();
+  expect(recovered.refreshError).toBeUndefined();
+  expect(await query.load()).toBe(recovered);
+});
+
+test("failed cache reads keep their error without mutating hydrated or independent query data", async () => {
+  const seeded = value("hydrated");
+  const query = new CachedQuery({ read: () => seeded, fetch: async () => { throw new Error("offline"); } });
+  const independent = new CachedQuery({ read: () => seeded });
+  await query.load({ force: true });
+  expect((await query.load()).refreshError).toBeInstanceOf(Error);
+  expect((await independent.load()).refreshError).toBeUndefined();
+  expect(seeded.refreshError).toBeUndefined();
+  const reopened = new CachedQuery({ read: () => seeded });
+  expect(await reopened.load()).toBe(seeded);
+});
+
+test("expired fallbacks retain source age and a superseded failure cannot restore an old error", async () => {
+  const expired = value("expired", Date.now() - 10_000_000);
+  let calls = 0;
+  const query = new CachedQuery({ read: (allowExpired) => allowExpired ? expired : null, fetch: async () => {
+    calls++;
+    throw new Error("offline");
+  } });
+  const fallback = await query.load();
+  expect(fallback).toMatchObject({ fetchedAt: expired.fetchedAt, expiresAt: expired.expiresAt, refreshError: expect.any(Error) });
+  await query.load();
+  expect(calls).toBe(2);
+  let rejectOld!: (error: Error) => void;
+  const old = query.load({ force: true, fetch: () => new Promise((_, reject) => { rejectOld = reject; }) });
+  await Promise.resolve();
+  const current = await query.load({ force: true, replace: true, fetch: async () => value("recovered") });
+  rejectOld(new Error("late obsolete failure"));
+  await old;
+  expect(await query.load()).toBe(current);
+  expect(query.getSnapshot().error).toBeNull();
+  expect(current.refreshError).toBeUndefined();
 });
 
 test("cross-query order follows accepted completion, excluding superseded and disposed results", async () => {

@@ -164,11 +164,20 @@ describe("fetchAuctionPages", () => {
 
   test("bounded: absurd page metadata cannot walk forever", async () => {
     let calls = 0;
-    await fetchAuctionPages(async (pageNumber) => {
+    await expect(fetchAuctionPages(async (pageNumber) => {
       calls += 1;
       return page([row("10-Year", `2026-0${pageNumber}-12`)], 9_999);
-    });
-    expect(calls).toBe(5);
+    })).rejects.toThrow("page limit");
+    expect(calls).toBe(1);
+  });
+
+  test("rejects incomplete later pages instead of returning the usable prefix", async () => {
+    await expect(fetchAuctionPages(async () => page([], 2))).rejects.toThrow("page 1");
+    for (const invalid of [null, { message: "Unexpected envelope" }, { data: [] }, { data: [null] }]) {
+      await expect(fetchAuctionPages(async (number) => number === 1
+        ? page([row("10-Year", "2026-08-12")], 2)
+        : invalid)).rejects.toThrow("page 2");
+    }
   });
 
   test("treats missing or unusable page metadata as a single page", () => {

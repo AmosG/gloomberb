@@ -78,6 +78,14 @@ INS retains Form 4 and Form 4/A disclosures separately, with their filing access
 
 Amendment status uses the existing footer. Headless reports retain the candidate original accessions and mark affected output incomplete, including an amendment that contains explanations without transaction lines. Owner filtering preserves amendment context for the selected owner's original filings. The loaded window is limited; this is disclosure history, not a reconstructed position ledger or a guarantee that every later amendment has been loaded.
 
+## Treasury auctions
+
+AUCT dates are auction dates, not issue or maturity dates. Term sorting uses every component of the published term, including reopening months; nominal day equivalents only order those labels and do not calculate remaining maturity or settlement cash flows. Unavailable metrics and unrecognized terms sort after known values in either direction. A published zero remains zero.
+
+The rate column currently exposes bill investment rates and note/bond/TIPS high yields in percentage points. Bill investment rates differ from bill discount rates; TIPS yields are real yields. FRN auction discount margins, fixed spreads, and issue/maturity dates are not currently loaded, so AUCT does not provide an FRN coupon or a settlement cash-flow forecast. Treasury distinguishes these fields in its [auction overview](https://treasurydirect.gov/auctions/) and [FRN description](https://treasurydirect.gov/marketable-securities/floating-rate-notes/). Prices are quoted per $100 principal. Indirect percentage is accepted indirect dollars divided by total accepted dollars, not the share of competitive awards alone.
+
+All declared response pages must load successfully before the board replaces cached history. Malformed or missing pages, invalid records, or more than five declared pages fail the refresh; the last validated board retains its original retrieval time and the active failure appears in the footer and headless errors. A headless report with a failed refresh is incomplete even when retained rows remain usable. A successful refresh clears that failure. Previously cached boards are invalidated once because their pagination completeness cannot be established. This cache validation does not certify that the provider reported every auction or support future rate forecasts.
+
 ## Treasury curve
 
 GC plots constant-maturity Treasury yields against elapsed maturity, with month/year axis and cursor labels. The table retains each tenor's published observation date. The 10Y−2Y spread is measured in basis points; a negative value indicates inversion. Missing tenors remain unavailable, and a curve requires matching dates.
