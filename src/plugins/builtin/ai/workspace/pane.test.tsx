@@ -7,7 +7,7 @@ import { createStatefulTestPluginRuntime } from "../../../../test-support/plugin
 import { createDefaultConfig, createPaneInstance } from "../../../../types/config";
 import { Box } from "../../../../ui";
 import type { PluginRuntimeAccess } from "../../../runtime";
-import { setAiRuntimeCatalog } from "../runner";
+import { setAiRunHost, setAiRuntimeCatalog, type AiRunHost } from "../runner";
 import {
   LOCAL_AGENT_WORKSPACE_SCHEMA_VERSION,
   LOCAL_AGENT_WORKSPACE_STATE_KEY,
@@ -18,7 +18,7 @@ import {
   EMPTY_LOCAL_AGENT_WORKSPACE,
   type LocalAgentWorkspaceState,
 } from "./model";
-import { TestPaneProvider } from "../../../../test-support/pane";
+import { TestPaneProvider, createTestTicker } from "../../../../test-support/pane";
 
 const PANE_ID = "local-agent-workspace:test";
 
@@ -28,7 +28,13 @@ function AgentPaneHarness({
   existingWorkspace,
   newThreadId,
   onOpenSettings,
+  configureState,
+  width = 100,
+  height = 16,
 }: {
+  configureState?: (state: ReturnType<typeof createInitialState>) => void;
+  width?: number;
+  height?: number;
   existingWorkspace?: LocalAgentWorkspaceState;
   newThreadId?: string;
   onOpenSettings: PluginRuntimeAccess["openPaneSettings"];
@@ -42,6 +48,7 @@ function AgentPaneHarness({
     }));
     const initial = createInitialState(config);
     initial.focusedPaneId = PANE_ID;
+    configureState?.(initial);
     return initial;
   });
   const [runtime] = useState(() => {
@@ -60,7 +67,7 @@ function AgentPaneHarness({
   });
 
   return (
-    <Box flexDirection="column" width={100} height={16}>
+    <Box flexDirection="column" width={width} height={height}>
       <TestPaneProvider state={state} paneId={PANE_ID} pluginId="ai" runtime={runtime}>
         <PaneFooterProvider>
           {() => (
@@ -68,8 +75,8 @@ function AgentPaneHarness({
               paneId={PANE_ID}
               paneType="local-agent-workspace"
               focused
-              width={100}
-              height={16}
+              width={width}
+              height={height}
             />
           )}
         </PaneFooterProvider>
@@ -85,6 +92,7 @@ afterEach(async () => {
     });
     testSetup = undefined;
   }
+  setAiRunHost(null);
   setAiRuntimeCatalog({ providers: [], accounts: [], models: [] });
 });
 
@@ -187,4 +195,49 @@ describe("LocalAgentWorkspacePane provider setup", () => {
 
     expect(openedSettings).toEqual([PANE_ID]);
   });
+});
+
+
+test("a long research attachment keeps its controls and composer outside the preview", async () => {
+  setAiRuntimeCatalog({ providers: [{ providerId: "anthropic", label: "Claude", status: "ready", outputModes: ["plain", "structured", "screener"] }], accounts: [], models: [] });
+  let request: Parameters<AiRunHost["run"]>[0] | undefined;
+  setAiRunHost({
+    async checkStatus() { return { available: true, authenticated: true, message: null }; },
+    run(options) { request = options; return { done: Promise.resolve("Controlled local response"), cancel() {} }; },
+  });
+  testSetup = await testRender(<AgentPaneHarness
+    width={48}
+    height={14}
+    existingWorkspace={createLocalAgentThread(EMPTY_LOCAL_AGENT_WORKSPACE, "anthropic", { id: "attachment", now: 1 })}
+    onOpenSettings={() => {}}
+    configureState={(state) => {
+      state.recentTickers = ["CONTROL"];
+      state.tickers.set("CONTROL", createTestTicker("CONTROL", "Controlled issuer"));
+      state.financials.set("CONTROL", {
+        fundamentals: { financialCurrency: "JPY", eps: 42.5, netIncome: 0, source: "yahoo", stale: true },
+        annualStatements: [{ date: "2025-12-31", currency: "JPY", totalRevenue: 100, netIncome: 0, totalDebt: 0 }],
+        quarterlyStatements: [], priceHistory: [],
+      });
+    }}
+  />, { width: 48, height: 14, screenMode: "alternate-screen" });
+  await act(async () => { await testSetup!.renderOnce(); });
+  const clickText = async (text: string) => {
+    const lines = testSetup!.captureCharFrame().split("\n");
+    const row = lines.findIndex((line) => line.includes(text));
+    expect(row).toBeGreaterThanOrEqual(0);
+    await act(async () => { await testSetup!.mockMouse.click(lines[row]!.indexOf(text) + 1, row); await testSetup!.renderOnce(); });
+    await testSetup!.renderOnce();
+  };
+  await clickText("Attach CONTROL");
+  const attached = testSetup.captureCharFrame();
+  expect(attached).toContain("Attached: Ticker CONTROL");
+  expect(attached).toContain("Company: Controlled issuer");
+  expect(attached).toContain("Message Claude");
+  await clickText("Remove");
+  expect(testSetup.captureCharFrame()).not.toContain("Attached: Ticker CONTROL");
+  await clickText("Attach CONTROL");
+  await act(async () => { testSetup!.mockInput.pressEnter(); await testSetup!.renderOnce(); });
+  await act(async () => { await testSetup!.mockInput.typeText("Compare earnings"); testSetup!.mockInput.pressEnter(); await testSetup!.renderOnce(); });
+  expect(request?.prompt).toContain("EPS: 42.5 JPY");
+  expect(request?.prompt).toContain("Net Income: 0 JPY");
 });

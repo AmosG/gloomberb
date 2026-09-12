@@ -5,7 +5,6 @@ import { TextAttributes } from "../../../ui";
 import { type ScrollBoxRenderable, type TextareaRenderable } from "../../../ui";
 import type { TickerResearchTabProps } from "../../../types/plugin";
 import { useAppSelector, usePaneTicker } from "../../../state/app/context";
-import { useFxRatesMap } from "../../../market-data/hooks";
 import { usePluginConfigState, usePluginState } from "../../runtime";
 import { useInlineTickers } from "../../../state/hooks/inline-tickers";
 import { MarkdownText } from "../../../components/markdown-text";
@@ -93,17 +92,7 @@ function completedConversation(messages: readonly ChatMessage[]): AiConversation
 export function AskAiResearchTab({ width, height, focused, onCapture }: TickerResearchTabProps) {
   const { nativePaneChrome } = useUiCapabilities();
   const baseCurrency = useAppSelector((state) => state.config.baseCurrency);
-  const cachedExchangeRates = useAppSelector((state) => state.exchangeRates);
   const { ticker, financials } = usePaneTicker();
-  const exchangeRates = useFxRatesMap([
-    baseCurrency,
-    ticker?.metadata.currency,
-    financials?.quote?.currency,
-    ...(ticker?.metadata.positions.map((position) => position.currency) ?? []),
-  ]);
-  const effectiveExchangeRates = exchangeRates.size > 1 || cachedExchangeRates.size === 0
-    ? exchangeRates
-    : cachedExchangeRates;
   const providers = useAiRuntimeProviders();
   const fallbackProviderId = resolveDefaultAiProviderId(providers);
   const [configuredDefaultProviderId] = usePluginConfigState<string>(
@@ -268,9 +257,8 @@ export function AskAiResearchTab({ width, height, focused, onCapture }: TickerRe
       ticker,
       financials,
       baseCurrency,
-      effectiveExchangeRates,
     );
-    const prompt = `You are a financial analyst assistant. Here is the current financial data for the company being discussed:\n\n${context}\n\nUser question: ${text}`;
+    const prompt = `You are a financial analyst assistant. Here is the available financial data for the selected instrument:\n\n${context}\n\nUser question: ${text}`;
 
     try {
       const run = runAiPrompt({
@@ -310,7 +298,7 @@ export function AskAiResearchTab({ width, height, focused, onCapture }: TickerRe
     } finally {
       runRef.current = null;
     }
-  }, [baseCurrency, currentModelId, currentProvider, effectiveExchangeRates, financials, messages, ticker]);
+  }, [baseCurrency, currentModelId, currentProvider, financials, messages, ticker]);
 
   const submitInput = useCallback(() => {
     const currentValue = inputRef.current?.editBuffer.getText() ?? inputValue;
