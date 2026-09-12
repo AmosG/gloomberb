@@ -38,6 +38,7 @@ interface SourceFetchResult {
   articles: NewsArticle[];
   sourceIds: string[];
   failedSourceIds: string[];
+  errors: string[];
   nextCursor: string | null;
 }
 
@@ -305,9 +306,12 @@ export class NewsService {
           articles,
           // A partial failure still has stories, so it stays ready and reports
           // the gap instead of pretending the feed is complete.
-          error: result.failedSourceIds.length > 0
-            ? `${result.failedSourceIds.length} of ${result.failedSourceIds.length + result.sourceIds.length} news sources unavailable.`
-            : null,
+          error: [
+            result.failedSourceIds.length > 0
+              ? `${result.failedSourceIds.length} of ${result.failedSourceIds.length + result.sourceIds.length} news sources unavailable.`
+              : null,
+            ...result.errors,
+          ].filter(Boolean).join(" ") || null,
           updatedAt: this.now(),
           sourceIds: result.sourceIds,
           nextCursor: hasOlderPages ? entry.state.nextCursor : result.nextCursor,
@@ -400,7 +404,7 @@ export class NewsService {
   private async readSourcePage(
     source: NewsCapability,
     query: NewsQuery,
-  ): Promise<{ articles: NewsArticle[]; nextCursor: string | null }> {
+  ): Promise<{ articles: NewsArticle[]; nextCursor: string | null; error?: string | null }> {
     if (source.provider.fetchNewsPage) {
       const page = await this.trackSourceRequest(
         source,
@@ -410,6 +414,7 @@ export class NewsService {
       return {
         articles: page.articles.map((article) => markDetailCapableArticle(source, article)),
         nextCursor: page.nextCursor ?? null,
+        error: page.error,
       };
     }
     const articles = (await this.trackSourceRequest(
@@ -430,6 +435,7 @@ export class NewsService {
           articles: page.articles,
           sourceIds: [newsCapabilitySourceId(source)],
           failedSourceIds,
+          errors: page.error ? [page.error] : [],
           nextCursor: page.nextCursor,
         };
         if (page.articles.length > 0) return result;
@@ -438,7 +444,7 @@ export class NewsService {
         failedSourceIds.push(newsCapabilitySourceId(source));
       }
     }
-    return firstEmpty ?? { articles: [], sourceIds: [], failedSourceIds, nextCursor: null };
+    return firstEmpty ?? { articles: [], sourceIds: [], failedSourceIds, errors: [], nextCursor: null };
   }
 
   private async fetchMergedNews(query: NewsQuery, sources: NewsCapability[]): Promise<SourceFetchResult> {
@@ -449,6 +455,7 @@ export class NewsService {
       })),
     );
     const articles: NewsArticle[] = [];
+    const errors: string[] = [];
     const sourceIds: string[] = [];
     const failedSourceIds: string[] = [];
     let nextCursor: string | null = null;
@@ -459,10 +466,11 @@ export class NewsService {
         return;
       }
       articles.push(...result.value.page.articles);
+      if (result.value.page.error) errors.push(result.value.page.error);
       sourceIds.push(newsCapabilitySourceId(result.value.source));
       nextCursor ??= result.value.page.nextCursor;
     });
-    return { articles, sourceIds, failedSourceIds, nextCursor };
+    return { articles, sourceIds, failedSourceIds, errors, nextCursor };
   }
 
   private trackSourceRequest<T>(

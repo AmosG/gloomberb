@@ -1,6 +1,7 @@
 import type { MarketNewsItem } from "../../../../../types/news-source";
 import { decodeHtmlEntities } from "../../../../../utils/html-entities";
 import { hashString } from "../hash";
+import { feedChildren, feedText, parseFeedXml, resolveFeedUrl, type FeedElement } from "./feed-xml";
 
 export interface RssFeedConfig {
   id: string;
@@ -24,20 +25,10 @@ function extractText(s: string): string {
   return stripHtml(decodeHtmlEntities(stripCdata(s))).trim();
 }
 
-function getTagContent(xml: string, tag: string): string {
-  const m = xml.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i"));
-  return m ? m[1]!.trim() : "";
-}
-
 function parseDate(s: string): Date {
   if (!s) return new Date(0);
   const d = new Date(s);
   return isNaN(d.getTime()) ? new Date(0) : d;
-}
-
-function extractAttr(tag: string, attr: string): string {
-  const m = tag.match(new RegExp(`${attr}="([^"]*)"`, "i"));
-  return m ? m[1]! : "";
 }
 
 function extractImageUrl(block: string): string | undefined {
@@ -64,20 +55,24 @@ function extractImageUrl(block: string): string | undefined {
   return undefined;
 }
 
-function parseRss2Items(xml: string, config: RssFeedConfig): MarketNewsItem[] {
-  const itemRe = /<item>([\s\S]*?)<\/item>/gi;
+function parseRssItems(xml: string, config: RssFeedConfig, root: FeedElement): MarketNewsItem[] {
+  const entries = root.localName === "RDF"
+    ? feedChildren(root, "item", "http://purl.org/rss/1.0/")
+    : feedChildren(feedChildren(root, "channel")[0]!, "item");
   const items: MarketNewsItem[] = [];
-  let match: RegExpExecArray | null;
+  for (const entry of entries) {
+    const block = xml.slice(entry.innerStart, entry.innerEnd);
+    const tagContent = (name: string) => {
+      const node = feedChildren(entry, name)[0];
+      return node ? xml.slice(node.innerStart, node.innerEnd) : "";
+    };
 
-  while ((match = itemRe.exec(xml)) !== null) {
-    const block = match[1]!;
-
-    const title = extractText(getTagContent(block, "title"));
-    const url = extractText(getTagContent(block, "link"));
-    const pubDateRaw = extractText(getTagContent(block, "pubDate"));
-    const descRaw = getTagContent(block, "description");
+    const title = extractText(tagContent("title"));
+    const url = extractText(tagContent("link"));
+    const pubDateRaw = extractText(tagContent("pubDate"));
+    const descRaw = tagContent("description");
     const desc = descRaw ? extractText(descRaw) : undefined;
-    const categoryRaw = getTagContent(block, "category");
+    const categoryRaw = tagContent("category");
     const category = categoryRaw ? extractText(categoryRaw) : undefined;
 
     if (!title && !url) continue;
@@ -120,84 +115,63 @@ function parseRss2Items(xml: string, config: RssFeedConfig): MarketNewsItem[] {
   return items;
 }
 
-function parseAtomEntries(xml: string, config: RssFeedConfig): MarketNewsItem[] {
-  const entryRe = /<entry>([\s\S]*?)<\/entry>/gi;
-  const items: MarketNewsItem[] = [];
-  let match: RegExpExecArray | null;
-
-  while ((match = entryRe.exec(xml)) !== null) {
-    const block = match[1]!;
-
-    const title = extractText(getTagContent(block, "title"));
-
-    // Atom <link href="..."/> or <link>...</link>
-    const linkTagMatch = block.match(/<link([^>]*)>/i);
-    let url = "";
-    if (linkTagMatch) {
-      const href = extractAttr(linkTagMatch[0]!, "href");
-      if (href) {
-        url = href;
-      } else {
-        url = extractText(getTagContent(block, "link"));
-      }
-    }
-
-    const publishedRaw =
-      extractText(getTagContent(block, "published")) ||
-      extractText(getTagContent(block, "updated"));
-
-    const summaryRaw = getTagContent(block, "summary") || getTagContent(block, "content");
-    const summaryFull = summaryRaw ? extractText(summaryRaw) : undefined;
-    const summary = summaryFull
-      ? summaryFull.slice(0, 300) + (summaryFull.length > 300 ? "…" : "")
-      : undefined;
-
-    if (!title && !url) continue;
-
-    const id = hashString(`${url}|${title}`);
-    const publishedAt = parseDate(publishedRaw);
+function parseAtomEntries(xml: string, config: RssFeedConfig, root: FeedElement): MarketNewsItem[] {
+  return feedChildren(root, "entry").flatMap((entry): MarketNewsItem[] => {
+    const text = (name: string) => feedText(feedChildren(entry, name)[0]);
+    const construct = (name: string) => {
+      const node = feedChildren(entry, name)[0];
+      const value = feedText(node);
+      // Atom's default text construct contains literal text. Only HTML text
+      // constructs use escaped markup; XHTML has already been read as elements.
+      return node?.attributes.type === "html" ? decodeHtmlEntities(stripHtml(value)).trim() : value;
+    };
+    const title = construct("title");
+    const links = feedChildren(entry, "link")
+      .filter((link) => !link.attributes.rel || link.attributes.rel === "alternate"
+        || link.attributes.rel === "http://www.iana.org/assignments/relation/alternate")
+      .map((link) => ({
+        url: resolveFeedUrl(link.attributes.href ?? "", link.base),
+        type: (link.attributes.type ?? "").split(";")[0]!.trim().toLowerCase(),
+      }))
+      .filter((link) => /^https?:\/\//i.test(link.url));
+    const url = (links.find((link) => link.type === "text/html" || link.type === "application/xhtml+xml")
+      ?? links.find((link) => !link.type) ?? links[0])?.url ?? "";
+    if (!title && !url) return [];
+    const summaryFull = construct("summary") || construct("content");
+    const summary = summaryFull ? summaryFull.slice(0, 300) + (summaryFull.length > 300 ? "…" : "") : undefined;
+    // An Atom id survives headline/URL corrections. Do not normalize its case,
+    // resolve it as a relative URL, or replace it with the presentation link.
+    const publisherId = text("id");
+    const id = publisherId ? `atom:${publisherId}` : hashString(`${url}|${title}`);
+    const publishedAt = parseDate(text("updated") || text("published"));
     const categories = config.category ? [config.category] : [];
-    const imageUrl = extractImageUrl(block);
+    const imageUrl = extractImageUrl(xml.slice(entry.innerStart, entry.innerEnd));
+    return [{
+      id, title, url, source: config.name, publishedAt, summary, imageUrl,
+      topic: categories[0] ?? "general", topics: categories, sectors: [], categories, tickers: [],
+      scores: { importance: 0, urgency: 0, marketImpact: 0, novelty: 0, confidence: 0 },
+      importance: 0, isBreaking: false, isDeveloping: false,
+    }];
+  });
+}
 
-    items.push({
-      id,
-      title,
-      url,
-      source: config.name,
-      publishedAt,
-      summary,
-      imageUrl,
-      topic: categories[0] ?? "general",
-      topics: categories,
-      sectors: [],
-      categories,
-      tickers: [],
-      scores: {
-        importance: 0,
-        urgency: 0,
-        marketImpact: 0,
-        novelty: 0,
-        confidence: 0,
-      },
-      importance: 0,
-      isBreaking: false,
-      isDeveloping: false,
-    });
+// The source uses this strict entry point so a proxy error page or truncated
+// document cannot replace the last successful feed with a fresh empty cache.
+export function parseRssFeedDocument(xml: string, config: RssFeedConfig): MarketNewsItem[] {
+  const root = parseFeedXml(xml, config.url);
+  if (root?.localName === "feed" && (!root.namespace || root.namespace === "http://www.w3.org/2005/Atom")) {
+    return parseAtomEntries(xml, config, root);
   }
-
-  return items;
+  if (root?.localName === "rss" && !root.namespace && feedChildren(root, "channel").length === 1) {
+    return parseRssItems(xml, config, root);
+  }
+  if (root?.localName === "RDF" && root.namespace === "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    && feedChildren(root, "channel", "http://purl.org/rss/1.0/").length === 1) {
+    return parseRssItems(xml, config, root);
+  }
+  throw new Error("Invalid or unsupported news feed.");
 }
 
 export function parseRssFeed(xml: string, config: RssFeedConfig): MarketNewsItem[] {
-  if (!xml || !xml.trim()) return [];
-
-  try {
-    const isAtom = /<feed\b/i.test(xml);
-    if (isAtom) {
-      return parseAtomEntries(xml, config);
-    }
-    return parseRss2Items(xml, config);
-  } catch {
-    return [];
-  }
+  try { return parseRssFeedDocument(xml, config); } catch { return []; }
 }
