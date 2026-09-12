@@ -92,6 +92,7 @@ export function samePaneFooterRegistration(
       const other = rightInfo[index];
       return !!other
         && segment.id === other.id
+        && !!segment.onPress === !!other.onPress
         && segment.disabled === other.disabled
         && sameFooterParts(segment.parts, other.parts);
     })
@@ -101,6 +102,7 @@ export function samePaneFooterRegistration(
         && hint.id === other.id
         && hint.key === other.key
         && hint.label === other.label
+        && !!hint.onPress === !!other.onPress
         && hint.disabled === other.disabled;
     });
 }

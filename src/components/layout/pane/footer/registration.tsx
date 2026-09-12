@@ -90,10 +90,14 @@ export function usePaneFooter(
   const language = useAppLanguage();
   const context = useContext(PaneFooterContext);
   const previousRegistrationRef = useRef<PaneFooterRegistration | null>(null);
+  const currentRegistrationRef = useRef<PaneFooterRegistration | null>(null);
+  const lifetimeRef = useRef(0);
 
   usePaneFooterRegistrationEffect(() => {
     return () => {
       previousRegistrationRef.current = null;
+      currentRegistrationRef.current = null;
+      lifetimeRef.current += 1;
       context?.unregister(registrationId);
     };
   }, [context, registrationId]);
@@ -101,9 +105,31 @@ export function usePaneFooter(
   usePaneFooterRegistrationEffect(() => {
     if (!context) return;
     const nextRegistration = factory() ?? null;
+    currentRegistrationRef.current = nextRegistration;
     if (samePaneFooterRegistration(previousRegistrationRef.current, nextRegistration)) return;
     previousRegistrationRef.current = nextRegistration;
-    context.register(registrationId, nextRegistration);
+    const lifetime = lifetimeRef.current;
+    // Keep visual equality independent of inline callback identity, while each
+    // registered action follows the latest committed state of its own item.
+    context.register(registrationId, nextRegistration ? {
+      ...nextRegistration,
+      info: nextRegistration.info?.map((segment) => ({
+        ...segment,
+        onPress: segment.onPress ? () => {
+          if (lifetime !== lifetimeRef.current) return;
+          const current = currentRegistrationRef.current?.info?.find((item) => item.id === segment.id);
+          if (!current?.disabled) current?.onPress?.();
+        } : undefined,
+      })),
+      hints: nextRegistration.hints?.map((hint) => ({
+        ...hint,
+        onPress: hint.onPress ? (event) => {
+          if (lifetime !== lifetimeRef.current) return;
+          const current = currentRegistrationRef.current?.hints?.find((item) => item.id === hint.id);
+          if (!current?.disabled) current?.onPress?.(event);
+        } : undefined,
+      })),
+    } : null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [context, language, registrationId, ...deps]);
 }
