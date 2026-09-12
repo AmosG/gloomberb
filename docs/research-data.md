@@ -134,7 +134,7 @@ Each series keeps its own observation date. A shared date appears in the footer 
 
 ## Options
 
-OVME uses a European-exercise Black–Scholes model. It does not model early exercise or discrete dividends. Theta is per day; vega is per volatility percentage point; rho is per rate percentage point. The UI keeps these units beside their values.
+OVME uses a European-exercise Black–Scholes model. It does not model early exercise or discrete dividends. Theta is per day; vega is per volatility percentage point; rho is per rate percentage point. The UI keeps these units beside their values. A positive input exactly at the model’s discounted zero-volatility payoff has a 0% boundary solution. Nearby prices within the cumulative-normal approximation’s price-error bound cannot resolve IV and remain unavailable; this is not an estimate of quote precision or realized volatility. The asymptotic maximum has no finite IV, and the solver retains its 500% ceiling. Submitted calculator inputs retain their entered precision while editing.
 
 OMON HV30 is the annualized sample standard deviation of 30 daily log returns from 31 distinct reported observations, using 252 trading days per year. A later correction replaces the same timestamp. Missing or nonpositive closes and contradictory OHLC inside that window make HV30 and IV/HV unavailable; they are not skipped to bridge a return. A quote explicitly marked stale cannot seed underlying-dependent Greeks, ATM selection, or the calculator. Contract quotes remain visible with their own timestamps.
 

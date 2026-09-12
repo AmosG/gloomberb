@@ -75,3 +75,14 @@ describe("InlineFieldView", () => {
     expect(testSetup.captureCharFrame()).toContain("2.00");
   });
 });
+
+
+test("submitted percentage precision stays visible and is not recommitted from rounded text", async () => {
+  const commits:number[]=[];
+  testSetup=await testRender(<InlineFieldHarness commits={commits}/>,{width:36,height:4});
+  await act(async()=>{setFieldActive?.(true);await testSetup!.renderOnce();});
+  await act(async()=>{await testSetup!.mockInput.typeText("12.3456");testSetup!.mockInput.pressEnter();await testSetup!.renderOnce();});
+  expect(testSetup.captureCharFrame()).toContain("12.3456");expect(commits.at(-1)).toBeCloseTo(.123456,10);
+  await act(async()=>{setFieldActive?.(false);await testSetup!.renderOnce();});
+  expect(commits.at(-1)).toBeCloseTo(.123456,10);
+});

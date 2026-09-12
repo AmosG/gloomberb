@@ -6,8 +6,8 @@ export const OPTIONS_CALCULATOR_TEMPLATE_ID = "options-calculator-pane";
 const DAY_MS = 86_400_000;
 const DAYS_PER_YEAR = 365;
 const OPTION_EXPIRY_TIME_ZONE = "America/New_York";
-const MIN_VOLATILITY = 1e-6;
 const MAX_VOLATILITY = 5;
+const NORMAL_CDF_ERROR_BOUND = 7.5e-8;
 
 export type OptionSide = "call" | "put";
 
@@ -197,25 +197,37 @@ export function solveImpliedVolatility(
     ? Math.max(0, discountedSpot - discountedStrike)
     : Math.max(0, discountedStrike - discountedSpot);
   const upperBound = draft.side === "call" ? discountedSpot : discountedStrike;
-  if (marketPrice < lowerBound - 1e-8) {
+  if (![discountedSpot, discountedStrike, years].every(Number.isFinite) || !(upperBound > lowerBound)) {
+    return { volatility: null, note: "inputs exceed model precision" };
+  }
+  // Each CDF contributes at most this much absolute price error. Near a
+  // bound, a rounded-flat price curve cannot identify a positive volatility.
+  const priceTolerance = NORMAL_CDF_ERROR_BOUND * (discountedSpot + discountedStrike);
+  if (marketPrice < lowerBound - priceTolerance) {
     return { volatility: null, note: "market price is below intrinsic value" };
   }
-  if (marketPrice > upperBound + 1e-8) {
+  if (marketPrice > upperBound + priceTolerance) {
     return { volatility: null, note: "market price is above the no-arbitrage maximum" };
+  }
+  if (marketPrice === lowerBound) return { volatility: 0, note: null };
+  if (marketPrice === upperBound) return { volatility: null, note: "no finite IV at the model maximum" };
+  if (marketPrice - lowerBound <= priceTolerance || upperBound - marketPrice <= priceTolerance) {
+    return { volatility: null, note: "market price too close to a model bound to resolve IV" };
   }
 
   const priceAt = (volatility: number) => valueOption({ ...draft, volatility }).price;
-  const floor = priceAt(MIN_VOLATILITY);
   const cap = priceAt(MAX_VOLATILITY);
-  if (marketPrice < floor - 1e-8) return { volatility: null, note: "market price is below intrinsic value" };
   if (marketPrice > cap) return { volatility: null, note: `market price implies volatility above ${MAX_VOLATILITY * 100}%` };
 
-  let low = MIN_VOLATILITY;
+  let low = 0;
   let high = MAX_VOLATILITY;
   for (let i = 0; i < 100 && high - low > 1e-8; i += 1) {
     const mid = (low + high) / 2;
     if (priceAt(mid) > marketPrice) high = mid;
     else low = mid;
+  }
+  if (!(priceAt(high) > priceAt(low))) {
+    return { volatility: null, note: "market price cannot resolve IV at model precision" };
   }
   return { volatility: (low + high) / 2, note: null };
 }
