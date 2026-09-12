@@ -3,11 +3,12 @@ import type { Dispatch } from "react";
 import { appReducer, createInitialState, type AppAction, type AppState } from "../core/state/app/state";
 import type { PluginRegistry } from "../plugins/registry";
 import { createDefaultConfig } from "../types/config";
+import type { TickerFinancials } from "../types/financials";
 import { createAppRemoteController } from "./controller";
 import type { RemoteControlSchema, RemoteUiNodeSnapshot } from "./types";
 import type { RemoteUiRegistry } from "./semantic-tree";
 
-function createRegistryHarness(options: { withFloatingPane?: boolean } = {}) {
+function createRegistryHarness(options: { withFloatingPane?: boolean; financials?: TickerFinancials } = {}) {
   const config = {
     ...createDefaultConfig("/tmp/gloom-remote-controller"),
     onboardingComplete: true,
@@ -59,7 +60,7 @@ function createRegistryHarness(options: { withFloatingPane?: boolean } = {}) {
       },
       getTickerFinancials: async (symbol: string, exchange?: string) => {
         marketDataQueries.push({ operation: "financials", input: { symbol, exchange } });
-        return { quote: { symbol, exchange, price: 180 } };
+        return options.financials ?? { quote: { symbol, exchange, price: 180 }, annualStatements: [], quarterlyStatements: [] };
       },
     },
     resolvePaneSettings: () => null,
@@ -179,6 +180,46 @@ describe("createAppRemoteController", () => {
       error: { message: expect.stringContaining("Unknown market data operation") },
     });
     expect(actions).toEqual([]);
+  });
+
+  test("financials tools retain reporting currency and coverage independently of the listing quote", async () => {
+    const financials: TickerFinancials = {
+      financialCurrency: "JPY",
+      quote: { symbol: "ACME", price: 30, currency: "USD", change: 0, changePercent: 0, lastUpdated: 1_789_200_000_000 },
+      statementHistory: { mode: "extended", source: "sec", status: "retryable-failure", fetchedAt: "2026-09-12T12:00:00Z", reason: "Extended history unavailable" },
+      annualStatements: Array.from({ length: 6 }, (_, index) => ({ date: `${2026 - index}-03-31`, totalRevenue: 10_000_000_000 })),
+      quarterlyStatements: [], priceHistory: [],
+    };
+    const { controller, actions, marketDataQueries } = createRegistryHarness({ financials });
+    const result = await controller.handle({ type: "data", operation: "financials", symbol: "acme", exchange: "nyse" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.message);
+    const data = JSON.parse(JSON.stringify(result.data));
+    expect(data.financialCurrency).toBe("JPY");
+    expect(data.quote.currency).toBe("USD");
+    expect(data.annualStatements[0]).toEqual({ date: "2026-03-31", totalRevenue: 10_000_000_000 });
+    expect(data.annualStatements).toHaveLength(5);
+    expect(data.statementHistory).toEqual(financials.statementHistory);
+    expect(marketDataQueries).toEqual([{ operation: "financials", input: { symbol: "ACME", exchange: "NYSE" } }]);
+    expect(actions).toEqual([]);
+  });
+
+  test("financials tools retain metadata-only observations without inventing a quote or statement currency", async () => {
+    const financials: TickerFinancials = {
+      quoteMetadata: { symbol: "ACME", currency: "USD", instrumentType: "EQUITY", source: { providerId: "cloud", stale: true, lastUpdated: 1_789_200_000_000 } },
+      annualStatements: [{ date: "2026-03-31", totalRevenue: 10_000_000_000 }],
+      quarterlyStatements: [], priceHistory: [],
+    };
+    const { controller } = createRegistryHarness({ financials });
+    const result = await controller.handle({ type: "data", operation: "financials", symbol: "ACME" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.message);
+    const data = JSON.parse(JSON.stringify(result.data));
+    expect(data.quoteMetadata).toEqual(financials.quoteMetadata);
+    expect(data).not.toHaveProperty("quote");
+    expect(data).not.toHaveProperty("financialCurrency");
+    expect(data).not.toHaveProperty("statementHistory");
+    expect(data.annualStatements[0]).not.toHaveProperty("currency");
   });
 
   test("dispatches semantic app operations", async () => {
