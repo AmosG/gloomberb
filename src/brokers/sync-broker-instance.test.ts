@@ -4,6 +4,13 @@ import type { BrokerAdapter } from "../types/broker";
 import type { TickerRecord } from "../types/ticker";
 import { hydrateTickerMetadata } from "../tickers/metadata";
 import { AppPersistence } from "../data/app-persistence";
+import { TickerRepository } from "../data/ticker-repository";
+import { getColumnValue, getSortValue } from "../plugins/builtin/portfolio-list/column-values";
+import { showCollection } from "../plugins/builtin/portfolio-list/cli/render";
+import { createTestDataProvider } from "../test-support/data-provider";
+import { DEFAULT_CLI_OPTIONS } from "../cli/options";
+import type { CliResult } from "../cli/result";
+import type { CliCommandContext } from "../types/plugin";
 import { loadPersistedBrokerAccounts, persistBrokerAccounts } from "./account-cache";
 import {
   restoreBrokerPortfoliosFromTickerPositions,
@@ -143,6 +150,48 @@ describe("syncBrokerInstance", () => {
       expect(reloaded.positions[0]!.avgCost).toBe(Number.isFinite(cost) ? cost : undefined);
       expect(reloaded.positions[0]).toMatchObject({ shares: 10, unrealizedPnl: 200, marketValue: 1200 });
       expect(reloaded.positions).toHaveLength(1);
+    }
+  });
+
+  test("retains supplied acquisition dates through resync, persistence, holding age and portfolio exports", async () => {
+    const persistence = new AppPersistence(":memory:");
+    const tickerRepository = new TickerRepository(persistence.tickers);
+    const adapter = createDemoBroker();
+    const portfolioId = "broker:demo-broker:ACC-1";
+    const column = { id: "held", label: "HELD", width: 8, align: "right" as const };
+    const now = Date.UTC(2026, 8, 12, 12);
+    const context = { activeTab: portfolioId, baseCurrency: "USD", exchangeRates: new Map([["USD", 1]]), now };
+    let config = { ...createDefaultConfig("/unused-acquisition-date"), portfolios: [], brokerInstances: [createBrokerInstance()] };
+    try {
+      for (const [shares, avgCost, dateAcquired, held] of [
+        [10, 100, "2020-01-02", "6.7y"],
+        [20, 50, "2020-01-02", "6.7y"],
+        [20, 50, undefined, "—"],
+        [20, 50, "not-a-date", "—"],
+      ] as const) {
+        adapter.importPositions = async () => [{ ticker: "AAPL", exchange: "NASDAQ", accountId: "ACC-1",
+          shares, avgCost, currency: "USD", dateAcquired }];
+        const synced = await syncBrokerInstance({ config, instanceId: "demo-broker", brokers: new Map([["demo", adapter]]), tickerRepository });
+        config = synced.config as typeof config;
+        const reloaded = (await tickerRepository.loadTicker("AAPL"))!;
+        expect(reloaded.metadata.positions).toHaveLength(1);
+        expect(reloaded.metadata.positions[0]).toMatchObject({ shares, avgCost });
+        expect(reloaded.metadata.positions[0]!.dateAcquired).toBe(dateAcquired);
+        expect(getColumnValue(column, reloaded, undefined, context).text).toBe(held);
+        expect(getSortValue(column, reloaded, undefined, context)).toBe(held === "—" ? null : 2445);
+        let exported: CliResult | undefined;
+        await showCollection(portfolioId, {
+          cliOptions: { ...DEFAULT_CLI_OPTIONS, format: "json" },
+          printResult: (result) => { exported = result; },
+          initMarketData: async () => ({ config, persistence: { close() {} }, store: tickerRepository,
+            dataProvider: createTestDataProvider({ getQuote: async () => ({ symbol: "AAPL", price: 60,
+              currency: "USD", change: 0, changePercent: 0, previousClose: 60, lastUpdated: now }) }) }),
+          fail: (message) => { throw new Error(message); },
+        } as unknown as CliCommandContext);
+        expect((exported?.data as Array<{ dateAcquired: string | null }>)[0]!.dateAcquired).toBe(dateAcquired ?? null);
+      }
+    } finally {
+      persistence.close();
     }
   });
 

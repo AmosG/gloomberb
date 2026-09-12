@@ -36,6 +36,7 @@ function buildPositionEntry(
     shares: position.shares,
     avgCost: typeof position.avgCost === "number" && Number.isFinite(position.avgCost) ? position.avgCost : undefined,
     currency: position.currency,
+    dateAcquired: position.dateAcquired,
     broker: instance.brokerType,
     side: position.side,
     marketValue: position.marketValue,
