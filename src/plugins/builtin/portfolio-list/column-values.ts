@@ -70,7 +70,8 @@ function startOfUtcDay(date: Date): number {
 function daysSince(value: Date | string | number | null | undefined, now: number): number | null {
   const date = parseDateValue(value);
   if (!date) return null;
-  return Math.max(0, Math.floor((startOfUtcDay(new Date(now)) - startOfUtcDay(date)) / 86_400_000));
+  const days = Math.floor((startOfUtcDay(new Date(now)) - startOfUtcDay(date)) / 86_400_000);
+  return days >= 0 ? days : null;
 }
 
 function formatHeldDays(days: number | null): string {

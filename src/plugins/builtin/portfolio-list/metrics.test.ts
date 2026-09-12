@@ -61,6 +61,26 @@ const defaultColumnContext: ColumnContext = {
 };
 
 describe("portfolio-metrics", () => {
+  test("withholds future holding age without changing the source date or same-day holdings", () => {
+    const context = { ...defaultColumnContext, now: Date.UTC(2026, 8, 12, 12) };
+    const column: ColumnConfig = { id: "held", label: "HELD", width: 8, align: "right" };
+    for (const [dateAcquired, text, sort] of [
+      ["2026-09-20", "—", null],
+      ["2026-09-13T01:00:00+02:00", "0d", 0],
+      ["2026-09-12T23:59:59Z", "0d", 0],
+      ["2026-09-11", "1d", 1],
+      ["not-a-date", "—", null],
+    ] as const) {
+      const ticker = createTicker({ positions: [
+        { portfolio: "main", shares: 10, avgCost: 100, broker: "manual", dateAcquired },
+        { portfolio: "other", shares: 1, avgCost: 1, broker: "manual", dateAcquired: "2020-01-02" },
+      ] });
+      expect(getColumnValue(column, ticker, undefined, context).text).toBe(text);
+      expect(getSortValue(column, ticker, undefined, context)).toBe(sort);
+      expect(ticker.metadata.positions[0]!.dateAcquired).toBe(dateAcquired);
+    }
+  });
+
   test("withholds mixed-currency totals until FX is known, then restores complete values", () => {
     const us = createTicker({ positions: [{ portfolio: "main", shares: 10, avgCost: 100, broker: "manual" }] });
     const eur = createTicker({ ticker: "SAP", currency: "EUR", positions: [{ portfolio: "main", shares: 10, avgCost: 100, broker: "manual", currency: "EUR" }] });
