@@ -25,7 +25,7 @@ import { StatDetail } from "./detail";
 import { DEFAULT_STAT_ID } from "./stats";
 import { selectStatViews, type StatRangeId, type StatViewModel } from "./view";
 
-const loadBundle = () => loadStatsBundle();
+const loadBundle = (force: boolean) => loadStatsBundle({ force });
 
 const SPLIT_MIN_WIDTH = 108;
 const LIST_WIDTH = 46;
@@ -127,7 +127,7 @@ export function EconStatisticsPane({ focused, width, height }: PaneProps) {
   const [statId, setStatId] = usePaneSettingValue<string>("stat", DEFAULT_STAT_ID);
   const [range, setRange] = usePaneSettingValue<StatRangeId>("range", "20Y");
   const resource = useAsyncResource(loadBundle, { initialData: () => getCachedStatsBundle() });
-  const { data: bundle, load: refresh, updatedAt: lastUpdated } = resource;
+  const { data: bundle, load: refresh, reload, updatedAt: lastUpdated } = resource;
   const [query, setQuery] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
   const [searchFocusToken, setSearchFocusToken] = useState(0);
@@ -148,17 +148,17 @@ export function EconStatisticsPane({ focused, width, height }: PaneProps) {
     }
     if (isPlainKey(event, "r")) {
       stopSearchFocusNavigation(event);
-      refresh();
+      reload();
       return true;
     }
     return false;
-  }, [focusSearch, refresh]);
+  }, [focusSearch, reload]);
 
   useShortcut((event) => {
     if (!focused || searchFocused || event.name !== "r") return;
     event.preventDefault?.();
     event.stopPropagation?.();
-    refresh();
+    reload();
   });
 
   const views = useMemo(
@@ -190,7 +190,7 @@ export function EconStatisticsPane({ focused, width, height }: PaneProps) {
     const info: PaneFooterSegment[] = [
       { id: "as-of", parts: [{ text: `as of ${selected.latest.date}`, tone: "muted" }] },
     ];
-    if (selected.observationStale) {
+    if (selected.observationStale || selected.cacheStale) {
       info.push({ id: "stale", parts: [{ text: "STALE", tone: "warning", bold: true }] });
     }
     if (normalizedQuery) {

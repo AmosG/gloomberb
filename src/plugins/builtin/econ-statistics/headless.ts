@@ -102,7 +102,11 @@ export function projectStatsHeadlessBundle(
         formattedPrevious: view.previous ? view.stat.formatValue(view.previous.value) : "-",
         percentile: view.percentile,
         asOf: view.latest.date,
-        stale: view.observationStale,
+        stale: view.observationStale || view.cacheStale,
+        fetchedAt: view.fetchedAt,
+        cacheStale: view.cacheStale,
+        cacheSource: view.cacheSource,
+        refreshError: view.refreshError,
       })),
     }];
   });
@@ -115,6 +119,7 @@ export function projectStatsHeadlessBundle(
     errors: bundle.errors,
     metadata: {
       fetchedAt: bundle.fetchedAt,
+      fetchedAtComplete: bundle.fetchedAtComplete,
       range,
       selected: selected?.stat.id ?? null,
     },
