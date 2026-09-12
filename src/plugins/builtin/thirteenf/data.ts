@@ -6,7 +6,6 @@ import {
   listTopThirteenFFunds,
   lookupThirteenFHoldersByCusip,
   lookupThirteenFTickers,
-  loadLatestFormsForFunds,
   normalizeCik,
   searchThirteenFFunds,
 } from "./api";
@@ -16,13 +15,13 @@ import {
   latestLikely13FQuarter,
   recentIso,
   buildPeriodReports,
+  dedupeLatestForms,
   todayIso,
 } from "./model";
 import type {
   FundBrowserRow,
   FundDetailData,
   ThirteenFBrowserTab,
-  ThirteenFFormSummary,
   ThirteenFFund,
   ThirteenFHoldingRecord,
   ThirteenFTopFund,
@@ -32,6 +31,32 @@ import type {
 const BROWSER_PAGE_LIMIT = 75;
 const LATEST_FILINGS_PAGE_LIMIT = 120;
 const FORM_ENRICHMENT_LIMIT = 35;
+
+async function loadReportsForFunds(
+  funds: ThirteenFFund[],
+  options: { from: string; to: string; signal?: AbortSignal; forceRefresh?: boolean; periods?: Map<string, string> },
+): Promise<{ reports: Map<string, ThirteenFPeriodReport>; warning?: string }> {
+  const reports = new Map<string, ThirteenFPeriodReport>();
+  const failures: string[] = [];
+  let index = 0;
+  async function worker() {
+    while (!options.signal?.aborted && index < funds.length) {
+      const fund = funds[index++]!;
+      try {
+        const forms = await listThirteenFForms(fund.cik, options.from, options.to, 100, options.signal, options);
+        const periods = buildPeriodReports(forms);
+        const selectedPeriod = options.periods?.get(fund.cik);
+        const report = selectedPeriod ? periods.find((item) => item.periodOfReport === selectedPeriod) : periods[0];
+        if (report) reports.set(fund.cik, report);
+      } catch {
+        if (options.signal?.aborted) throw options.signal.reason;
+        failures.push(`${fund.cik}: filing metadata unavailable.`);
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(5, funds.length) }, worker));
+  return { reports, ...(failures.length ? { warning: failures.join(" ") } : {}) };
+}
 
 export interface BrowserLoadResult {
   rows: FundBrowserRow[];
@@ -61,9 +86,13 @@ export async function loadBrowserRows(
   if (tab === "performance") {
     const topFunds = await listTopThirteenFFunds(quarter, browserLimit, signal, pageApiOptions);
     const funds: ThirteenFFund[] = topFunds.map((fund) => ({ cik: fund.cik, name: fund.name }));
-    const forms = await loadLatestFormsForFunds(funds.slice(0, Math.min(browserLimit, FORM_ENRICHMENT_LIMIT)), { from, to, signal, concurrency: 5, forceRefresh: options.forceRefresh });
+    const { reports, warning } = await loadReportsForFunds(funds.slice(0, Math.min(browserLimit, FORM_ENRICHMENT_LIMIT)), {
+      from, to, signal, forceRefresh: options.forceRefresh,
+      periods: new Map(topFunds.map((fund) => [fund.cik, fund.periodOfReport])),
+    });
     return {
-      rows: buildBrowserRows({ topFunds, forms, source: "performance" }),
+      rows: buildBrowserRows({ topFunds, reports, source: "performance" }),
+      warning,
       quarter,
       period: topFunds[0]?.periodOfReport,
       hasMore: topFunds.length >= browserLimit,
@@ -73,8 +102,14 @@ export async function loadBrowserRows(
 
   if (tab === "latest") {
     const filings = await listThirteenFFilings(recentIso(21, now), to, latestLimit, signal, pageApiOptions);
+    const selected = dedupeLatestForms(filings);
+    const { reports, warning } = await loadReportsForFunds(selected.map((form) => ({ cik: form.cik, name: form.companyName })), {
+      from, to, signal, forceRefresh: options.forceRefresh,
+      periods: new Map(selected.map((form) => [form.cik, form.periodOfReport])),
+    });
     return {
-      rows: buildBrowserRows({ latestFilings: filings, source: "latest" }),
+      rows: buildBrowserRows({ latestFilings: filings, reports, source: "latest" }),
+      warning,
       period: filings[0]?.periodOfReport,
       hasMore: filings.length >= latestLimit,
       nextOffset: offset + filings.length,
@@ -99,18 +134,15 @@ export async function loadBrowserRows(
     const periodOfReport = quarterToPeriod(quarter);
     try {
       const holders = await lookupThirteenFHoldersByCusip(cusip, periodOfReport, signal, apiOptions);
-      const forms = new Map<string, ThirteenFFormSummary>();
       const pageCiks = holders.ciks.slice(offset, offset + browserLimit);
-      const funds = await Promise.all(pageCiks.map(async (cik): Promise<ThirteenFFund> => {
-        const fundForms = await listThirteenFForms(cik, from, to, 1, signal, apiOptions);
-        if (fundForms[0]) forms.set(cik, fundForms[0]);
-        return {
-          cik,
-          name: fundForms[0]?.companyName || cik,
-        };
-      }));
+      const { reports, warning } = await loadReportsForFunds(pageCiks.map((cik) => ({ cik, name: cik })), {
+        from, to, signal, forceRefresh: options.forceRefresh,
+        periods: new Map(pageCiks.map((cik) => [cik, holders.periodOfReport])),
+      });
+      const funds = pageCiks.map((cik) => ({ cik, name: reports.get(cik)?.filings.at(-1)?.companyName || cik }));
       return {
-        rows: buildBrowserRows({ funds, forms, source: "ticker" }),
+        rows: buildBrowserRows({ funds, reports, source: "ticker" }),
+        warning,
         period: holders.periodOfReport,
         hasMore: holders.ciks.length > offset + pageCiks.length,
         nextOffset: offset + pageCiks.length,
@@ -128,20 +160,22 @@ export async function loadBrowserRows(
   if (!trimmed) return { rows: [], quarter };
   if (/^\d{6,10}$/.test(trimmed)) {
     const cik = normalizeCik(trimmed);
-    const forms = await listThirteenFForms(cik, from, to, 1, signal, apiOptions);
-    const fund = { cik, name: forms[0]?.companyName || cik };
-    const formsMap = new Map<string, NonNullable<typeof forms[0]>>();
-    if (forms[0]) formsMap.set(cik, forms[0]);
+    const forms = await listThirteenFForms(cik, from, to, 100, signal, apiOptions);
+    const report = buildPeriodReports(forms)[0];
+    const form = report?.filings.at(-1);
+    const fund = { cik, name: form?.companyName || cik };
+    const reports = new Map<string, ThirteenFPeriodReport>();
+    if (report) reports.set(cik, report);
     return {
-      rows: buildBrowserRows({ funds: [fund], forms: formsMap, source: "funds" }),
-      period: forms[0]?.periodOfReport,
+      rows: buildBrowserRows({ funds: [fund], reports, source: "funds" }),
+      period: form?.periodOfReport,
       hasMore: false,
       nextOffset: offset + 1,
     };
   }
   const funds = await searchThirteenFFunds(trimmed, browserLimit, signal, pageApiOptions);
-  const [forms, topFunds] = await Promise.all([
-    loadLatestFormsForFunds(funds.slice(0, Math.min(browserLimit, FORM_ENRICHMENT_LIMIT)), { from, to, signal, concurrency: 5, forceRefresh: options.forceRefresh }),
+  const [{ reports, warning }, topFunds] = await Promise.all([
+    loadReportsForFunds(funds.slice(0, Math.min(browserLimit, FORM_ENRICHMENT_LIMIT)), { from, to, signal, forceRefresh: options.forceRefresh }),
     listTopThirteenFFunds(quarter, browserLimit, signal, { forceRefresh: options.forceRefresh }).catch(() => []),
   ]);
   const topByCik = new Map(topFunds.map((fund) => [fund.cik, fund]));
@@ -152,10 +186,11 @@ export async function loadBrowserRows(
     rows: buildBrowserRows({
       funds,
       topFunds: matchedTopFunds,
-      forms,
+      reports,
       source: "funds",
     }),
     quarter,
+    warning,
     hasMore: funds.length >= browserLimit,
     nextOffset: offset + funds.length,
   };
@@ -202,7 +237,12 @@ export async function loadFundDetail(
   }
   const [latestHoldings, previousHoldings] = await Promise.all([
     loadReport(latestReport),
-    loadReport(previousReport),
+    loadReport(previousReport).catch((error) => {
+      if (signal?.aborted) throw error;
+      if (previousReport) previousReport.complete = false;
+      warnings.push(`${previousReport?.periodOfReport ?? "Prior quarter"}: holdings unavailable; comparison unavailable.`);
+      return [];
+    }),
   ]);
   return {
     cik: normalizeCik(cik),

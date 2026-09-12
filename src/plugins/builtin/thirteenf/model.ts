@@ -106,27 +106,32 @@ export function buildBrowserRows(options: {
   funds?: ThirteenFFund[];
   topFunds?: ThirteenFTopFund[];
   forms?: Map<string, ThirteenFFormSummary>;
+  reports?: Map<string, ThirteenFPeriodReport>;
   latestFilings?: ThirteenFFormSummary[];
   source: FundBrowserRow["source"];
 }): FundBrowserRow[] {
   if (options.latestFilings) {
-    return dedupeLatestForms(options.latestFilings).map((form) => ({
-      id: `${options.source}:${form.cik}`,
-      cik: form.cik,
-      name: form.companyName || form.cik,
-      periodOfReport: form.periodOfReport,
-      filedAsOfDate: form.filedAsOfDate,
-      tableValueTotal: form.tableValueTotal,
-      tableEntryTotal: form.tableEntryTotal,
-      source: options.source,
-    }));
+    return dedupeLatestForms(options.latestFilings).map((form) => {
+      const report = options.reports?.get(form.cik);
+      return {
+        id: `${options.source}:${form.cik}`,
+        cik: form.cik,
+        name: form.companyName || form.cik,
+        periodOfReport: form.periodOfReport,
+        filedAsOfDate: form.filedAsOfDate,
+        tableValueTotal: browserReportTotal(form, report, "tableValueTotal"),
+        tableEntryTotal: browserReportTotal(form, report, "tableEntryTotal"),
+        source: options.source,
+      };
+    });
   }
 
   const topByCik = new Map((options.topFunds ?? []).map((fund) => [fund.cik, fund]));
   const funds = options.funds ?? options.topFunds ?? [];
   return funds.map((fund) => {
     const topFund = topByCik.get(fund.cik);
-    const latestForm = options.forms?.get(fund.cik);
+    const report = options.reports?.get(fund.cik);
+    const latestForm = report?.filings.at(-1) ?? options.forms?.get(fund.cik);
     // Performance belongs to its supplied quarter; a later (or stale) filing
     // cannot supply that quarter's portfolio value or filing date.
     const periodOfReport = options.source === "performance"
@@ -139,12 +144,22 @@ export function buildBrowserRows(options: {
       name: fund.name,
       periodOfReport,
       filedAsOfDate: form?.filedAsOfDate,
-      tableValueTotal: form?.tableValueTotal,
-      tableEntryTotal: form?.tableEntryTotal,
+      tableValueTotal: browserReportTotal(form, report, "tableValueTotal"),
+      tableEntryTotal: browserReportTotal(form, report, "tableEntryTotal"),
       estQuarterReturn: topFund && topFund.periodOfReport === periodOfReport ? topFund.pnl : null,
       source: options.source,
     };
   });
+}
+
+function browserReportTotal(
+  form: ThirteenFFormSummary | undefined,
+  report: ThirteenFPeriodReport | undefined,
+  key: "tableValueTotal" | "tableEntryTotal",
+): number | null | undefined {
+  if (!form) return undefined;
+  if (report?.periodOfReport === form.periodOfReport) return report.complete ? report[key] : null;
+  return !form.isAmendment || form.amendmentType?.trim().toUpperCase() === "RESTATEMENT" ? form[key] : null;
 }
 
 export function dedupeLatestForms(forms: ThirteenFFormSummary[]): ThirteenFFormSummary[] {

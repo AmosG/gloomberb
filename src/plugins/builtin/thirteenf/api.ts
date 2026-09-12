@@ -356,31 +356,3 @@ export async function lookupThirteenFHoldersByCusip(
       : [],
   };
 }
-
-export async function loadLatestFormsForFunds(
-  funds: ThirteenFFund[],
-  options: { from: string; to: string; signal?: AbortSignal; concurrency?: number; forceRefresh?: boolean },
-): Promise<Map<string, ThirteenFFormSummary>> {
-  const forms = new Map<string, ThirteenFFormSummary>();
-  const concurrency = options.concurrency ?? 6;
-  let index = 0;
-
-  async function worker() {
-    while (index < funds.length) {
-      const fund = funds[index++];
-      if (!fund) continue;
-      try {
-        const fundForms = await listThirteenFForms(fund.cik, options.from, options.to, 1, options.signal, {
-          forceRefresh: options.forceRefresh,
-        });
-        const latest = fundForms[0];
-        if (latest) forms.set(fund.cik, latest);
-      } catch {
-        // A missing form should not hide the fund row.
-      }
-    }
-  }
-
-  await Promise.all(Array.from({ length: Math.min(concurrency, funds.length) }, () => worker()));
-  return forms;
-}
