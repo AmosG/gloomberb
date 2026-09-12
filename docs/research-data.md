@@ -38,6 +38,10 @@ Current multiples use the latest available reporting period before evaluating th
 
 SEC EPS uses corroborated split-adjusted share bases. Unverified bases are unavailable. Nonpositive P/E values display as **N/M** and are excluded from meaningful P/E rankings.
 
+Chart-derived P/E preserves finite reported diluted EPS, including zero. When it is absent or unusable, the fallback divides reported common-shareholder income by the first positive share count available: diluted average shares, basic average shares, ordinary shares, then issued shares. Aggregate net income is used only when common income is unavailable. This is a derived income-per-selected-share estimate, not reconstructed reported diluted EPS: the source may omit convertible-claim numerator adjustments or a compatible depositary-receipt basis. The app does not guess those adjustments or deduct preferred/minority claims a second time. Reported EPS and the financial-statement rows remain unchanged.
+
+TTM fallback income requires four complete quarters of one numerator field; partial common-income coverage withholds the fallback even if aggregate income is complete. Complete reported EPS still takes precedence. TTM average shares use the arithmetic mean of four reported quarterly averages, an approximation rather than a reconstructed daily weighted annual denominator; balance-sheet share counts remain period-end values. Availability follows the selected income and share fields, including every quarterly input used in a derived value.
+
 Market capitalization can come from a financial snapshot when a current quote does not supply it. Its retrieval time is not its valuation date. Source and freshness details remain attached to the affected value; market-cap comparisons require a valid currency conversion.
 
 Relative Valuation excludes explicitly stale quote prices, changes, and quote market caps from comparisons. Its exports retain the original quote, source timestamp and stale status, and identify incomplete output. Separately reported fundamentals and fallback market caps retain their own source and retrieval time; these are not dated by the rejected quote.

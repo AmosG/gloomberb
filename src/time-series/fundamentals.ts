@@ -14,6 +14,7 @@ type NumericStatementField =
   | "grossProfit"
   | "operatingIncome"
   | "netIncome"
+  | "netIncomeCommonStockholders"
   | "ebitda"
   | "operatingCashFlow"
   | "capitalExpenditure"
@@ -32,6 +33,7 @@ type NumericStatementField =
 type InternalStatement = FinancialStatement & {
   __timeSeriesDerivedFields?: NumericStatementField[];
   __timeSeriesTtm?: boolean;
+  __timeSeriesIncompleteCommonIncome?: boolean;
 };
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
@@ -41,6 +43,7 @@ export const QUARTERLY_FLOW_FIELDS: readonly NumericStatementField[] = [
   "grossProfit",
   "operatingIncome",
   "netIncome",
+  "netIncomeCommonStockholders",
   "ebitda",
   "operatingCashFlow",
   "capitalExpenditure",
@@ -375,6 +378,10 @@ function buildTtmStatements(statements: readonly FinancialStatement[]): Internal
     };
     const unresolvedEps = window.find((statement) => statement.epsBasis?.status === "unresolved");
     if (unresolvedEps) ttm.epsBasis = unresolvedEps.epsBasis;
+    const commonIncomeCount = window.filter((statement) => finiteNumber(statement.netIncomeCommonStockholders)).length;
+    // Known common claims in some quarters cannot be ignored by substituting
+    // aggregate income for the entire window or only its missing quarters.
+    if (commonIncomeCount > 0 && commonIncomeCount < window.length) ttm.__timeSeriesIncompleteCommonIncome = true;
 
     for (const field of [...QUARTERLY_FLOW_FIELDS, ...QUARTERLY_AVERAGE_FIELDS]) {
       const values = window.map((statement) => statementNumber(statement, field));
@@ -479,17 +486,19 @@ function selectedCash(statement: FinancialStatement): SelectedStatementField | n
 }
 
 function selectedEps(
-  statement: FinancialStatement,
+  statement: InternalStatement,
 ): { value: number; dependencies: NumericStatementField[] } | null {
   if (statement.epsBasis?.status === "unresolved") return null;
   if (finiteNumber(statement.eps)) {
     return { value: statement.eps, dependencies: ["eps"] };
   }
+  if (statement.__timeSeriesIncompleteCommonIncome) return null;
   const shares = selectedShares(statement);
-  if (!shares || !finiteNumber(statement.netIncome)) return null;
+  const income = selectStatementField(statement, ["netIncomeCommonStockholders", "netIncome"]);
+  if (!shares || !income) return null;
   return {
-    value: statement.netIncome / shares.value,
-    dependencies: ["netIncome", shares.field],
+    value: income.value / shares.value,
+    dependencies: [income.field, shares.field],
   };
 }
 
@@ -621,11 +630,11 @@ function historicalValuation(
   return { value: comparablePrice === null ? null : valuationAtPrice(statement, metric, comparablePrice), integrity: price.integrity, issue: price.issue };
 }
 
-function hasValuationInputs(statement: FinancialStatement, metric: string): boolean {
+function hasValuationInputs(statement: InternalStatement, metric: string): boolean {
   if (metric === "trailingPE") {
     return statement.epsBasis?.status === "unresolved"
-      || finiteNumber(statement.eps)
-      || (finiteNumber(statement.netIncome) && selectedShares(statement) !== null);
+      || statement.__timeSeriesIncompleteCommonIncome === true
+      || selectedEps(statement) !== null;
   }
   if (!selectedShares(statement)) return false;
   if (metric === "priceSales") return finiteNumber(statement.totalRevenue);
