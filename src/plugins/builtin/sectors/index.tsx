@@ -59,7 +59,7 @@ function SectorPerformancePane({ focused, width, height }: PaneProps) {
     [activeCollection.id, savedIndustryEtfs, savedSectorEtfs],
   );
   const [rowsByCollection, setRowsByCollection] = useDebouncedPluginPaneState<SectorRowsByCollection>(
-    "rowsByCollection:v3",
+    "rowsByCollection:v4",
     INITIAL_ROWS_BY_COLLECTION,
   );
   const [lastRefreshByCollection, setLastRefreshByCollection] = useDebouncedPluginPaneState<SectorRefreshByCollection>(
