@@ -8,7 +8,7 @@ import {
 } from "../../../components";
 import type { AnalystResearchData } from "../../../types/financials";
 import { blendHex, colors, priceColor } from "../../../theme/colors";
-import { formatCurrency, formatPercent } from "../../../utils/format";
+import { formatPercent } from "../../../utils/format";
 import { useAssetData } from "../../runtime";
 import { handleRefreshKey, loadingErrorFooterInfo } from "../shared/table-pane";
 import { SignInWall } from "../cloud/auth-actions";
@@ -17,6 +17,8 @@ import { useBoundTicker as useSymbolBinding, useTickerRequest } from "../shared/
 import { loadAnalystResearch } from "./client";
 import {
   DEFAULT_RATING_SORT,
+  analystTargetCurrency,
+  formatAnalystPrice,
   buildAnalystSummaryLines,
   buildRatingColumns,
   formatRatingTarget,
@@ -56,7 +58,7 @@ function ratingTargetBackground(delta: number | null): string | undefined {
 function AnalystSummary({ data }: { data: AnalystResearchData | null }) {
   const target = data?.priceTarget;
   const upside = targetUpside(target);
-  const currency = target?.currency ?? data?.currency ?? "USD";
+  const currency = analystTargetCurrency(data);
   const lines = buildAnalystSummaryLines(data);
 
   // The table body already reports loading, error, and empty states.
@@ -66,7 +68,7 @@ function AnalystSummary({ data }: { data: AnalystResearchData | null }) {
     <Box flexDirection="column" paddingX={1} height={1 + lines.length}>
       <Box height={1} flexDirection="row">
         <Text fg={colors.textBright} attributes={TextAttributes.BOLD}>
-          {target?.average != null ? formatCurrency(target.average, currency) : "-"}
+          {formatAnalystPrice(target?.average, currency)}
         </Text>
         <Text fg={colors.textDim}> avg target </Text>
         <Text fg={upside == null ? colors.textDim : priceColor(upside)}>
@@ -100,7 +102,7 @@ export function AnalystResearchView({ focused, width, height }: { focused: boole
   const { data, loading, error, reload } = useTickerRequest<AnalystResearchData>(loader, symbol, exchange);
   const authWall = !data && isCloudSessionRequired(error);
   const rows = useMemo(() => sortRatingRows(data?.ratings ?? [], sortPreference), [data?.ratings, sortPreference]);
-  const ratingCurrency = data?.priceTarget?.currency ?? data?.currency ?? "USD";
+  const ratingCurrency = analystTargetCurrency(data);
   const columns = useMemo(
     () => buildRatingColumns(data?.ratings ?? [], ratingCurrency),
     [data?.ratings, ratingCurrency],

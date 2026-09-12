@@ -7,12 +7,15 @@ import type {
   HeadlessPaneLoadArgs,
 } from "../../../types/plugin";
 import type { AnalystResearchData } from "../../../types/financials";
-import { formatCurrency, formatPercent } from "../../../utils/format";
+import { formatPercent } from "../../../utils/format";
 import { loadAnalystResearch } from "./client";
 import {
+  analystTargetCurrency,
+  formatAnalystPrice,
+  formatRecommendationMix,
+  recommendationMix,
   formatRatingLabel,
   formatRatingTarget,
-  latestRecommendation,
   recommendationTotal,
   sortRatingRows,
   targetUpside,
@@ -29,7 +32,7 @@ const RATING_COLUMNS: HeadlessPaneColumn[] = [
     header: "Target",
     format: (_value, row) => formatRatingTarget(
       row as unknown as AnalystResearchData["ratings"][number],
-      String(row.currency ?? "USD"),
+      typeof row.currency === "string" ? row.currency : undefined,
     ).trim(),
   },
   { key: "prior", header: "Prior" },
@@ -45,14 +48,13 @@ const SORT_COLUMNS: Record<string, RatingColumnId> = {
 
 function overviewEntries(data: AnalystResearchData): HeadlessPaneEntry[] {
   const target = data.priceTarget;
-  const currency = target?.currency ?? data.currency ?? "USD";
-  const recommendation = latestRecommendation(data);
+  const currency = analystTargetCurrency(data);
   const upside = targetUpside(target);
   return [
     {
       label: "Average target",
       value: target?.average ?? null,
-      formatted: target?.average == null ? "-" : formatCurrency(target.average, currency),
+      formatted: formatAnalystPrice(target?.average, currency),
     },
     {
       label: "Target upside",
@@ -62,14 +64,14 @@ function overviewEntries(data: AnalystResearchData): HeadlessPaneEntry[] {
     {
       label: "Upside reference price",
       value: target?.current ?? null,
-      formatted: target?.current == null ? "-" : formatCurrency(target.current, currency),
+      formatted: formatAnalystPrice(target?.current, currency),
     },
     {
       label: "Target range",
       value: target ? { low: target.low, median: target.median, high: target.high } : null,
       formatted: target
         ? [target.low, target.median, target.high]
-          .map((value) => value == null ? "-" : formatCurrency(value, currency))
+          .map((value) => formatAnalystPrice(value, currency))
           .join(" / ")
         : "-",
     },
@@ -81,17 +83,8 @@ function overviewEntries(data: AnalystResearchData): HeadlessPaneEntry[] {
     { label: "Analysts", value: recommendationTotal(data) },
     {
       label: "Recommendation mix",
-      value: recommendation ? {
-        period: recommendation.period,
-        strongBuy: recommendation.strongBuy ?? 0,
-        buy: recommendation.buy ?? 0,
-        hold: recommendation.hold ?? 0,
-        sell: recommendation.sell ?? 0,
-        strongSell: recommendation.strongSell ?? 0,
-      } : null,
-      formatted: recommendation
-        ? `SB ${recommendation.strongBuy ?? 0}  B ${recommendation.buy ?? 0}  H ${recommendation.hold ?? 0}  S ${(recommendation.sell ?? 0) + (recommendation.strongSell ?? 0)}`
-        : "-",
+      value: recommendationMix(data),
+      formatted: formatRecommendationMix(data),
     },
   ];
 }
@@ -105,7 +98,10 @@ export interface AnalystResearchHeadlessDependencies {
 }
 
 const defaultDependencies: AnalystResearchHeadlessDependencies = {
-  loadData: (symbol, _args, ctx) => loadAnalystResearch(ctx.marketData, symbol),
+  async loadData(symbol, _args, ctx) {
+    const instrument = await ctx.resolveInstrument?.(symbol);
+    return loadAnalystResearch(ctx.marketData, symbol, instrument?.exchange);
+  },
 };
 
 export function createAnalystResearchHeadless(
@@ -147,7 +143,7 @@ export function createAnalystResearchHeadless(
     async load(args, ctx) {
       const symbol = args.symbols[0]!;
       const data = await dependencies.loadData(symbol, args, ctx);
-      const currency = data.priceTarget?.currency ?? data.currency ?? "USD";
+      const currency = analystTargetCurrency(data);
       const ratings = sortRatingRows(data.ratings, {
         columnId: SORT_COLUMNS[String(args.options.sort)] ?? "date",
         direction: args.options.order === "asc" ? "asc" : "desc",
@@ -156,7 +152,7 @@ export function createAnalystResearchHeadless(
         .map((rating) => ({
           ...rating,
           target: rating.currentPriceTarget ?? rating.priorPriceTarget ?? null,
-          currency,
+          currency: currency ?? null,
         }));
       const sections: HeadlessBundleSection[] = [
         { title: "Summary", entries: overviewEntries(data) },
@@ -168,7 +164,7 @@ export function createAnalystResearchHeadless(
         metadata: {
           symbol: data.symbol || symbol,
           name: data.name ?? null,
-          currency,
+          currency: currency ?? null,
           fetchedAt: data.fetchedAt,
           stale: data.stale,
         },

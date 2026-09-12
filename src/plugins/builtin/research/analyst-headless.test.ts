@@ -69,3 +69,20 @@ describe("analyst research headless model", () => {
     expect(ratings.map((row) => row.firm)).toEqual(["Beta", "Alpha"]);
   });
 });
+
+test("default analyst loader keeps remembered venue and returns unknown currency/counts without defaults", async () => {
+  const calls: Array<[string, string | undefined]> = [];
+  const headless = createAnalystResearchHeadless();
+  const ctx = context();
+  ctx.resolveInstrument = async (symbol) => ({ symbol, exchange: "LSE" });
+  ctx.marketData = createTestDataProvider({ getAnalystResearch: async (symbol, exchange) => {
+    calls.push([symbol, exchange]);
+    return { ...data, symbol, currency: undefined, priceTarget: { average: 0, current: 2 }, recommendations: [] };
+  } });
+  const result = await headless.load(args(), ctx);
+  expect(calls).toEqual([["AMD", "LSE"]]);
+  expect(result.metadata?.currency).toBeNull();
+  expect(result.sections[0]?.entries?.[0]).toMatchObject({ value: 0, formatted: "0.00 (ccy?)" });
+  expect(result.sections[0]?.entries?.find((entry) => entry.label === "Analysts")?.value).toBeNull();
+  expect(result.sections[1]?.rows?.[0]?.currency).toBeNull();
+});

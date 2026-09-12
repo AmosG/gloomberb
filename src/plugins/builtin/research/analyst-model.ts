@@ -1,5 +1,6 @@
 import type { DataTableColumn } from "../../../components";
 import type { AnalystRatingRecord, AnalystResearchData } from "../../../types/financials";
+import { resolveCurrencyUnit } from "../../../utils/currency-units";
 import { formatCurrency, formatNumber } from "../../../utils/format";
 import { compareSortValues, type SortDirection } from "../../../utils/sort-values";
 
@@ -19,22 +20,59 @@ export function targetUpside(target: AnalystResearchData["priceTarget"]): number
 }
 
 export function latestRecommendation(data: AnalystResearchData | null) {
-  return data?.recommendations[0] ?? null;
+  const rows = data?.recommendations ?? [];
+  return rows.find((row) => ["current month", "0m"].includes(row.period.trim().toLowerCase().replace(/_/g, " ")))
+    ?? rows[0] ?? null;
 }
 
-export function recommendationTotal(data: AnalystResearchData | null): number {
+function recommendationCount(value: number | undefined): number | null {
+  return value != null && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+export function recommendationMix(data: AnalystResearchData | null) {
   const rec = latestRecommendation(data);
-  if (!rec) return 0;
-  return (rec.strongBuy ?? 0) + (rec.buy ?? 0) + (rec.hold ?? 0) + (rec.sell ?? 0) + (rec.strongSell ?? 0);
+  return rec ? {
+    period: rec.period,
+    strongBuy: recommendationCount(rec.strongBuy),
+    buy: recommendationCount(rec.buy),
+    hold: recommendationCount(rec.hold),
+    sell: recommendationCount(rec.sell),
+    strongSell: recommendationCount(rec.strongSell),
+  } : null;
+}
+
+export function recommendationTotal(data: AnalystResearchData | null): number | null {
+  const rec = recommendationMix(data);
+  if (!rec) return null;
+  const values = [rec.strongBuy, rec.buy, rec.hold, rec.sell, rec.strongSell];
+  return values.every((value): value is number => value != null)
+    ? values.reduce((sum, value) => sum + value, 0) : null;
+}
+
+export function formatRecommendationMix(data: AnalystResearchData | null): string {
+  const rec = recommendationMix(data);
+  if (!rec) return "-";
+  const sells = rec.sell != null && rec.strongSell != null ? rec.sell + rec.strongSell : null;
+  return `SB ${rec.strongBuy ?? "-"}  B ${rec.buy ?? "-"}  H ${rec.hold ?? "-"}  S ${sells ?? "-"}`;
 }
 
 export function formatRatingLabel(value: number | undefined): string {
-  return value == null ? "-" : `${formatNumber(value, 1)}/10`;
+  return value == null || !Number.isFinite(value) ? "-" : `${formatNumber(value, 1)}/10`;
 }
 
-export function formatPriceTarget(value: number | undefined, currency: string): string {
-  if (value == null) return "-";
-  return formatCurrency(value, currency)
+export function analystTargetCurrency(data: AnalystResearchData | null): string | undefined {
+  return data?.priceTarget?.currency?.trim() || data?.currency?.trim() || undefined;
+}
+
+export function formatAnalystPrice(value: number | undefined, currency: string | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "-";
+  if (!currency?.trim()) return `${formatNumber(value)} (ccy?)`;
+  const unit = resolveCurrencyUnit(currency);
+  return formatCurrency(value / unit.divisor, unit.currency);
+}
+
+export function formatPriceTarget(value: number | undefined, currency: string | undefined): string {
+  return formatAnalystPrice(value, currency)
     .replace(/\.00\b/, "")
     .replace(/(\.\d)0\b/, "$1");
 }
@@ -48,7 +86,7 @@ export interface RatingTargetColumnSizing {
 
 export function formatRatingTarget(
   row: AnalystResearchData["ratings"][number],
-  currency: string,
+  currency: string | undefined,
   sizing?: Partial<RatingTargetColumnSizing>,
 ): string {
   const current = row.currentPriceTarget;
@@ -63,7 +101,8 @@ export function formatRatingTarget(
 }
 
 export function ratingTargetDelta(row: AnalystResearchData["ratings"][number]): number | null {
-  if (row.currentPriceTarget == null || row.priorPriceTarget == null) return null;
+  if (row.currentPriceTarget == null || row.priorPriceTarget == null
+    || !Number.isFinite(row.currentPriceTarget) || !Number.isFinite(row.priorPriceTarget)) return null;
   return row.currentPriceTarget - row.priorPriceTarget;
 }
 
@@ -100,7 +139,7 @@ const BASE_RATING_COLUMNS: RatingColumn[] = [
 
 export function buildRatingColumns(
   rows: readonly AnalystRatingRecord[],
-  currency: string,
+  currency: string | undefined,
 ): RatingColumn[] {
   const targetSizing = rows.reduce<RatingTargetColumnSizing>(
     (sizing, row) => ({
@@ -200,8 +239,8 @@ export function buildAnalystSummaryLines(data: AnalystResearchData | null): stri
   if (!data) return [];
 
   const target = data.priceTarget;
-  const currency = target?.currency ?? data.currency ?? "USD";
-  const price = (value: number | undefined) => value != null ? formatCurrency(value, currency) : "-";
+  const currency = analystTargetCurrency(data);
+  const price = (value: number | undefined) => formatAnalystPrice(value, currency);
   const rec = latestRecommendation(data);
   const total = recommendationTotal(data);
   const lines: string[] = [];
@@ -212,11 +251,11 @@ export function buildAnalystSummaryLines(data: AnalystResearchData | null): stri
   }
 
   if (data.fetchedAt || data.stale) lines.push(`${data.stale ? "Stale data" : "Fetched"}${data.fetchedAt ? ` ${data.fetchedAt}` : ""}`);
-  if (data.recommendationRating != null || rec || total > 0) {
+  if (data.recommendationRating != null || rec || total != null) {
     lines.push([
       data.recommendationRating != null ? `rating ${formatRatingLabel(data.recommendationRating)}` : null,
-      rec ? `SB ${rec.strongBuy ?? 0}  B ${rec.buy ?? 0}  H ${rec.hold ?? 0}  S ${(rec.sell ?? 0) + (rec.strongSell ?? 0)}` : null,
-      total > 0 ? `${total} analysts${rec?.period ? ` (${compactPeriod(rec.period)})` : ""}` : null,
+      rec ? formatRecommendationMix(data) : null,
+      total != null ? `${total} analysts${rec?.period ? ` (${compactPeriod(rec.period)})` : ""}` : rec?.period ? compactPeriod(rec.period) : null,
     ].filter(Boolean).join("   "));
   }
 
