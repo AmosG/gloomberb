@@ -1,3 +1,4 @@
+import { resolveCurrencyUnit } from "../../../utils/currency-units";
 import { createThrottledFetch, type ThrottledFetchTransport } from "../../../utils/throttled-fetch";
 import type { PluginPersistence } from "../../../types/plugin";
 import { apiClient } from "../../../api-client";
@@ -225,6 +226,14 @@ export function screenerVolumeRatio(volume: number | null, average: number | nul
   return volume != null && average != null && average > 0 ? volume / average : null;
 }
 
+/** Cross-source endpoints require explicit compatible price units. */
+export function convertScreenerPriceUnit(value: number | undefined, from: string, to: string): number | undefined {
+  const source = resolveCurrencyUnit(from);
+  const target = resolveCurrencyUnit(to);
+  return value != null && Number.isFinite(value) && source.currency && source.currency === target.currency
+    ? value / source.divisor * target.divisor : undefined;
+}
+
 export function parseScreenerResponse(data: any): ScreenerQuote[] {
   const quotes = data?.finance?.result?.[0]?.quotes;
   if (data?.finance?.error != null || !Array.isArray(quotes)) {
@@ -305,6 +314,8 @@ function mergeCloudScreenerItem(
   item: CloudMarketScreenerItem,
   metadata?: ScreenerQuote,
 ): ScreenerQuote {
+  const currency = typeof item.currency === "string" ? item.currency.trim() : "";
+  const metadataPrice = (value: number | undefined) => convertScreenerPriceUnit(value, metadata?.currency ?? "", currency);
   return {
     symbol: item.symbol,
     name: item.name && item.name !== item.symbol
@@ -317,11 +328,11 @@ function mergeCloudScreenerItem(
     avgVolume: metadata?.avgVolume ?? null,
     volumeRatio: screenerVolumeRatio(screenerVolume(item.volume), metadata?.avgVolume ?? null),
     marketCap: metadata?.marketCap,
-    currency: item.currency || metadata?.currency || "",
-    fiftyTwoWeekHigh: item.high52w ?? metadata?.fiftyTwoWeekHigh,
-    fiftyTwoWeekLow: item.low52w ?? metadata?.fiftyTwoWeekLow,
-    dayHigh: item.dayHigh ?? metadata?.dayHigh,
-    dayLow: item.dayLow ?? metadata?.dayLow,
+    currency,
+    fiftyTwoWeekHigh: screenerNumber(item.high52w) ?? metadataPrice(metadata?.fiftyTwoWeekHigh),
+    fiftyTwoWeekLow: screenerNumber(item.low52w) ?? metadataPrice(metadata?.fiftyTwoWeekLow),
+    dayHigh: screenerNumber(item.dayHigh) ?? metadataPrice(metadata?.dayHigh),
+    dayLow: screenerNumber(item.dayLow) ?? metadataPrice(metadata?.dayLow),
     exchange: item.exchange || metadata?.exchange || "",
     lastUpdated: item.lastUpdated,
   };

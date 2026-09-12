@@ -5,7 +5,7 @@ import type { QueryEntry } from "../../../market-data/result-types";
 import { formatCurrency, formatNumber } from "../../../utils/format";
 import type { DataTableColumn } from "../../../components";
 import { compareSortValues, type SortDirection } from "../../../utils/sort-values";
-import { MARKET_SUMMARY_SYMBOLS, screenerNumber, screenerVolume, screenerVolumeRatio, type MarketSummaryQuote, type ScreenerCategory, type ScreenerQuote } from "./screener";
+import { MARKET_SUMMARY_SYMBOLS, convertScreenerPriceUnit, screenerNumber, screenerVolume, screenerVolumeRatio, type MarketSummaryQuote, type ScreenerCategory, type ScreenerQuote } from "./screener";
 
 export type TabId = "gainers" | "losers" | "actives" | "trending";
 
@@ -184,11 +184,7 @@ export function overlayMarketMoverQuotes(
   return overlayScreenerQuoteEntries(rows, entries).map((row, index) => {
     const original = rows[index]!;
     if (row === original) return row;
-    const sourceUnit = resolveCurrencyUnit(original.currency);
-    const currentUnit = resolveCurrencyUnit(row.currency);
-    const sameCurrency = !!sourceUnit.currency && sourceUnit.currency === currentUnit.currency;
-    const convert = (value: number | undefined) => sameCurrency && value != null
-      ? value / sourceUnit.divisor * currentUnit.divisor : undefined;
+    const convert = (value: number | undefined) => convertScreenerPriceUnit(value, original.currency, row.currency);
     return {
       ...row,
       fiftyTwoWeekLow: convert(original.fiftyTwoWeekLow),

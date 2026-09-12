@@ -5,7 +5,7 @@ import { renderHeadlessPaneText } from "../../../cli/pane-functions/headless";
 import { createMarketMoversHeadless } from "./headless";
 import { loadMarketMoverTab } from "./client";
 import { createRows, sortRows } from "./model";
-import { attachMarketMoversPersistence, fetchScreenerResult, parseScreenerResponse, resetMarketMoversPersistence } from "./screener";
+import { attachMarketMoversPersistence, fetchPreferredMarketMovers, fetchScreenerResult, parseScreenerResponse, resetMarketMoversPersistence } from "./screener";
 
 const payload = (quotes: unknown[]) => ({ finance: { result: [{ quotes }], error: null } });
 const raw = (symbol: string, fields = {}) => ({ symbol, regularMarketPrice: 10, currency: "USD", ...fields });
@@ -90,4 +90,30 @@ test("declared minor currencies normalize only display, without changing raw row
   expect(text.split("\n").find(line => line.includes("UNIT3"))).toContain("1.25");
   expect(text.split("\n").find(line => line.includes("UNIT4"))).toContain("£125.00");
   expect(text.split("\n").find(line => line.includes("UNIT5"))).not.toContain("$");
+});
+
+
+test("preferred Cloud prices qualify Yahoo range units before default headless projection", async () => {
+  const metadata = parseScreenerResponse(payload([raw("UNIT", { regularMarketPrice: 125, currency: "GBp", fiftyTwoWeekLow: 100, fiftyTwoWeekHigh: 200, regularMarketDayLow: 110, regularMarketDayHigh: 150 })]));
+  const load = async (currency: string, ownBounds = false) => {
+    const result = await fetchPreferredMarketMovers("day_gainers", 25, undefined, {
+      isCloudEligible: () => true,
+      fetchCloud: async () => ({ status: "success", data: { items: [{ symbol: "UNIT", price: 1.25, change: 0, changePercent: 0, volume: 0, currency, exchange: "LSE", ...(ownBounds ? { low52w: 1, high52w: 2 } : {}) }] } } as any),
+      fetchYahoo: async () => ({ data: metadata, stale: false }),
+    });
+    const definition = createMarketMoversHeadless({ load: async (_args, tab) => ({ ...result, tab }) });
+    const args = { rawArgument: "", argument: null, symbols: [], options: { list: "gainers" } };
+    const model = await definition.load(args, { marketData: createTestDataProvider() } as any);
+    return { model, text: renderHeadlessPaneText(definition, model, args, "MOST") };
+  };
+  const converted = await load("GBP");
+  expect(converted.model.rows[0]).toMatchObject({ price: 1.25, currency: "GBP", fiftyTwoWeekLow: 1, fiftyTwoWeekHigh: 2, dayLow: 1.1, dayHigh: 1.5, rangePositionPercent: 25 });
+  expect(converted.text).toContain("£1.25");
+  expect((await load("GBP", true)).model.rows[0]!.rangePositionPercent).toBe(25);
+  for (const currency of ["", "USD"]) {
+    const unknown = await load(currency);
+    expect(unknown.model.rows[0]).toMatchObject({ price: 1.25, currency, rangePositionPercent: null });
+    expect(unknown.model.rows[0]!.fiftyTwoWeekLow).toBeUndefined();
+    expect(unknown.text).not.toContain("£");
+  }
 });
