@@ -1,21 +1,38 @@
 import { useCallback, useEffect, useRef, type Dispatch } from "react";
 import type { MarketDataCoordinator } from "../../market-data/coordinator";
-import { instrumentFromTicker } from "../../market-data/request-types";
+import { instrumentFromTicker, type InstrumentRef } from "../../market-data/request-types";
+import { buildInstrumentKey } from "../../market-data/selectors";
 import type { PluginRegistry } from "../../plugins/registry";
 import type { AppAction } from "../../state/app/context";
+import type { InitializeAppStateArgs } from "../../state/app/bootstrap";
 import { TickerRefreshQueue } from "../../state/ticker-refresh-queue";
-import type { TickerFinancials } from "../../types/financials";
 import type { TickerRecord } from "../../types/ticker";
 
 const refreshInFlight: Set<string> = (globalThis as any).__refreshInFlight ??= new Set<string>();
 const quoteRefreshInFlight: Set<string> = (globalThis as any).__quoteRefreshInFlight ??= new Set<string>();
+const refreshingSymbols: Map<string, number> = (globalThis as any).__refreshingSymbols ??= new Map<string, number>();
+
+type RefreshEntry = { ticker: TickerRecord; priority: number; instrument?: InstrumentRef };
+type InstrumentRefreshEntry = RefreshEntry & { instrument: InstrumentRef; key: string };
 
 export interface AppTickerRefreshRuntime {
-  primeCachedFinancials: (entries: Array<{ ticker: TickerRecord; financials: TickerFinancials }>) => void;
-  refreshQuote: (symbol: string, exchange?: string, tickerOverride?: TickerRecord | null, priority?: number) => void;
-  refreshQuotesBatch: (entries: Array<{ ticker: TickerRecord; priority: number }>) => void;
-  refreshTicker: (symbol: string, exchange?: string, tickerOverride?: TickerRecord | null, priority?: number) => void;
-  refreshTickersBatch: (entries: Array<{ ticker: TickerRecord; priority: number }>) => void;
+  primeCachedFinancials: NonNullable<InitializeAppStateArgs["primeCachedFinancials"]>;
+  refreshQuote: InitializeAppStateArgs["refreshQuote"];
+  refreshQuotesBatch: NonNullable<InitializeAppStateArgs["refreshQuotesBatch"]>;
+  refreshTicker: InitializeAppStateArgs["refreshTicker"];
+  refreshTickersBatch: NonNullable<InitializeAppStateArgs["refreshTickersBatch"]>;
+}
+
+function resolveRefreshEntries(entries: RefreshEntry[]): InstrumentRefreshEntry[] {
+  const targets = new Map<string, InstrumentRefreshEntry>();
+  for (const entry of entries) {
+    const instrument = entry.instrument ?? instrumentFromTicker(entry.ticker, entry.ticker.metadata.ticker);
+    if (!instrument) continue;
+    const key = buildInstrumentKey(instrument);
+    const previous = targets.get(key);
+    targets.set(key, { ...entry, instrument, key, priority: Math.min(previous?.priority ?? entry.priority, entry.priority) });
+  }
+  return [...targets.values()];
 }
 
 export function useTickerRefreshRuntime({
@@ -33,220 +50,155 @@ export function useTickerRefreshRuntime({
   pluginRegistry: PluginRegistry;
   tickers: Map<string, TickerRecord>;
 }): AppTickerRefreshRuntime {
-  const refreshQueueRef = useRef<{
-    queue: TickerRefreshQueue;
-  }>({
-    queue: new TickerRefreshQueue(3),
-  });
-  const pendingRefreshesRef = useRef<{
-    financials: Set<string>;
-    quotes: Set<string>;
-  }>({
-    financials: new Set<string>(),
-    quotes: new Set<string>(),
-  });
+  const refreshQueueRef = useRef({ queue: new TickerRefreshQueue(3) });
+  const pendingRefreshesRef = useRef({ financials: new Set<string>(), quotes: new Set<string>() });
 
   useEffect(() => {
     refreshQueueRef.current.queue.setPaused(!appActive);
   }, [appActive]);
 
-  const performRefreshTicker = useCallback(async (symbol: string, tickerOverride?: TickerRecord | null) => {
-    if (refreshInFlight.has(symbol)) return;
-    refreshInFlight.add(symbol);
-    dispatch({ type: "SET_REFRESHING", symbol, refreshing: true });
+  const setRefreshing = useCallback((symbol: string, active: boolean) => {
+    const count = Math.max(0, (refreshingSymbols.get(symbol) ?? 0) + (active ? 1 : -1));
+    if (count) refreshingSymbols.set(symbol, count);
+    else refreshingSymbols.delete(symbol);
+    dispatch({ type: "SET_REFRESHING", symbol, refreshing: count > 0 });
+  }, [dispatch]);
+
+  const performRefreshTicker = useCallback(async (instrument: InstrumentRef) => {
+    const key = buildInstrumentKey(instrument);
+    if (refreshInFlight.has(key)) return;
+    refreshInFlight.add(key);
+    setRefreshing(instrument.symbol, true);
     try {
-      const ticker = tickerOverride ?? tickers.get(symbol) ?? null;
-      const instrument = instrumentFromTicker(ticker, symbol);
-      if (!instrument) return;
       const entry = await marketData.loadSnapshot(instrument, { forceRefresh: true });
       const data = entry.data ?? entry.lastGoodData;
-      if (data) {
-        pluginRegistry.events.emit("ticker:refreshed", { symbol, financials: data });
-      }
-
+      if (data) pluginRegistry.events.emit("ticker:refreshed", { symbol: instrument.symbol, financials: data });
       const currency = data?.quote?.currency;
-      if (currency) {
-        void marketData.loadFxRate(currency).catch(() => {});
-      }
+      if (currency) void marketData.loadFxRate(currency).catch(() => {});
       void marketData.loadFxRate(baseCurrency).catch(() => {});
     } catch {
-      // Silently fail - will show "—" for missing data
+      // Silently fail - will show "—" for missing data.
     } finally {
-      refreshInFlight.delete(symbol);
-      dispatch({ type: "SET_REFRESHING", symbol, refreshing: false });
+      refreshInFlight.delete(key);
+      setRefreshing(instrument.symbol, false);
     }
-  }, [baseCurrency, dispatch, marketData, pluginRegistry.events, tickers]);
+  }, [baseCurrency, marketData, pluginRegistry.events, setRefreshing]);
 
-  const performRefreshQuote = useCallback(async (symbol: string, tickerOverride?: TickerRecord | null) => {
-    if (refreshInFlight.has(symbol) || quoteRefreshInFlight.has(symbol)) return;
-    quoteRefreshInFlight.add(symbol);
+  const performRefreshQuote = useCallback(async (instrument: InstrumentRef) => {
+    const key = buildInstrumentKey(instrument);
+    if (refreshInFlight.has(key) || quoteRefreshInFlight.has(key)) return;
+    quoteRefreshInFlight.add(key);
     try {
-      const ticker = tickerOverride ?? tickers.get(symbol) ?? null;
-      const instrument = instrumentFromTicker(ticker, symbol);
-      if (!instrument) return;
       const entry = await marketData.loadQuote(instrument, { forceRefresh: true });
       const quote = entry.data ?? entry.lastGoodData;
       if (!quote) return;
-
-      const currency = quote.currency;
-      if (currency) {
-        void marketData.loadFxRate(currency).catch(() => {});
-      }
+      if (quote.currency) void marketData.loadFxRate(quote.currency).catch(() => {});
       void marketData.loadFxRate(baseCurrency).catch(() => {});
     } catch {
-      // Silently fail - the list can fall back to stale cache or Yahoo
+      // Silently fail - the list can fall back to stale cache or Yahoo.
     } finally {
-      quoteRefreshInFlight.delete(symbol);
+      quoteRefreshInFlight.delete(key);
     }
-  }, [baseCurrency, marketData, tickers]);
+  }, [baseCurrency, marketData]);
 
-  const refreshTicker = useCallback((symbol: string, _exchange = "", tickerOverride?: TickerRecord | null, priority = 2) => {
-    if (refreshInFlight.has(symbol) || pendingRefreshesRef.current.financials.has(symbol)) return;
-    pendingRefreshesRef.current.financials.add(symbol);
+  const refreshTicker = useCallback<AppTickerRefreshRuntime["refreshTicker"]>((symbol, _exchange = "", tickerOverride, priority = 2, target) => {
+    const instrument = target ?? instrumentFromTicker(tickerOverride ?? tickers.get(symbol), symbol);
+    if (!instrument) return;
+    const key = buildInstrumentKey(instrument);
+    if (refreshInFlight.has(key) || pendingRefreshesRef.current.financials.has(key)) return;
+    pendingRefreshesRef.current.financials.add(key);
     refreshQueueRef.current.queue.enqueue({
-      key: `financials:${symbol}`,
-      priority,
+      key: `financials:${key}`, priority,
       run: async () => {
-        try {
-          await performRefreshTicker(symbol, tickerOverride ?? null);
-        } finally {
-          pendingRefreshesRef.current.financials.delete(symbol);
-        }
+        try { await performRefreshTicker(instrument); }
+        finally { pendingRefreshesRef.current.financials.delete(key); }
       },
     });
-  }, [performRefreshTicker]);
+  }, [performRefreshTicker, tickers]);
 
-  const refreshQuote = useCallback((symbol: string, _exchange = "", tickerOverride?: TickerRecord | null, priority = 2) => {
-    if (
-      refreshInFlight.has(symbol)
-      || quoteRefreshInFlight.has(symbol)
-      || pendingRefreshesRef.current.financials.has(symbol)
-      || pendingRefreshesRef.current.quotes.has(symbol)
-    ) {
-      return;
-    }
-    pendingRefreshesRef.current.quotes.add(symbol);
+  const refreshQuote = useCallback<AppTickerRefreshRuntime["refreshQuote"]>((symbol, _exchange = "", tickerOverride, priority = 2, target) => {
+    const instrument = target ?? instrumentFromTicker(tickerOverride ?? tickers.get(symbol), symbol);
+    if (!instrument) return;
+    const key = buildInstrumentKey(instrument);
+    if (refreshInFlight.has(key) || quoteRefreshInFlight.has(key)
+      || pendingRefreshesRef.current.financials.has(key) || pendingRefreshesRef.current.quotes.has(key)) return;
+    pendingRefreshesRef.current.quotes.add(key);
     refreshQueueRef.current.queue.enqueue({
-      key: `quote:${symbol}`,
-      priority,
+      key: `quote:${key}`, priority,
       run: async () => {
         try {
-          if (pendingRefreshesRef.current.financials.has(symbol) || refreshInFlight.has(symbol)) return;
-          await performRefreshQuote(symbol, tickerOverride ?? null);
-        } finally {
-          pendingRefreshesRef.current.quotes.delete(symbol);
-        }
+          if (pendingRefreshesRef.current.financials.has(key) || refreshInFlight.has(key)) return;
+          await performRefreshQuote(instrument);
+        } finally { pendingRefreshesRef.current.quotes.delete(key); }
       },
     });
-  }, [performRefreshQuote]);
+  }, [performRefreshQuote, tickers]);
 
-  const refreshTickersBatch = useCallback((entries: Array<{ ticker: TickerRecord; priority: number }>) => {
-    const runnable = entries.filter(({ ticker }) => {
-      const symbol = ticker.metadata.ticker;
-      return !refreshInFlight.has(symbol) && !pendingRefreshesRef.current.financials.has(symbol);
-    });
+  const refreshTickersBatch = useCallback((entries: RefreshEntry[]) => {
+    const runnable = resolveRefreshEntries(entries).filter(({ key }) => !refreshInFlight.has(key) && !pendingRefreshesRef.current.financials.has(key));
     if (runnable.length === 0) return;
-    for (const { ticker } of runnable) {
-      pendingRefreshesRef.current.financials.add(ticker.metadata.ticker);
-    }
+    for (const { key } of runnable) pendingRefreshesRef.current.financials.add(key);
     const priority = Math.min(...runnable.map((entry) => entry.priority));
     refreshQueueRef.current.queue.enqueue({
-      key: `financials-batch:${priority}:${runnable.map(({ ticker }) => ticker.metadata.ticker).join(",")}`,
-      priority,
+      key: `financials-batch:${priority}:${runnable.map(({ key }) => key).join(",")}`, priority,
       run: async () => {
-        const instrumentEntries = runnable.flatMap(({ ticker }) => {
-          const instrument = instrumentFromTicker(ticker, ticker.metadata.ticker);
-          return instrument ? [{ ticker, instrument }] : [];
-        });
-        for (const { ticker } of runnable) {
-          const symbol = ticker.metadata.ticker;
-          refreshInFlight.add(symbol);
-          dispatch({ type: "SET_REFRESHING", symbol, refreshing: true });
+        for (const { instrument, key } of runnable) {
+          refreshInFlight.add(key);
+          setRefreshing(instrument.symbol, true);
         }
         try {
-          const entries = await marketData.loadSnapshotsBatch(
-            instrumentEntries.map((entry) => entry.instrument),
-            { forceRefresh: true },
-          );
-          entries.forEach((entry, index) => {
-            const ticker = instrumentEntries[index]?.ticker;
+          const results = await marketData.loadSnapshotsBatch(runnable.map(({ instrument }) => instrument), { forceRefresh: true });
+          results.forEach((entry, index) => {
+            const instrument = runnable[index]?.instrument;
             const data = entry.data ?? entry.lastGoodData;
-            if (ticker && data) {
-              pluginRegistry.events.emit("ticker:refreshed", { symbol: ticker.metadata.ticker, financials: data });
-              const currency = data.quote?.currency;
-              if (currency) void marketData.loadFxRate(currency).catch(() => {});
+            if (instrument && data) {
+              pluginRegistry.events.emit("ticker:refreshed", { symbol: instrument.symbol, financials: data });
+              if (data.quote?.currency) void marketData.loadFxRate(data.quote.currency).catch(() => {});
             }
           });
           void marketData.loadFxRate(baseCurrency).catch(() => {});
         } finally {
-          for (const { ticker } of runnable) {
-            const symbol = ticker.metadata.ticker;
-            refreshInFlight.delete(symbol);
-            pendingRefreshesRef.current.financials.delete(symbol);
-            dispatch({ type: "SET_REFRESHING", symbol, refreshing: false });
+          for (const { instrument, key } of runnable) {
+            refreshInFlight.delete(key);
+            pendingRefreshesRef.current.financials.delete(key);
+            setRefreshing(instrument.symbol, false);
           }
         }
       },
     });
-  }, [baseCurrency, dispatch, marketData, pluginRegistry.events]);
+  }, [baseCurrency, marketData, pluginRegistry.events, setRefreshing]);
 
-  const refreshQuotesBatch = useCallback((entries: Array<{ ticker: TickerRecord; priority: number }>) => {
-    const runnable = entries.filter(({ ticker }) => {
-      const symbol = ticker.metadata.ticker;
-      return !refreshInFlight.has(symbol)
-        && !quoteRefreshInFlight.has(symbol)
-        && !pendingRefreshesRef.current.financials.has(symbol)
-        && !pendingRefreshesRef.current.quotes.has(symbol);
-    });
+  const refreshQuotesBatch = useCallback((entries: RefreshEntry[]) => {
+    const runnable = resolveRefreshEntries(entries).filter(({ key }) => !refreshInFlight.has(key) && !quoteRefreshInFlight.has(key)
+      && !pendingRefreshesRef.current.financials.has(key) && !pendingRefreshesRef.current.quotes.has(key));
     if (runnable.length === 0) return;
-    for (const { ticker } of runnable) {
-      pendingRefreshesRef.current.quotes.add(ticker.metadata.ticker);
-    }
+    for (const { key } of runnable) pendingRefreshesRef.current.quotes.add(key);
     const priority = Math.min(...runnable.map((entry) => entry.priority));
     refreshQueueRef.current.queue.enqueue({
-      key: `quotes-batch:${priority}:${runnable.map(({ ticker }) => ticker.metadata.ticker).join(",")}`,
-      priority,
+      key: `quotes-batch:${priority}:${runnable.map(({ key }) => key).join(",")}`, priority,
       run: async () => {
-        const instrumentEntries = runnable.flatMap(({ ticker }) => {
-          const instrument = instrumentFromTicker(ticker, ticker.metadata.ticker);
-          return instrument ? [{ ticker, instrument }] : [];
-        });
-        for (const { ticker } of runnable) {
-          quoteRefreshInFlight.add(ticker.metadata.ticker);
-        }
+        for (const { key } of runnable) quoteRefreshInFlight.add(key);
         try {
-          const entries = await marketData.loadQuotesBatch(instrumentEntries.map((entry) => entry.instrument));
-          entries.forEach((entry) => {
+          const results = await marketData.loadQuotesBatch(runnable.map(({ instrument }) => instrument));
+          for (const entry of results) {
             const quote = entry.data ?? entry.lastGoodData;
-            const currency = quote?.currency;
-            if (currency) void marketData.loadFxRate(currency).catch(() => {});
-          });
+            if (quote?.currency) void marketData.loadFxRate(quote.currency).catch(() => {});
+          }
           void marketData.loadFxRate(baseCurrency).catch(() => {});
         } finally {
-          for (const { ticker } of runnable) {
-            const symbol = ticker.metadata.ticker;
-            quoteRefreshInFlight.delete(symbol);
-            pendingRefreshesRef.current.quotes.delete(symbol);
+          for (const { key } of runnable) {
+            quoteRefreshInFlight.delete(key);
+            pendingRefreshesRef.current.quotes.delete(key);
           }
         }
       },
     });
   }, [baseCurrency, marketData]);
 
-  const primeCachedFinancials = useCallback((entries: Array<{ ticker: TickerRecord; financials: TickerFinancials }>) => {
-    const primeEntries = entries.flatMap(({ ticker, financials }) => {
-      const instrument = instrumentFromTicker(ticker, ticker.metadata.ticker);
-      return instrument ? [{ instrument, financials }] : [];
-    });
-    if (primeEntries.length === 0) return;
-    marketData.primeCachedFinancials(primeEntries);
+  const primeCachedFinancials = useCallback<AppTickerRefreshRuntime["primeCachedFinancials"]>((entries) => {
+    // Cache ownership was established by the exact queried startup target.
+    if (entries.length) marketData.primeCachedFinancials(entries);
   }, [marketData]);
 
-  return {
-    primeCachedFinancials,
-    refreshQuote,
-    refreshQuotesBatch,
-    refreshTicker,
-    refreshTickersBatch,
-  };
+  return { primeCachedFinancials, refreshQuote, refreshQuotesBatch, refreshTicker, refreshTickersBatch };
 }
