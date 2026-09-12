@@ -223,6 +223,11 @@ export class NewsService {
       if (article) requestedRevisions.set(entry, newsArticleRevision(article));
     }
     let failed = false;
+    let olderDetail: NewsArticle | null = null;
+    const commitDetail = (article: NewsArticle) => {
+      this.mergeStoryDetail(article, requestedRevisions);
+      return this.articles.find((current) => current.id === storyId) ?? article;
+    };
     for (const source of sources) {
       try {
         const article = await this.trackSourceRequest(
@@ -232,14 +237,21 @@ export class NewsService {
         );
         if (!article) continue;
         if (article.id !== storyId) throw new Error("Story detail identity mismatch.");
-        this.mergeStoryDetail(article, requestedRevisions);
-        return article;
+        const current = this.articles.find((current) => current.id === storyId);
+        if (current && article.publishedAt < current.publishedAt) {
+          if (!olderDetail || article.publishedAt > olderDetail.publishedAt) olderDetail = article;
+          continue;
+        }
+        return commitDetail(article);
       } catch {
         failed = true;
         // Continue to lower-priority sources.
       }
     }
 
+    // A newer fallback is preferred. Otherwise older, explicitly dated source
+    // items can enrich the timeline without rolling back the known headline.
+    if (olderDetail) return commitDetail(olderDetail);
     if (failed) throw new Error("Story detail unavailable.");
     return null;
   }

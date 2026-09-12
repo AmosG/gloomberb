@@ -9,6 +9,7 @@ import { TestPaneProvider, createTestPaneConfig } from "../../../../../test-supp
 import { createStatefulTestPluginRuntime } from "../../../../../test-support/plugin-runtime";
 import { createInitialState, appReducer } from "../../../../../state/app/context";
 import { PaneFooterProvider, PaneFooterBar } from "../../../../../components/layout/pane/footer";
+import { formatDetailDate } from "../../../../../utils/datetime-format";
 import type { NewsArticle } from "../../../../../news/types";
 import { Box } from "../../../../../ui";
 
@@ -191,3 +192,62 @@ test("same-time headline correction invalidates loaded old detail", async () => 
   expect(calls).toBe(2);
 });
 
+
+test("a corrected URL leaves one selectable row for the stable story ID", async () => {
+  let corrected = false;
+  const article = () => corrected
+    ? { ...story(), title: "Acme corrected publication link", url: "https://example.test/acme-corrected" }
+    : story();
+  await mount(async () => [article()], async () => ({ ...article(), items: story("acme", "", 1, true).items }));
+  corrected = true;
+  await refresh();
+  expect(service.getQueryState(query).articles).toHaveLength(1);
+  expect(capture()).toContain("Acme corrected publication link");
+  expect(capture()).not.toContain("Acme plans acquisition");
+  await key("return");
+  expect(capture()).toContain("Acme corrected publication link");
+});
+
+test("a timeline correction supersedes an earlier pending detail", async () => {
+  let corrected = false;
+  let resolveOld!: (article: NewsArticle) => void;
+  const updated = story("acme", "Acme plans acquisition", 1, true);
+  updated.items![0] = { ...updated.items![0]!, title: "Corrected cash consideration $12" };
+  await mount(async () => [corrected ? updated : story()], async () => new Promise<NewsArticle>((resolve) => { resolveOld = resolve; }));
+  await key("return");
+  corrected = true;
+  await refresh();
+  expect(capture()).toContain("Corrected cash consideration $12");
+  await act(async () => { resolveOld(story("acme", "Acme plans acquisition", 1, true)); });
+  await settleFrame(setup, 12);
+  expect(capture()).toContain("Corrected cash consideration $12");
+  expect(capture()).not.toContain("Timeline cash consideration 1");
+});
+
+test("older detail preserves the newer known headline and summary", async () => {
+  await mount(
+    async () => [story("acme", "Acme acquisition terminated", 2)],
+    async () => story("acme", "Acme plans acquisition", 1, true),
+  );
+  await key("return");
+  expect(capture()).toContain("Acme acquisition terminated");
+  expect(capture()).toContain("Acme cash consideration version 2");
+  expect(capture()).toContain("Timeline cash consideration 1");
+  const updatedLine = capture().split("\n").find((line) => line.includes("last updated at"));
+  expect(updatedLine).toContain(formatDetailDate(new Date("2026-09-11T12:00:00Z")));
+  expect(capture()).toContain(formatDetailDate(new Date("2026-09-11T11:00:00Z")));
+  expect(service.getQueryState(query).articles[0]?.title).toBe("Acme acquisition terminated");
+});
+
+test("a newer detail fallback is preferred to an older primary response", async () => {
+  let fallback = 0;
+  await mount(
+    async () => [story("acme", "Acme acquisition terminated", 2)],
+    async () => story("acme", "Acme plans acquisition", 1, true),
+    async () => { fallback++; return story("acme", "Acme acquisition terminated", 2, true); },
+  );
+  await key("return");
+  expect(fallback).toBe(1);
+  expect(capture()).toContain("Timeline cash consideration 2");
+  expect(capture()).not.toContain("Timeline cash consideration 1");
+});

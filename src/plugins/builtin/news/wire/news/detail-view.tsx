@@ -11,6 +11,7 @@ import { useInlineTickers } from "../../../../../state/hooks/inline-tickers";
 import { isPlainKey } from "../../../../../utils/keyboard";
 import { wrapTextLines } from "../../../../../utils/text-wrap";
 import { formatDetailDate } from "../../../../../utils/datetime-format";
+import { mergeNewsArticle } from "../../../../../news/news-model";
 import { formatNewsCategory } from "../categories";
 
 function hasStoryItems(article: MarketNewsItem | null): boolean {
@@ -52,7 +53,7 @@ export function useNewsArticleDetail(
       .then((article) => {
         if (!active) return;
         if (article && article.id !== baseDetailArticle.id) throw new Error("Story detail identity mismatch.");
-        setRequest({ base: baseDetailArticle, article: article ?? undefined, loading: false, error: null });
+        setRequest({ base: baseDetailArticle, article: article ? mergeNewsArticle(baseDetailArticle, article) : undefined, loading: false, error: null });
       })
       .catch((error: unknown) => {
         if (!active) return;
@@ -191,8 +192,11 @@ export function NewsDetailView({ item, focused, width, showTitle = true }: {
     () => item.categories.map(formatNewsCategory).filter(Boolean).join(" · "),
     [item.categories],
   );
-  const lastUpdatedAt = timelineItems[0]?.publishedAt ?? item.publishedAt;
-  const lastUpdatedStr = formatDetailDate(storyItemDate(lastUpdatedAt));
+  const lastUpdatedAt = new Date(Math.max(
+    storyItemDate(item.publishedAt).getTime(),
+    storyItemDate(timelineItems[0]?.publishedAt ?? item.publishedAt).getTime(),
+  ));
+  const lastUpdatedStr = formatDetailDate(lastUpdatedAt);
 
   const scrollBy = useCallback((delta: number) => {
     const scrollBox = scrollRef.current;
