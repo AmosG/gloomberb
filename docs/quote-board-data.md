@@ -35,3 +35,31 @@ eight decimal places, subject to the table's column width; tiny nonzero values
 can use scientific notation. Raw JSON observations remain unchanged. This
 formatting does not establish the history's units or a continuous future's roll
 convention.
+
+## Market movers
+
+Gainers, Losers and Most Active use the provider's returned universe and rank;
+Trending hydrates quotes for the supplied symbol order. Live quotes update those
+rows without claiming a newly screened global ranking. Header sorting and CSV
+export use the current displayed values. Volume/average-volume ratios are
+recomputed from the current volume and the reported average; an absent average
+is unavailable, and a reported zero volume with a positive average is zero.
+
+Missing price, change, volume and currency fields remain unknown. Canonical
+quotes can calculate a day change from a supported explicit prior close; an
+absent change does not itself mean zero. Quote snapshots replace unavailable
+dynamic fields instead of borrowing those fields from the older screener row.
+Source list refresh and live quote delivery are separate freshness signals.
+A failed list switch cannot display the previous list as the newly selected one.
+A failed same-list refresh retains validated rows with current failure/stale
+status. Malformed list envelopes are failures; a valid empty quote array is an
+empty list. Old cached rows that encoded missing fields as zero are invalidated.
+
+Declared GBp/GBX, ILA and ZAc price units normalize to their major currency for
+display; raw headless values retain their original amount and currency code.
+GBP itself is not scaled merely because a row names London. Live quotes may
+supply a different explicit subdivision of the same currency; retained price
+range endpoints are converted to that subdivision. Unknown or different
+currencies cannot support a retained range. No foreign-exchange conversion is
+performed. Listing keys are preserved when a row opens ticker research, and the
+opened source supplies its own security type.

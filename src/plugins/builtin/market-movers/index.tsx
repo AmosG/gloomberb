@@ -5,6 +5,7 @@ import type { PaneProps } from "../../../types/plugin";
 import type { PluginModule } from "../plugin-module";
 import { TICKER_RESEARCH_PANE_ID } from "../../../types/config";
 import { priceColor } from "../../../theme/colors";
+import { publicTickerKey } from "../../../utils/exchanges";
 import { formatPercentRaw } from "../../../utils/format";
 import { useAppSelector, usePaneSettingValue } from "../../../state/app/context";
 import { useAssetData, usePluginTickerActions } from "../../runtime";
@@ -23,6 +24,7 @@ import {
   INDEX_SHORT,
   TABS,
   createRows,
+  overlayMarketMoverQuotes,
   nextSortPreference,
   resolveSummarySymbols,
   resolveTabs,
@@ -43,7 +45,6 @@ import {
 } from "../shared/live-streaming";
 import {
   buildScreenerQuoteTargets,
-  overlayScreenerQuoteEntries,
   resolveScreenerQuoteFeedStatus,
 } from "../shared/screener-live-quotes";
 
@@ -51,6 +52,8 @@ export { marketMoversHeadless } from "./headless";
 
 /** Stable identity: a fresh literal here would reload the board every render. */
 const NO_SAVED_SELECTION: string[] = [];
+const NO_QUOTES: ScreenerQuote[] = [];
+const moverKey = (row: Pick<ScreenerQuote, "symbol" | "exchange">) => publicTickerKey(row.symbol, row.exchange);
 
 function MarketMoversPane({ focused, width, height }: PaneProps) {
   const dataProvider = useAssetData();
@@ -65,6 +68,8 @@ function MarketMoversPane({ focused, width, height }: PaneProps) {
   const refreshIntervalMs = Math.max(1, refreshIntervalMinutes || 1) * 60_000;
   const [activeTab, setActiveTab] = useState<TabId>(tabs[0]!.id);
   const [quotes, setQuotes] = useState<ScreenerQuote[]>([]);
+  const [loadedTab, setLoadedTab] = useState<TabId | null>(null);
+  const visibleQuotes = loadedTab === activeTab ? quotes : NO_QUOTES;
   // The first load starts before the effect runs; an empty board is not "no data".
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -76,8 +81,8 @@ function MarketMoversPane({ focused, width, height }: PaneProps) {
   const fetchGenRef = useRef(0);
 
   const quoteTargets = useMemo(
-    () => buildScreenerQuoteTargets(quotes, selectedSymbol),
-    [quotes, selectedSymbol],
+    () => buildScreenerQuoteTargets(visibleQuotes, selectedSymbol),
+    [visibleQuotes, selectedSymbol],
   );
   const {
     entries: liveQuoteEntries,
@@ -88,8 +93,8 @@ function MarketMoversPane({ focused, width, height }: PaneProps) {
     liveStreaming,
   });
   const resolvedQuotes = useMemo(
-    () => overlayScreenerQuoteEntries(quotes, liveQuoteEntries),
-    [liveQuoteEntries, quotes],
+    () => overlayMarketMoverQuotes(visibleQuotes, liveQuoteEntries),
+    [liveQuoteEntries, visibleQuotes],
   );
   const feedStatus = useMemo(
     () => resolveScreenerQuoteFeedStatus(quoteTargets, liveQuoteEntries, {
@@ -102,13 +107,13 @@ function MarketMoversPane({ focused, width, height }: PaneProps) {
   const rankedRows = useMemo(() => createRows(resolvedQuotes), [resolvedQuotes]);
   const rows = useMemo(() => sortRows(rankedRows, sortPreference), [rankedRows, sortPreference]);
   const selectedIdx = selectedSymbol
-    ? rows.findIndex((row) => row.symbol === selectedSymbol)
+    ? rows.findIndex((row) => moverKey(row) === selectedSymbol)
     : -1;
   useEffect(() => {
     if (selectedSymbol && selectedIdx >= 0) return;
     const firstRow = rows[0];
     if (firstRow) {
-      setSelectedSymbol(firstRow.symbol);
+      setSelectedSymbol(moverKey(firstRow));
     } else if (selectedSymbol !== null) {
       setSelectedSymbol(null);
     }
@@ -144,17 +149,14 @@ function MarketMoversPane({ focused, width, height }: PaneProps) {
       if (fetchGenRef.current !== gen) return;
 
       setQuotes(result.quotes);
+      setLoadedTab(tab);
       setMoversStale(result.stale);
       if (!options?.background) setSelectedSymbol(null);
       setLoadError(null);
       setLastLoadedAt(Date.now());
     } catch {
       if (fetchGenRef.current !== gen) return;
-      if (options?.background) {
-        // Rows stay, but they are no longer what the pane just fetched.
-        setMoversStale(true);
-        return;
-      }
+      setMoversStale(true);
       setLoadError("Market movers temporarily unavailable");
     }
     finally {
@@ -176,8 +178,8 @@ function MarketMoversPane({ focused, width, height }: PaneProps) {
   }, [activeTab, loadTab]);
   useAutoRefresh(lastLoadedAt, backgroundRefresh);
 
-  const openSymbol = useCallback((symbol: string) => {
-    pinTicker(symbol, { floating: true, paneType: TICKER_RESEARCH_PANE_ID });
+  const openSymbol = useCallback((row: MarketMoverRow) => {
+    pinTicker(moverKey(row), { floating: true, paneType: TICKER_RESEARCH_PANE_ID, instrument: null });
   }, [pinTicker]);
 
   const handleHeaderClick = useCallback((columnId: string) => {
@@ -198,6 +200,7 @@ function MarketMoversPane({ focused, width, height }: PaneProps) {
 
   usePaneFooter("market-movers", () => ({
     info: [
+      ...(loadError ? [{ id: "load-error", parts: [{ text: loadError, tone: "warning" as const }] }] : []),
       ...summaryQuotes.map((idx) => {
         const short = INDEX_SHORT[idx.symbol] ?? idx.symbol;
         return {
@@ -213,12 +216,12 @@ function MarketMoversPane({ focused, width, height }: PaneProps) {
         id: "feed",
         parts: [{ text: feedStatus, tone: feedStatus === "live" ? "value" as const : "muted" as const }],
       }] : []),
-      ...(moversStale ? [{
+      ...(moversStale && loadedTab === activeTab ? [{
         id: "stale",
         parts: [{ text: "stale", tone: "muted" as const }],
       }] : []),
     ],
-  }), [feedStatus, loading, moversStale, summaryQuotes]);
+  }), [activeTab, feedStatus, loadedTab, loadError, loading, moversStale, summaryQuotes]);
 
   return (
     <Box flexDirection="column" width={width} height={height}>
@@ -241,7 +244,7 @@ function MarketMoversPane({ focused, width, height }: PaneProps) {
         selection={{
           kind: "id",
           selectedId: selectedSymbol,
-          getId: (row) => row.symbol,
+          getId: moverKey,
           onChange: (symbol) => setSelectedSymbol(symbol),
         }}
         onRootKeyDown={handleTableKeyDown}
@@ -251,8 +254,8 @@ function MarketMoversPane({ focused, width, height }: PaneProps) {
         sortColumnId={sortPreference.columnId}
         sortDirection={sortPreference.direction}
         onHeaderClick={handleHeaderClick}
-        getItemKey={(row) => `${row.symbol}-${row.rank}`}
-        onActivate={(row) => openSymbol(row.symbol)}
+        getItemKey={moverKey}
+        onActivate={openSymbol}
         renderCell={renderMarketMoverCell}
         emptyStateTitle={loading ? "Loading movers..." : loadError ?? "No movers returned."}
         emptyContent={loadError ? (

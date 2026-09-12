@@ -3,20 +3,20 @@ import type {
   HeadlessPaneDefinition,
   HeadlessPaneLoadArgs,
 } from "../../../types/plugin";
-import { formatCompact, formatCurrency, formatNumber, formatPercentRaw } from "../../../utils/format";
+import { formatCompact, formatNumber, formatPercentRaw } from "../../../utils/format";
 import { loadMarketMoverTab, type MarketMoverTabResult } from "./client";
-import { createRows, fiftyTwoWeekPositionPercent, type TabId } from "./model";
+import { createRows, fiftyTwoWeekPositionPercent, formatMoverPrice, type TabId } from "./model";
 
 const COLUMNS = [
   { key: "rank", header: "Rank", align: "right" as const },
   { key: "symbol", header: "Symbol" },
   { key: "name", header: "Name" },
-  { key: "price", header: "Last", align: "right" as const, format: (value: unknown, row: Record<string, unknown>) => formatCurrency(Number(value), String(row.currency)) },
-  { key: "changePercent", header: "Change %", align: "right" as const, format: (value: unknown) => formatPercentRaw(Number(value)) },
-  { key: "volume", header: "Volume", align: "right" as const, format: (value: unknown) => formatCompact(Number(value)) },
-  { key: "volumeRatio", header: "Vol / Avg", align: "right" as const, format: (value: unknown) => formatNumber(Number(value), 1) },
-  { key: "rangePositionPercent", header: "52W pos", align: "right" as const, format: (value: unknown) => value == null ? "-" : formatPercentRaw(Number(value)) },
-  { key: "marketCap", header: "Market cap", align: "right" as const, format: (value: unknown) => value == null ? "-" : formatCompact(Number(value)) },
+  { key: "price", header: "Last", align: "right" as const, format: (value: unknown, row: Record<string, unknown>) => formatMoverPrice(typeof value === "number" ? value : null, typeof row.currency === "string" ? row.currency : "") },
+  { key: "changePercent", header: "Change %", align: "right" as const, format: (value: unknown) => value == null ? "—" : formatPercentRaw(Number(value)) },
+  { key: "volume", header: "Volume", align: "right" as const, format: (value: unknown) => value == null ? "—" : formatCompact(Number(value)) },
+  { key: "volumeRatio", header: "Vol / Avg", align: "right" as const, format: (value: unknown) => value == null ? "—" : formatNumber(Number(value), 1) },
+  { key: "rangePositionPercent", header: "52W pos", align: "right" as const, format: (value: unknown) => value == null ? "—" : formatPercentRaw(Number(value)) },
+  { key: "marketCap", header: "Market cap", align: "right" as const, format: (value: unknown) => value == null ? "—" : formatCompact(Number(value)) },
 ];
 
 export interface MarketMoversHeadlessDependencies {

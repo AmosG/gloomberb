@@ -15,7 +15,7 @@ const YAHOO_FINANCE_HOSTS = [
 ] as const;
 const CACHE_KIND = "yahoo-screener";
 const CACHE_SOURCE = "yahoo-finance";
-const CACHE_SCHEMA_VERSION = 1;
+const CACHE_SCHEMA_VERSION = 2;
 const CACHE_POLICY = {
   staleMs: 5 * 60 * 1000,
   expireMs: 60 * 60 * 1000,
@@ -40,6 +40,7 @@ export interface FetchCacheOptions {
 
 let marketMoversPersistence: PluginPersistence | null = null;
 const activeFetches = new Map<string, Promise<unknown>>();
+const failedFetches = new Set<string>();
 
 export function attachMarketMoversPersistence(persistence: PluginPersistence): void {
   marketMoversPersistence = persistence;
@@ -48,6 +49,7 @@ export function attachMarketMoversPersistence(persistence: PluginPersistence): v
 export function resetMarketMoversPersistence(): void {
   marketMoversPersistence = null;
   activeFetches.clear();
+  failedFetches.clear();
 }
 
 export function createYahooScreenerApi(transport?: ThrottledFetchTransport): YahooScreenerApi {
@@ -98,7 +100,7 @@ function readCache<T>(key: string, options?: { allowExpired?: boolean }): { data
 
   return {
     data: record.value,
-    stale: !!record.stale,
+    stale: !!record.stale || failedFetches.has(key),
   };
 }
 
@@ -133,11 +135,15 @@ async function loadCached<T>(
   const fetchPromise = fetcher()
     .then((data) => {
       writeCache(key, data);
+      failedFetches.delete(key);
       return { data, stale: false };
     })
     .catch((error) => {
       // Serving the expired copy is right; hiding that it is expired is not.
-      if (fallback) return { data: fallback.data, stale: true };
+      if (fallback) {
+        failedFetches.add(key);
+        return { data: fallback.data, stale: true };
+      }
       throw error;
     })
     .finally(() => {
@@ -155,12 +161,12 @@ export type ScreenerCategory = "day_gainers" | "day_losers" | "most_actives";
 export interface ScreenerQuote {
   symbol: string;
   name: string;
-  price: number;
-  change: number;
-  changePercent: number;
-  volume: number;
-  avgVolume: number;
-  volumeRatio: number; // volume / avgVolume
+  price: number | null;
+  change: number | null;
+  changePercent: number | null;
+  volume: number | null;
+  avgVolume: number | null;
+  volumeRatio: number | null; // volume / avgVolume
   marketCap: number | undefined;
   currency: string;
   fiftyTwoWeekHigh: number | undefined;
@@ -205,37 +211,48 @@ export interface MarketSummaryQuote {
   changePercent: number;
 }
 
+/** Unknown source fields stay unavailable; zero is a reported observation. */
+export function screenerNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+export function screenerVolume(value: unknown): number | null {
+  const number = screenerNumber(value);
+  return number != null && number >= 0 ? number : null;
+}
+
+export function screenerVolumeRatio(volume: number | null, average: number | null): number | null {
+  return volume != null && average != null && average > 0 ? volume / average : null;
+}
+
 export function parseScreenerResponse(data: any): ScreenerQuote[] {
-  try {
-    const quotes = data?.finance?.result?.[0]?.quotes;
-    if (!Array.isArray(quotes)) return [];
-    const result: ScreenerQuote[] = [];
-    for (const q of quotes) {
-      if (!q || typeof q.symbol !== "string") continue;
-      const volume = q.regularMarketVolume ?? 0;
-      const avgVolume = q.averageDailyVolume3Month ?? q.averageDailyVolume10Day ?? 0;
-      result.push({
-        symbol: q.symbol,
-        name: q.shortName ?? q.longName ?? q.symbol,
-        price: q.regularMarketPrice ?? 0,
-        change: q.regularMarketChange ?? 0,
-        changePercent: q.regularMarketChangePercent ?? 0,
-        volume,
-        avgVolume,
-        volumeRatio: avgVolume > 0 ? volume / avgVolume : 0,
-        marketCap: q.marketCap ?? undefined,
-        currency: q.currency ?? "USD",
-        fiftyTwoWeekHigh: q.fiftyTwoWeekHigh ?? undefined,
-        fiftyTwoWeekLow: q.fiftyTwoWeekLow ?? undefined,
-        dayHigh: q.regularMarketDayHigh ?? undefined,
-        dayLow: q.regularMarketDayLow ?? undefined,
-        exchange: q.fullExchangeName ?? q.exchange ?? "",
-      });
-    }
-    return result;
-  } catch {
-    return [];
+  const quotes = data?.finance?.result?.[0]?.quotes;
+  if (data?.finance?.error != null || !Array.isArray(quotes)) {
+    throw new Error("Invalid market movers response");
   }
+  return quotes.flatMap((q): ScreenerQuote[] => {
+    if (!q || typeof q.symbol !== "string" || !q.symbol.trim()) return [];
+    const volume = screenerVolume(q.regularMarketVolume);
+    const avgVolume = screenerVolume(q.averageDailyVolume3Month) ?? screenerVolume(q.averageDailyVolume10Day);
+    return [{
+      symbol: q.symbol.trim(),
+      name: q.shortName ?? q.longName ?? q.symbol,
+      price: screenerNumber(q.regularMarketPrice),
+      change: screenerNumber(q.regularMarketChange),
+      changePercent: screenerNumber(q.regularMarketChangePercent),
+      volume, avgVolume,
+      volumeRatio: screenerVolumeRatio(volume, avgVolume),
+      marketCap: screenerVolume(q.marketCap) ?? undefined,
+      currency: typeof q.currency === "string" ? q.currency.trim() : "",
+      fiftyTwoWeekHigh: screenerNumber(q.fiftyTwoWeekHigh) ?? undefined,
+      fiftyTwoWeekLow: screenerNumber(q.fiftyTwoWeekLow) ?? undefined,
+      dayHigh: screenerNumber(q.regularMarketDayHigh) ?? undefined,
+      dayLow: screenerNumber(q.regularMarketDayLow) ?? undefined,
+      exchange: typeof (q.fullExchangeName ?? q.exchange) === "string" ? q.fullExchangeName ?? q.exchange : "",
+      lastUpdated: typeof q.regularMarketTime === "number" && Number.isFinite(q.regularMarketTime) && q.regularMarketTime > 0
+        ? q.regularMarketTime * 1000 : undefined,
+    }];
+  });
 }
 
 export async function fetchScreenerResult(
@@ -293,16 +310,14 @@ function mergeCloudScreenerItem(
     name: item.name && item.name !== item.symbol
       ? item.name
       : metadata?.name ?? item.symbol,
-    price: item.price,
-    change: item.change,
-    changePercent: item.changePercent,
-    volume: item.volume,
-    avgVolume: metadata?.avgVolume ?? 0,
-    volumeRatio: metadata?.avgVolume
-      ? item.volume / metadata.avgVolume
-      : 0,
+    price: screenerNumber(item.price),
+    change: screenerNumber(item.change),
+    changePercent: screenerNumber(item.changePercent),
+    volume: screenerVolume(item.volume),
+    avgVolume: metadata?.avgVolume ?? null,
+    volumeRatio: screenerVolumeRatio(screenerVolume(item.volume), metadata?.avgVolume ?? null),
     marketCap: metadata?.marketCap,
-    currency: item.currency || metadata?.currency || "USD",
+    currency: item.currency || metadata?.currency || "",
     fiftyTwoWeekHigh: item.high52w ?? metadata?.fiftyTwoWeekHigh,
     fiftyTwoWeekLow: item.low52w ?? metadata?.fiftyTwoWeekLow,
     dayHigh: item.dayHigh ?? metadata?.dayHigh,

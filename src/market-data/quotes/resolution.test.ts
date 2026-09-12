@@ -588,3 +588,12 @@ test("a different price provider cannot inherit a closing-price anchor", () => {
   expect(result.regularClose).toBeUndefined();
   expect(result.regularCloseSessionDate).toBeUndefined();
 });
+
+test("canonical quote preserves unavailable day changes while retaining zero and a legitimate prior-close derivation", () => {
+  const base = { symbol: "SCANNER", price: 12, currency: "USD", lastUpdated: Date.now(), marketState: "CLOSED" };
+  const missing = resolveCanonicalQuote({ quote: base }).quote!;
+  expect(missing.change).toBeUndefined();
+  expect(missing.changePercent).toBeUndefined();
+  expect(resolveCanonicalQuote({ quote: { ...base, change: 0, changePercent: 0 } }).quote).toMatchObject({ change: 0, changePercent: 0 });
+  expect(resolveCanonicalQuote({ quote: { ...base, previousClose: 10 } }).quote).toMatchObject({ change: 2, changePercent: 20 });
+});
