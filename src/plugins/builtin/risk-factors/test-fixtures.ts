@@ -1,0 +1,4 @@
+import type { CloudRiskReportPayload } from "../../../api-client";
+export const company={ticker:"CONTROL",cik:"0000000001",name:"Control Issuer",shortName:"Control"};
+export function report(year:number): CloudRiskReportPayload {return {id:`control-${year}`,ticker:"CONTROL",company,reportYear:year,filedAt:`${year}-02-03T00:00:00Z`,updatedAt:`${year}-02-04T12:30:00Z`,riskCount:1,groupCount:1,wordCount:100,addedCount:null,removedCount:null,rewordedCount:null,overview:`Only ${year} risk analysis`,docUrl:`https://www.sec.gov/Archives/control-${year}.htm`,groups:["Business"],risks:[{heading:`Unique ${year} supply-chain exposure`,group:"Business",excerpt:`Source ${year} text`,words:100}],diff:null,notes:{added:[],removed:[],reworded:[],top:[]},otherYears:[]};}
+export const list=(years:number[])=>({company,reports:years.map(report)});

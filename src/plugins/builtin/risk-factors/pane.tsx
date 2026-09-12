@@ -1,8 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   CloudRiskNotePayload,
-  CloudRiskReportPayload,
-  CloudRiskReportSummaryPayload,
 } from "../../../api-client";
 import {
   EmptyState, PaneStatusBody, Prose, SectionHeading, Spinner,
@@ -11,6 +9,7 @@ import {
   type PaneFooterSegment
 } from "../../../components";
 import { useShortcut } from "../../../react/input";
+import { useAsyncResource } from "../../../react/async-resource";
 import { colors } from "../../../theme/colors";
 import {
   Box,
@@ -22,7 +21,7 @@ import {
 } from "../../../ui";
 import { isPlainKey } from "../../../utils/keyboard";
 import { useBoundTicker } from "../shared/ticker-request";
-import { loadRiskReport, loadRiskReports } from "./data";
+import { discardRiskData, loadRiskReport, loadRiskReports } from "./data";
 
 export const RISK_FACTORS_PANE_ID = "risk-factors";
 
@@ -85,64 +84,27 @@ export function RiskFactorsPane({
   const nativePaneChrome = useUiCapabilities().nativePaneChrome === true;
   const rendererHost = useRendererHost();
 
-  const [years, setYears] = useState<CloudRiskReportSummaryPayload[]>([]);
-  const [year, setYear] = useState<number | null>(null);
-  const [report, setReport] = useState<CloudRiskReportPayload | null>(null);
-  const [status, setStatus] = useState<
-    "idle" | "loading" | "loaded" | "none" | "error"
-  >("idle");
-  const [error, setError] = useState<string | null>(null);
+  const [selection, setSelection] = useState<{ ticker: string | null; year: number | null }>({ ticker: null, year: null });
+  const listLoader = useCallback((force: boolean) => loadRiskReports(ticker!, { force }), [ticker]);
+  const list = useAsyncResource(ticker ? listLoader : null, { clearOnError: discardRiskData });
+  const years = useMemo(() => [...(list.data?.reports ?? [])].sort((a, b) => b.reportYear - a.reportYear), [list.data]);
+  // Null follows the newest discovered filing; an explicit choice stays on that year.
+  const year = selection.ticker === ticker && selection.year !== null
+    ? selection.year : years[0]?.reportYear ?? null;
+  const reportLoader = useCallback((force: boolean) => loadRiskReport(ticker!, year!, { force }), [ticker, year]);
+  const detail = useAsyncResource(ticker && year !== null ? reportLoader : null, { clearOnError: discardRiskData });
+  const report = detail.data;
+  const listError = list.error ?? list.data?.refreshError ?? null;
+  const reportError = detail.error ?? report?.refreshError ?? null;
+  const refresh = useCallback(() => {
+    void list.reload();
+    if (year !== null) void detail.reload();
+  }, [list.reload, detail.reload, year]);
   const scrollRef = useRef<ScrollBoxRenderable | null>(null);
-
-  useEffect(() => {
-    if (!ticker) return;
-    let cancelled = false;
-    setStatus("loading");
-    setReport(null);
-    loadRiskReports(ticker)
-      .then((payload) => {
-        if (cancelled) return;
-        setYears(payload.reports);
-        setYear(payload.reports[0]?.reportYear ?? null);
-        setStatus(payload.reports.length > 0 ? "loaded" : "none");
-      })
-      .catch((caught: unknown) => {
-        if (cancelled) return;
-        const message =
-          caught instanceof Error ? caught.message : String(caught);
-        if (/404|not found|no risk/i.test(message)) {
-          setYears([]);
-          setStatus("none");
-          return;
-        }
-        setError(message);
-        setStatus("error");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [ticker]);
-
-  useEffect(() => {
-    if (!ticker || year === null) return;
-    let cancelled = false;
-    loadRiskReport(ticker, year)
-      .then((payload) => {
-        if (!cancelled) setReport(payload);
-      })
-      .catch((caught: unknown) => {
-        if (!cancelled)
-          setError(caught instanceof Error ? caught.message : String(caught));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [ticker, year]);
-
   useEffect(() => {
     const scrollBox = scrollRef.current;
     if (scrollBox) scrollBox.scrollTop = 0;
-  }, [year]);
+  }, [ticker, year]);
 
   const openFiling = useCallback(() => {
     if (report?.docUrl) void rendererHost.openExternal(report.docUrl);
@@ -160,7 +122,8 @@ export function RiskFactorsPane({
 
   useShortcut(
     (event) => {
-      if (isPlainKey(event, "o")) openFiling();
+      if (isPlainKey(event, "r")) refresh();
+      else if (isPlainKey(event, "o")) openFiling();
       else if (isPlainKey(event, "j", "down")) scrollBy(1);
       else if (isPlainKey(event, "k", "up")) scrollBy(-1);
     },
@@ -169,47 +132,36 @@ export function RiskFactorsPane({
 
   usePaneFooter(RISK_FACTORS_PANE_ID, () => {
     const info: PaneFooterSegment[] = [];
-    if (status === "loading")
+    if (list.loading || detail.loading)
       info.push({ id: "loading", parts: [{ text: "loading", tone: "muted" }] });
-    if (report) {
-      info.push({
-        id: "count",
-        parts: [{ text: `${report.riskCount} risks`, tone: "muted" }],
-      });
+    if (listError) info.push({ id: "list-error", parts: [{ text: `Report list: ${listError}`, tone: "warning" }] });
+    if (reportError) info.push({ id: "report-error", parts: [{ text: `${year} report: ${reportError}`, tone: "warning" }] });
+    if ((listError || list.data?.stale) && list.data) {
+      info.push({ id: "list-stale", parts: [{ text: `List cached ${new Date(list.data.fetchedAt).toISOString()}`, tone: "muted" }] });
     }
-    const hints = report
+    if ((reportError || report?.stale) && report) {
+      info.push({ id: "report-stale", parts: [{ text: `Report cached ${new Date(report.fetchedAt).toISOString()}`, tone: "muted" }] });
+    }
+    const hints = report?.docUrl
       ? [{ id: "open", key: "o", label: "pen filing", onPress: openFiling }]
       : [];
     return { info, hints };
-  }, [status, report, openFiling]);
+  }, [list.loading, detail.loading, listError, reportError, list.data, report, year, openFiling]);
 
   const bodyWidth = Math.max(12, width - 2);
   const proseWidth = Math.min(bodyWidth, MAX_PROSE_WIDTH);
 
-  if (!ticker)
-    return <EmptyState title="Pick a ticker to see its risk factors." />;
-  if (status === "loading" && !report) {
-    return (
-      <PaneStatusBody loading align="center" loadingLabel="Loading risk factors..." />
-    );
-  }
-  if (status === "none") {
-    return (
-      <EmptyState
-        title={`No 10-K risk factors on file for ${ticker}.`}
-        message="Reports are built from Item 1A of each annual report on Form 10-K. Foreign filers report on Form 20-F and are not covered yet."
-      />
-    );
-  }
-  if (status === "error")
-    return (
-      <PaneStatusBody error={error ?? "Could not load risk factors."} errorTitle="Could not load risk factors." />
-    );
+  if (!ticker) return <EmptyState title="Pick a ticker to see its risk factors." />;
+  if (!list.data && list.loading) return <PaneStatusBody loading align="center" loadingLabel="Loading risk factors..." />;
+  if (!list.data && listError && year === null) return <PaneStatusBody error={listError} errorTitle="Could not load risk reports." />;
+  if (year === null) return <EmptyState title={`No 10-K risk factors on file for ${ticker}.`} />;
 
   const diff = report?.diff ?? null;
   const summaryLine = report
     ? [
         `${report.reportYear} 10-K`,
+        `Filed ${report.filedAt?.slice(0, 10) || "unavailable"}`,
+        `Report updated ${report.updatedAt?.slice(0, 10) || "unavailable"}`,
         `${report.riskCount} risks in ${report.groupCount} groups`,
         diff
           ? `${diff.added.length} new, ${diff.removed.length} dropped, ${diff.reworded.length} reworded vs prior year`
@@ -234,7 +186,7 @@ export function RiskFactorsPane({
               value: String(entry.reportYear),
             }))}
             activeValue={year === null ? "" : String(year)}
-            onSelect={(value) => setYear(Number(value))}
+            onSelect={(value) => setSelection({ ticker, year: Number(value) })}
             compact
             variant="bare"
             focused={focused}
@@ -345,12 +297,10 @@ export function RiskFactorsPane({
                 />
               ))}
             </Box>
-            <Box height={1} marginTop={1}>
-              <Text fg={colors.textDim}>
-                Headings are the filing's own. Press o to open the 10-K.
-              </Text>
-            </Box>
+
           </Box>
+        ) : reportError ? (
+          <PaneStatusBody error={reportError} errorTitle={`Could not load ${year} risk report.`} />
         ) : (
           <Spinner label="Loading..." />
         )}
