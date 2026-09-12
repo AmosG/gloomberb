@@ -180,11 +180,20 @@ describe("fetchAuctionPages", () => {
     }
   });
 
-  test("treats missing or unusable page metadata as a single page", () => {
-    expect(totalPages({ meta: {} })).toBe(1);
-    expect(totalPages({ meta: { "total-pages": "nope" } })).toBe(1);
-    expect(totalPages({ meta: { "total-pages": 0 } })).toBe(1);
-    expect(totalPages(null)).toBe(1);
+  test("does not infer complete pagination from missing or malformed declarations", () => {
+    for (const count of [undefined, null, "", "nope", 0, 1.5, "1.5", -1, true, [1], Infinity]) {
+      expect(() => totalPages({ meta: { "total-pages": count } })).toThrow("invalid page count");
+    }
+    expect(() => totalPages(null)).toThrow("invalid page count");
     expect(totalPages({ meta: { "total-pages": 4 } })).toBe(4);
+    expect(totalPages({ meta: { "total-pages": "1" } })).toBe(1);
+  });
+
+  test("a changing page declaration cannot certify the initially declared prefix", async () => {
+    for (const changed of [1, 3]) {
+      await expect(fetchAuctionPages(async (number) => page(
+        [row("10-Year", `2026-08-0${number}`)], number === 1 ? 2 : changed,
+      ))).rejects.toThrow("page count changed");
+    }
   });
 });

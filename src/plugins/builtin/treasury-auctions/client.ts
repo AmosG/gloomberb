@@ -54,10 +54,15 @@ export function buildAuctionsUrl(sinceDays: number, now = Date.now(), page = 1):
 }
 
 /** Fiscal Data reports the page count as `meta["total-pages"]`. */
-export function totalPages(body: unknown): number {
+export function totalPages(body: unknown, page = 1): number {
   const meta = (body as { meta?: Record<string, unknown> } | null)?.meta;
-  const pages = Number(meta?.["total-pages"]);
-  return Number.isFinite(pages) && pages > 1 ? Math.floor(pages) : 1;
+  const value = meta?.["total-pages"];
+  const pages = typeof value === "number" || (typeof value === "string" && value.trim())
+    ? Number(value) : NaN;
+  if (!Number.isSafeInteger(pages) || pages < 1) {
+    throw new Error(`Treasury auction page ${page} has an invalid page count`);
+  }
+  return pages;
 }
 
 /** Fiscal Data sends missing metrics as the literal string "null". */
@@ -127,7 +132,11 @@ export async function fetchAuctionPages(
 
   for (let page = 1; page <= Math.min(pages, MAX_PAGES); page += 1) {
     const body = await loadPage(page);
-    if (page === 1) pages = totalPages(body);
+    const declaredPages = totalPages(body, page);
+    if (page === 1) pages = declaredPages;
+    else if (declaredPages !== pages) {
+      throw new Error(`Treasury auction page count changed on page ${page}`);
+    }
     if (pages > MAX_PAGES) {
       throw new Error(`Treasury auction history exceeds the ${MAX_PAGES}-page limit`);
     }
