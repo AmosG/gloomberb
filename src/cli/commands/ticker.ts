@@ -247,27 +247,25 @@ export async function buildTickerReport({
   const quoteOptions = quoteFormatOptions(quote, tickerFile?.metadata.assetCategory, financials.quoteMetadata?.instrumentType);
   const lines: string[] = [];
 
-  if (!quote) {
-    lines.push(`${cliStyles.accent(symbol)} ${cliStyles.bold(name)}`);
-    lines.push(cliStyles.muted("Quote unavailable."));
-    await appendTickerPositions(lines, tickerFile, quote, config, toBase);
-    return lines.join("\n");
-  }
-
-  lines.push(`${cliStyles.accent(quote.symbol)} ${cliStyles.bold(name)}`);
+  lines.push(`${cliStyles.accent(quote?.symbol ?? symbol)} ${cliStyles.bold(name)}`);
+  if (!quote) lines.push(cliStyles.muted("Quote unavailable."));
 
   const summaryParts = [
-    exchangeShortName(quote.exchangeName, quote.fullExchangeName) || undefined,
-    quote.currency ? `Currency ${quote.currency}` : undefined,
-    quote.marketState ? marketStateLabel(quote.marketState) : undefined,
-    quote.dataSource ? `Source ${quote.dataSource.toUpperCase()}` : undefined,
+    exchangeShortName(quote?.exchangeName ?? financials.quoteMetadata?.listingExchangeName ?? tickerFile?.metadata.exchange, quote?.fullExchangeName) || undefined,
+    (quote?.currency || financials.quoteMetadata?.currency || tickerFile?.metadata.currency)
+      ? `Currency ${quote?.currency || financials.quoteMetadata?.currency || tickerFile?.metadata.currency}` : undefined,
+    quote?.marketState ? marketStateLabel(quote.marketState) : undefined,
+    quote?.dataSource ? `Source ${quote.dataSource.toUpperCase()}` : undefined,
   ].filter((part): part is string => !!part);
   if (summaryParts.length > 0) {
     lines.push(cliStyles.muted(summaryParts.join("  |  ")));
   }
 
+  const instrumentType = quote?.instrumentType?.trim()
+    || financials.quoteMetadata?.instrumentType?.trim()
+    || tickerFile?.metadata.assetCategory;
   const metadataParts = [
-    tickerFile?.metadata.assetCategory ? `Type ${tickerFile.metadata.assetCategory}` : undefined,
+    instrumentType ? `Type ${instrumentType}` : undefined,
     (tickerFile?.metadata.sector || profile?.sector) ? `Sector ${tickerFile?.metadata.sector || profile?.sector}` : undefined,
     (tickerFile?.metadata.industry || profile?.industry) ? `Industry ${tickerFile?.metadata.industry || profile?.industry}` : undefined,
   ].filter((part): part is string => !!part);
@@ -289,39 +287,41 @@ export async function buildTickerReport({
     lines.push(cliStyles.muted(membershipParts.join("  |  ")));
   }
 
-  const marketCapText = quote.marketCap != null
+  const marketCapText = quote?.marketCap != null
     ? `${formatCompact(await toBase(quote.marketCap, quote.currency))} ${config.baseCurrency}`
     : "—";
 
-  appendMetricSection(lines, "Quote", [
-    ["Last", colorBySign(formatMarketPriceWithCurrency(quote.price, quote.currency, quoteOptions), quote.change)],
-    ["Change", colorBySign(`${formatMarketChangeWithCurrency(quote.change, quote.currency, quoteOptions)} (${formatSignedPercentRaw(quote.changePercent)})`, quote.change)],
-    ["Open", quote.open != null ? formatMarketPriceWithCurrency(quote.open, quote.currency, quoteOptions) : "—"],
-    ["Day Range", quote.low != null || quote.high != null
-      ? `${quote.low != null ? formatMarketPriceWithCurrency(quote.low, quote.currency, quoteOptions) : "—"} - ${quote.high != null ? formatMarketPriceWithCurrency(quote.high, quote.currency, quoteOptions) : "—"}`
-      : "—"],
-    ["52W Range", quote.low52w != null || quote.high52w != null
-      ? `${quote.low52w != null ? formatMarketPriceWithCurrency(quote.low52w, quote.currency, quoteOptions) : "—"} - ${quote.high52w != null ? formatMarketPriceWithCurrency(quote.high52w, quote.currency, quoteOptions) : "—"}`
-      : "—"],
-    ["Bid / Ask", formatBidAsk(quote.bid, quote.ask, quote.bidSize, quote.askSize, quote.currency, quoteOptions.assetCategory, quote.priceBasis)],
-    ["Volume", quote.volume != null ? formatNumber(quote.volume, 0) : "—"],
-    ["Updated", formatTimestamp(quote.lastUpdated)],
-  ]);
+  if (quote) {
+    appendMetricSection(lines, "Quote", [
+      ["Last", colorBySign(formatMarketPriceWithCurrency(quote.price, quote.currency, quoteOptions), quote.change)],
+      ["Change", colorBySign(`${formatMarketChangeWithCurrency(quote.change, quote.currency, quoteOptions)} (${formatSignedPercentRaw(quote.changePercent)})`, quote.change)],
+      ["Open", quote.open != null ? formatMarketPriceWithCurrency(quote.open, quote.currency, quoteOptions) : "—"],
+      ["Day Range", quote.low != null || quote.high != null
+        ? `${quote.low != null ? formatMarketPriceWithCurrency(quote.low, quote.currency, quoteOptions) : "—"} - ${quote.high != null ? formatMarketPriceWithCurrency(quote.high, quote.currency, quoteOptions) : "—"}`
+        : "—"],
+      ["52W Range", quote.low52w != null || quote.high52w != null
+        ? `${quote.low52w != null ? formatMarketPriceWithCurrency(quote.low52w, quote.currency, quoteOptions) : "—"} - ${quote.high52w != null ? formatMarketPriceWithCurrency(quote.high52w, quote.currency, quoteOptions) : "—"}`
+        : "—"],
+      ["Bid / Ask", formatBidAsk(quote.bid, quote.ask, quote.bidSize, quote.askSize, quote.currency, quoteOptions.assetCategory, quote.priceBasis)],
+      ["Volume", quote.volume != null ? formatNumber(quote.volume, 0) : "—"],
+      ["Updated", formatTimestamp(quote.lastUpdated)],
+    ]);
 
-  appendMetricSection(lines, "Extended Hours", [
-    ["Pre-Market", quote.preMarketPrice != null
-      ? colorBySign(
-        `${formatMarketPriceWithCurrency(quote.preMarketPrice, quote.currency, quoteOptions)} (${quote.preMarketChangePercent != null ? formatSignedPercentRaw(quote.preMarketChangePercent) : "—"})`,
-        quote.preMarketChange ?? 0,
-      )
-      : "—"],
-    ["After Hours", quote.postMarketPrice != null
-      ? colorBySign(
-        `${formatMarketPriceWithCurrency(quote.postMarketPrice, quote.currency, quoteOptions)} (${quote.postMarketChangePercent != null ? formatSignedPercentRaw(quote.postMarketChangePercent) : "—"})`,
-        quote.postMarketChange ?? 0,
-      )
-      : "—"],
-  ]);
+    appendMetricSection(lines, "Extended Hours", [
+      ["Pre-Market", quote.preMarketPrice != null
+        ? colorBySign(
+          `${formatMarketPriceWithCurrency(quote.preMarketPrice, quote.currency, quoteOptions)} (${quote.preMarketChangePercent != null ? formatSignedPercentRaw(quote.preMarketChangePercent) : "—"})`,
+          quote.preMarketChange ?? 0,
+        )
+        : "—"],
+      ["After Hours", quote.postMarketPrice != null
+        ? colorBySign(
+          `${formatMarketPriceWithCurrency(quote.postMarketPrice, quote.currency, quoteOptions)} (${quote.postMarketChangePercent != null ? formatSignedPercentRaw(quote.postMarketChangePercent) : "—"})`,
+          quote.postMarketChange ?? 0,
+        )
+        : "—"],
+    ]);
+  }
 
   appendMetricSection(lines, "Fundamentals", [
     ["Market Cap", marketCapText],
@@ -329,7 +329,10 @@ export async function buildTickerReport({
     ["P/E (TTM)", formatPriceEarnings(fundamentals?.trailingPE, 2)],
     ["Forward P/E", formatPriceEarnings(fundamentals?.forwardPE, 2)],
     ["PEG", fundamentals?.pegRatio != null ? formatNumber(fundamentals.pegRatio, 2) : "—"],
-    ["EPS", fundamentals?.eps != null ? formatCurrency(fundamentals.eps, quote.currency) : "—"],
+    ["EPS", fundamentals?.eps != null && Number.isFinite(fundamentals.eps)
+      ? quote ? formatCurrency(fundamentals.eps, quote.currency)
+        : `${formatNumber(fundamentals.eps, 2)} ${fundamentals.financialCurrency?.trim() || "(ccy?)"}`
+      : "—"],
     [`Dividend Yield${fundamentals?.dividendYieldBasis ? ` (${fundamentals.dividendYieldBasis})` : ""}`, fundamentals?.dividendYield != null ? formatPercent(fundamentals.dividendYield) : "—"],
     ["Revenue", formatNullableCompact(fundamentals?.revenue)],
     ["Net Income", formatNullableCompact(fundamentals?.netIncome)],
@@ -417,6 +420,7 @@ function buildTickerStructuredData({
     symbol,
     quote: quote ? {
       symbol: quote.symbol,
+      instrumentType: quote.instrumentType,
       name: quote.name,
       price: quote.price,
       priceBasis: quote.priceBasis ?? null,
@@ -432,6 +436,7 @@ function buildTickerStructuredData({
       providerId: quote.providerId ?? "",
       lastUpdated: quote.lastUpdated ? new Date(quote.lastUpdated).toISOString() : "",
     } : null,
+    quoteMetadata: financials.quoteMetadata,
     ticker: tickerFile ? {
       ticker: tickerFile.metadata.ticker,
       name: tickerFile.metadata.name ?? "",
@@ -490,8 +495,20 @@ export async function ticker(symbol: string, dependencies: TickerCommandDependen
       );
     }
 
-    if (!financials || (!financials.quote && !tickerFile?.metadata.positions.some((position) => position.shares !== 0))) {
-      failCommand(`No quote data available for ${normalized}.`);
+    const hasResearchData = financials && (
+      financials.quote
+      || Object.values(financials.profile ?? {}).some(value => value?.trim())
+      || Object.entries(financials.fundamentals ?? {}).some(([key, value]) =>
+        key !== "return1Y" && key !== "return3Y" && typeof value === "number" && Number.isFinite(value))
+      || financials.quoteMetadata?.instrumentType?.trim()
+      || financials.quoteMetadata?.currency?.trim()
+      || financials.quoteMetadata?.listingExchangeName?.trim()
+      || Object.values(computeTickerPriceReturns(financials, tickerFile?.metadata.assetCategory)).some(value => value != null)
+      || financials.annualStatements.length > 0
+      || financials.quarterlyStatements.length > 0
+    );
+    if (!financials || (!hasResearchData && !tickerFile?.metadata.positions.some((position) => position.shares !== 0))) {
+      failCommand(`No research data available for ${normalized}.`);
     }
     const resolvedFinancials = financials as TickerFinancials;
     const quote = resolvedFinancials.quote;
@@ -518,6 +535,7 @@ export async function ticker(symbol: string, dependencies: TickerCommandDependen
 
     if (dependencies.printResult) {
       dependencies.printResult({
+        warnings: quote ? undefined : ["Quote unavailable."],
         data: buildTickerStructuredData({
           symbol: normalized,
           tickerFile,

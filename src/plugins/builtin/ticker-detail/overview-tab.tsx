@@ -41,6 +41,9 @@ export function OverviewTab({
   const fundamentals = financials?.fundamentals;
   const capitalization = selectMarketCapitalization(quote, fundamentals);
   const profile = financials?.profile;
+  const instrumentType = quote?.instrumentType?.trim()
+    || financials?.quoteMetadata?.instrumentType?.trim()
+    || ticker.metadata.assetCategory;
   const exchangeRates = useFxRatesMap([
     baseCurrency,
     ticker.metadata.currency,
@@ -274,12 +277,12 @@ export function OverviewTab({
         )}
 
         {/* Sector / Industry / Type */}
-        {(sector || industry || ticker.metadata.assetCategory) && (
+        {(sector || industry || instrumentType) && (
           <Box flexDirection="row" height={1} gap={3}>
-            {ticker.metadata.assetCategory && (
+            {instrumentType && (
               <Box flexDirection="row">
                 <Text fg={colors.textDim}>{t("Type")}: </Text>
-                <Text fg={colors.text}>{ticker.metadata.assetCategory}</Text>
+                <Text fg={colors.text}>{instrumentType}</Text>
               </Box>
             )}
             {sector && (
