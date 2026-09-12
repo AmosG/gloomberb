@@ -923,7 +923,7 @@ function normalizeChartSeries(
       return Number.isFinite(date.getTime()) ? [{ ...point, date }] : [];
     })
     .sort((left, right) => left.date.getTime() - right.date.getTime());
-  const points = appendLiveQuotePoint(sorted, financials.quote)
+  const points = appendLiveQuotePoint(sorted, financials.quote, { assetCategory: financials.quoteMetadata?.instrumentType })
     .slice()
     .sort((left, right) => new Date(left.date).getTime() - new Date(right.date).getTime());
   return {

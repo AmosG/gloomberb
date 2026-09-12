@@ -12,6 +12,8 @@ A quote needs a finite, positive observation timestamp that is no later than the
 
 ## Charts, comparisons, and correlations
 
+Bond history currently has no source-declared price convention. Charts retain its raw observations with unknown price units and do not append a current bond quote: that quote's per-unit or percent-of-par declaration does not establish the basis of a separate historical series. Overview price returns also use the historical observations without appending that quote. A numeric ratio between a quote and an old close cannot establish compatible units. Historical values and current source quotes remain separate; this does not add bond historical coverage or reconstruct yield.
+
 Local chart snapshots retain the full selected instrument with its captured quote and history, including multiple contracts that share one public symbol. Reconstruction uses only observations captured for that exact contract; older public-symbol snapshots remain usable for public listings. A missing contract capture may be loaded from the corresponding market source, but another contract’s capture does not supply it.
 
 Historical price charts retain explicit listing currency and instrument type independently of a current quote. A rejected stale quote can supply those static facts, with its original source timestamp and stale flag in exported `quoteMetadata`; it cannot add a price observation or daily change. Snapshot reloads retain those facts without a live lookup. When optional enrichment supplies a missing field, `fieldSources` preserves that field's separate provenance. Missing or mismatched metadata remains unknown; no currency, FX conversion, or share/contract basis is inferred from a price's magnitude.

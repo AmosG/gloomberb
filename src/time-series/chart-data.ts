@@ -13,7 +13,7 @@ const MAX_LIVE_QUOTE_CLOCK_SKEW_MS = 5 * 60_000;
 const MAX_INTRADAY_BAR_INTERVAL_MS = 6 * 60 * 60_000;
 const MIN_LIVE_QUOTE_TAIL_GAP_MS = 5 * 60_000;
 
-export type AppendLiveQuotePointOptions =
+export type AppendLiveQuotePointOptions = { assetCategory?: string } & (
   | {
     now?: number;
     mode?: "scalar";
@@ -23,7 +23,15 @@ export type AppendLiveQuotePointOptions =
     mode: "ohlc";
     resolution: ManualChartResolution;
     exchange?: string;
-  };
+  });
+
+/** PricePoint history has no declared bond price convention. A quote cannot
+ * prove whether those separate observations are money or percent of par. */
+export function hasUnknownBondHistoryBasis(quote?: Quote | null, ...assetCategories: Array<string | undefined>): boolean {
+  return quote?.priceBasis === "percent-of-par"
+    || quote?.instrumentType?.trim().toUpperCase() === "BOND"
+    || assetCategories.some((category) => category?.trim().toUpperCase() === "BOND");
+}
 
 function coerceDate(value: Date | string | number): Date {
   return value instanceof Date ? value : new Date(value);
@@ -98,6 +106,7 @@ export function appendLiveQuotePoint(
 ): PricePoint[] {
   const now = options.now ?? Date.now();
   if (!quote || isQuoteStaleForCurrentSession(quote, now)) return points;
+  if (hasUnknownBondHistoryBasis(quote, options.assetCategory)) return points;
 
   const quoteTime = quote.lastUpdated;
   const quotePrice = getActiveQuotePrice(quote);

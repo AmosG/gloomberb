@@ -10,7 +10,7 @@ import { appendQuoteToPriceReturnHistory, buildPriceReturnFields } from "../../.
 import { useViewport } from "../../../react/input";
 import { useAppSelector } from "../../../state/app/context";
 import { colors, priceColor } from "../../../theme/colors";
-import { appendLiveQuotePoint } from "../../../time-series/chart-data";
+import { appendLiveQuotePoint, hasUnknownBondHistoryBasis } from "../../../time-series/chart-data";
 import type { TickerFinancials } from "../../../types/financials";
 import type { TickerRecord } from "../../../types/ticker";
 import { Box, ScrollBox, Text, TextAttributes, useUiCapabilities } from "../../../ui";
@@ -67,7 +67,9 @@ export function OverviewTab({
   const contentWidth = Math.max((width || Math.floor(termWidth * 0.5)) - (fractionalViewport ? 2 : 4), 20);
   const chartWidth = contentWidth;
   const hasHistory = (financials?.priceHistory?.length ?? 0) > 2;
-  const chartHistory = appendLiveQuotePoint(financials?.priceHistory ?? [], quote);
+  const unknownHistoryBasis = hasUnknownBondHistoryBasis(quote, ticker.metadata.assetCategory, financials?.quoteMetadata?.instrumentType);
+  const historyQuote = unknownHistoryBasis ? undefined : quote;
+  const chartHistory = appendLiveQuotePoint(financials?.priceHistory ?? [], historyQuote);
   const chartDelta = (chartHistory.at(-1)?.close ?? 0) - (chartHistory[0]?.close ?? 0);
   const chartTimeZone = resolveExchangeTimeZone(
     ticker.metadata.exchange || quote?.listingExchangeName || quote?.exchangeName,
@@ -76,7 +78,7 @@ export function OverviewTab({
     id: `${ticker.metadata.ticker}:price`,
     label: `${ticker.metadata.ticker} Price`,
     color: priceColor(chartDelta),
-    unit: quoteCurrency,
+    unit: unknownHistoryBasis ? "unknown" : quoteCurrency,
     style: "area",
     axis: "right",
     panelId: "price",
@@ -114,7 +116,7 @@ export function OverviewTab({
     marketCapExchangeRates: effectiveExchangeRates,
   });
   const performanceFields = buildPriceReturnFields(
-    appendQuoteToPriceReturnHistory(financials?.priceHistory ?? [], quote),
+    appendQuoteToPriceReturnHistory(financials?.priceHistory ?? [], historyQuote),
   ).map((field) => {
     if (field.value != null || field.unavailableReason) return field;
     if (field.id === "1Y" && fundamentals?.return1Y != null) {
