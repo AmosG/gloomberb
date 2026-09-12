@@ -8,9 +8,9 @@ export const CDS_PANE_ID = "cds";
 
 /**
  * Raw DTCC values are decimals: `Fixed rate-Leg 1 = 0.01` is a 100bp coupon and
- * `Spread-Leg 1 = 0.00256` under notation code "3" is 25.6bp. Only a report that
- * explicitly labels itself basis points or percent is read any other way. Both
- * conversions happen here and nowhere else.
+ * `Spread-Leg 1 = 0.00256` under notation code "3" is 25.6bp. Spread notation
+ * "4" is already basis points; "1" is monetary and cannot supply a bp rate.
+ * Conversions happen here and nowhere else.
  */
 const PERCENT_TO_BP = 100;
 const DECIMAL_TO_BP = 10_000;
@@ -30,6 +30,9 @@ export interface CdsTrade {
   couponBp: number | null;
   /** Only what the report carried. Never derived from upfront or coupon. */
   spreadBp: number | null;
+  /** Source inputs retained even when their notation cannot supply a bp rate. */
+  reportedSpread: number | null;
+  spreadNotation: string | null;
   upfront: number | null;
   upfrontCurrency: string | null;
 }
@@ -136,11 +139,16 @@ function preferredIssuerName(current: string, candidate: string): string {
 
 export function spreadToBasisPoints(value: number | null, notation: string | null): number | null {
   if (value == null || !Number.isFinite(value)) return null;
-  const unit = (notation ?? "").trim().toLowerCase();
-  if (unit.startsWith("bp") || unit.includes("basis")) return value;
-  if (unit.includes("percent") || unit === "%") return value * PERCENT_TO_BP;
-  // Notation code "3", textual "decimal", and an unlabelled raw value are all decimals.
-  return value * DECIMAL_TO_BP;
+  const unit = (notation ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  let multiplier: number;
+  if (["4", "bp", "bps", "basispoint", "basispoints", "basis point", "basis points"].includes(unit)) multiplier = 1;
+  else if (["%", "percent", "percentage"].includes(unit)) multiplier = PERCENT_TO_BP;
+  // Unlabelled values retain the existing raw-decimal feed contract. An explicit
+  // monetary or unknown unit must not silently inherit that fallback.
+  else if (["", "3", "decimal"].includes(unit)) multiplier = DECIMAL_TO_BP;
+  else return null;
+  const result = value * multiplier;
+  return Number.isFinite(result) ? result : null;
 }
 
 function couponToBasisPoints(fixedRate: number | null): number | null {
@@ -192,6 +200,8 @@ export function normalizeCdsTrades(trades: readonly CloudCdsTradePayload[]): Cds
       currency: trade.notionalCurrency,
       couponBp: couponToBasisPoints(trade.fixedRate),
       spreadBp: spreadToBasisPoints(trade.reportedSpread, trade.spreadNotation),
+      reportedSpread: trade.reportedSpread,
+      spreadNotation: trade.spreadNotation,
       upfront: trade.upfrontAmount,
       upfrontCurrency: trade.upfrontCurrency,
     });

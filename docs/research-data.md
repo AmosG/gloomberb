@@ -138,6 +138,14 @@ CRD shows daily closing option-adjusted spreads for the ICE BofA US Corporate (U
 
 Each series keeps its own observation date. A shared date appears in the footer when all displayed observations agree; otherwise an AS OF column identifies each row's date. Refresh time does not change an observation date. Headless reports retain each FRED series identifier, title, units, frequency, and date.
 
+Responses must identify the requested FRED series and daily percentage OAS metadata. An incompatible refresh leaves a usable prior observation in place with its original date and the current failure status; it does not replace the series with another index or erase valid cached history.
+
+## Single-name CDS
+
+CDS displays reported trade activity, with coupon and spread in basis points. Spread notation code 3 is decimal and code 4 is already basis points; explicit percentage notation is converted once. Unlabelled values are assumed decimal for compatibility with the legacy feed. Monetary notation (code 1) and unknown explicit units leave the bp spread unavailable. Trade-level headless rows retain the source spread and notation. Coupon and upfront amounts never establish an unreported spread.
+
+See the [CFTC spread notation specification](https://www.cftc.gov/media/6576/Part43_45TechnicalSpecification093021CLEAN/download) (elements 73–75) and [ICE SEC SBSDR field validations](https://www.theice.com/publicdocs/data/ICE_Trade_Vault_SEC_SBSDR_Field_List_Validations.pdf) (elements 68–70). These define reporting units, not executable quotes or a comparable constant-maturity issuer spread history.
+
 ## Options
 
 OVME uses a European-exercise Black–Scholes model. It does not model early exercise or discrete dividends. Theta is per day; vega is per volatility percentage point; rho is per rate percentage point. The UI keeps these units beside their values. A positive input exactly at the model’s discounted zero-volatility payoff has a 0% boundary solution. Nearby prices within the cumulative-normal approximation’s price-error bound cannot resolve IV and remain unavailable; this is not an estimate of quote precision or realized volatility. The asymptotic maximum has no finite IV, and the solver retains its 500% ceiling. Submitted calculator inputs retain their entered precision while editing.

@@ -32,6 +32,11 @@ function trimHistory(data: CloudFredSeriesPayload): CloudFredSeriesPayload {
   return { ...data, observations: data.observations.slice(0, HISTORY_LIMIT) };
 }
 
+function seriesError(seriesId: CreditSeriesId, error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.startsWith(`${seriesId}:`) ? message : `${seriesId}: ${message}`;
+}
+
 export function getCachedCreditConditions(): CreditConditionsLoadResult | null {
   const rows: CreditConditionRow[] = [];
   const errors: string[] = [];
@@ -59,10 +64,16 @@ async function loadSeries(
   const request = requestFor(definition.seriesId);
   const result = await loadCachedFredSeries(
     request,
-    async () => trimHistory(await loader(definition.seriesId, {
-      limit: HISTORY_LIMIT,
-      sortOrder: "desc",
-    })),
+    async () => {
+      const data = trimHistory(await loader(definition.seriesId, {
+        limit: HISTORY_LIMIT,
+        sortOrder: "desc",
+      }));
+      // Reject incompatible source responses before they replace usable cache.
+      // The shared cache can then retain the dated prior value as stale fallback.
+      normalizeCreditSeries(definition, data);
+      return data;
+    },
     { force },
   );
   return {
@@ -83,11 +94,11 @@ export async function loadCreditConditions(
   settled.forEach((result, index) => {
     if (result.status === "rejected") {
       const seriesId = CREDIT_SERIES[index]!.seriesId;
-      errors.push(`${seriesId}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`);
+      errors.push(seriesError(seriesId, result.reason));
       return;
     }
     rows.push(result.value.row);
-    if (result.value.refreshError) errors.push(`${result.value.row.seriesId}: ${result.value.refreshError}`);
+    if (result.value.refreshError) errors.push(seriesError(result.value.row.seriesId, result.value.refreshError));
   });
   if (rows.length === 0) throw new Error(summarizeSeriesErrors(errors));
   return { rows, stale: rows.some((row) => row.stale), errors };
