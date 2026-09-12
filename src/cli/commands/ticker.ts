@@ -412,6 +412,7 @@ function buildTickerStructuredData({
   recentSecFilings: SecFilingItem[];
 }) {
   const quote = financials.quote;
+  const priceReturns = computeTickerPriceReturns(financials, tickerFile?.metadata.assetCategory);
   return {
     symbol,
     quote: quote ? {
@@ -442,9 +443,9 @@ function buildTickerStructuredData({
       watchlists: formatWatchlistNames(config, tickerFile.metadata.watchlists),
       positions: tickerFile.metadata.positions,
     } : null,
-    fundamentals: financials.fundamentals ? {
+    fundamentals: financials.fundamentals || priceReturns.return1Y != null || priceReturns.return3Y != null ? {
       ...financials.fundamentals,
-      ...computeTickerPriceReturns(financials, tickerFile?.metadata.assetCategory),
+      ...priceReturns,
     } : undefined,
     profile: financials.profile,
     latestAnnual: financials.annualStatements.at(-1) ?? null,

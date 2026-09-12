@@ -105,8 +105,9 @@ export function buildTickerAiContext(
     add("Profit Margin", fundamentals.profitMargin, fraction);
     add("Free Cash Flow", fundamentals.freeCashFlow, reportedMoney);
     add(`Dividend Yield${fundamentals.dividendYieldBasis ? ` (${fundamentals.dividendYieldBasis})` : ""}${fundamentals.dividendYieldSource ? ` [${fundamentals.dividendYieldSource}]` : ""}`, fundamentals.dividendYield, fraction);
-    add("1Y Return", computeTickerPriceReturns(financials, metadata.assetCategory).return1Y, fraction);
   }
+
+  add("1Y Return", computeTickerPriceReturns(financials, metadata.assetCategory).return1Y, (value) => `${value} (fraction)`);
 
   if (financials?.annualStatements.length) {
     const latest = financials.annualStatements.filter((row) => Number.isFinite(Date.parse(row.date)))

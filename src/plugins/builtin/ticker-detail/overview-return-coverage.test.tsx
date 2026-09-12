@@ -19,8 +19,8 @@ afterEach(async () => {
   setup = undefined;
 });
 
-for (const covered of [false, true]) {
-  test(`${covered ? "covered zero" : "incomplete cached"} fund returns agree across overview, text, JSON and AI context`, async () => {
+for (const withSummary of [true, false]) for (const covered of [false, true]) {
+  test(`${covered ? "covered zero" : "incomplete"} fund returns ${withSummary ? "with cached summary" : "without company fundamentals"} agree across overview, text, JSON and AI context`, async () => {
     const financials: TickerFinancials = {
       annualStatements: [], quarterlyStatements: [],
       priceHistory: [
@@ -28,7 +28,7 @@ for (const covered of [false, true]) {
         { date: new Date("2026-09-10"), close: covered ? 100 : 105 },
       ],
       // Legacy cached since-inception percentages must not override the dated inputs.
-      fundamentals: { return1Y: .05, return3Y: .05, dividendYield: 0 },
+      ...(withSummary ? { fundamentals: { return1Y: .05, return3Y: .05, dividendYield: 0 } } : {}),
       quote: { symbol: "NEWF", currency: "USD", instrumentType: "ETF", price: covered ? 100 : 105, change: 0, changePercent: 0, lastUpdated: Date.parse("2026-09-10") },
     };
     const state = createInitialState(config);
@@ -44,7 +44,8 @@ for (const covered of [false, true]) {
     const frame = setup!.captureCharFrame();
     expect(frame).toMatch(covered ? /1Y\s+0.00%/ : /1Y\s+-/);
     expect(frame).toMatch(covered ? /3Y\s+0.00%/ : /3Y\s+-/);
-    expect(frame).toMatch(/Div Yield\s+0.00%/);
+    if (withSummary) expect(frame).toMatch(/Div Yield\s+0.00%/);
+    else expect(frame).not.toContain("Div Yield");
     const report = await buildTickerReport({ symbol: "NEWF", tickerFile: savedTicker, financials, config, toBase: async value => value });
     expect(report.includes("1Y Return")).toBe(covered);
     expect(report.includes("3Y Return")).toBe(covered);
@@ -60,11 +61,16 @@ for (const covered of [false, true]) {
       printResult: result => { captured = result.data; },
     });
     expect(closed).toBe(1);
-    expect(captured.fundamentals.return1Y).toBe(covered ? 0 : undefined);
-    expect(captured.fundamentals.return3Y).toBe(covered ? 0 : undefined);
+    expect(captured.fundamentals?.return1Y).toBe(covered ? 0 : undefined);
+    expect(captured.fundamentals?.return3Y).toBe(covered ? 0 : undefined);
     const context = buildTickerAiContext(savedTicker, financials, "USD");
     expect(context.includes("1Y Return: 0 (fraction)")).toBe(covered);
     expect(context).not.toContain("1Y Return: 0.05");
-    expect(financials.fundamentals?.return1Y).toBe(.05);
+    expect(financials.fundamentals?.return1Y).toBe(withSummary ? .05 : undefined);
+    if (!withSummary) {
+      expect(context).not.toContain("Fundamentals source:");
+      if (covered) expect(Object.keys(captured.fundamentals)).toEqual(["return1Y", "return3Y"]);
+      else expect(captured.fundamentals).toBeUndefined();
+    }
   });
 }
