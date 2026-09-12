@@ -130,6 +130,11 @@ function isActiveProviderQuoteTooOld(quote: Quote, now = Date.now()): boolean {
 
 export function isProviderQuoteUsableForCurrentSession(quote: Quote | null | undefined, exchange?: string, symbol?: string): quote is Quote {
   if (!quote) return false;
+  // Malformed source identity must reject this row, not throw out an entire
+  // batch or prevent a cached record from falling through to a valid source.
+  if (typeof quote.symbol !== "string" || !quote.symbol.trim()) return false;
+  if ([quote.listingExchangeName, quote.exchangeName, quote.instrumentType]
+    .some((value) => value != null && typeof value !== "string")) return false;
   if (symbol) {
     const metadata = quoteMetadataFromQuote(quote);
     // Older quote providers omit listing metadata. They must still return the

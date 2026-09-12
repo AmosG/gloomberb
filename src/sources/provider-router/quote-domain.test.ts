@@ -16,6 +16,21 @@ describe("provider quote identity and price domain", () => {
     expect(isProviderQuoteUsableForCurrentSession(quote("AAPL"), "NASDAQ", "AAPL")).toBe(true);
   });
 
+  test("malformed source identity rejects a row before metadata parsing", async () => {
+    for (const invalid of [{ symbol: undefined }, { symbol: null }, { symbol: 42 }, { symbol: " " },
+      { listingExchangeName: 42 }, { exchangeName: {} }, { instrumentType: [] }]) {
+      const malformed = { ...quote("ES=F"), ...invalid } as unknown as Quote;
+      expect(isProviderQuoteUsableForCurrentSession(malformed, "", "ES=F")).toBe(false);
+      const bad = createTestDataProvider({ id: "malformed", priority: 1,
+        getQuote: async () => malformed,
+        getQuotesBatch: async (targets) => targets.map((target) => ({ target, quote: malformed })),
+      });
+      const good = createTestDataProvider({ id: "good", priority: 2, getQuote: async (symbol) => quote(symbol, { price: 5000 }) });
+      const router = new AssetDataRouter(good, [bad]);
+      expect((await router.getQuotesBatch([{ symbol: "ES=F" }]))[0]?.quote?.price).toBe(5000);
+    }
+  });
+
   test("negative and zero prices need explicit futures metadata and a usable observation", () => {
     for (const price of [-37.63, 0]) {
       for (const instrumentType of ["FUT", "FUTURE", "FUTURES"]) {
