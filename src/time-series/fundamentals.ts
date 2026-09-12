@@ -482,7 +482,7 @@ function selectedEps(
   statement: FinancialStatement,
 ): { value: number; dependencies: NumericStatementField[] } | null {
   if (statement.epsBasis?.status === "unresolved") return null;
-  if (finiteNumber(statement.eps) && statement.eps !== 0) {
+  if (finiteNumber(statement.eps)) {
     return { value: statement.eps, dependencies: ["eps"] };
   }
   const shares = selectedShares(statement);

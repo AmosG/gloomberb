@@ -55,6 +55,55 @@ test("automatic valuation coverage does not substitute a profitable annual perio
   expect(extractFundamentalSeries(data, source("ttm"))).toEqual([]);
 });
 
+test("finite reported EPS takes precedence over aggregate income and shares, including zero", () => {
+  for (const eps of [0, -0, -2, 2]) {
+    const data = fixture();
+    Object.assign(data.annualStatements[1]!, { eps, netIncome: 100, netIncomeCommonStockholders: eps * 10, dilutedShares: 10 });
+    const original = structuredClone(data);
+    const points = extractFundamentalSeries(data, source());
+    expect(points.map(({ value }) => value)).toEqual(eps > 0 ? [5, 27.5, 30] : [5]);
+    expect(data).toEqual(original);
+  }
+  // Only unavailable/nonfinite reported EPS keeps the existing derivation.
+  for (const eps of [undefined, NaN, Infinity]) {
+    const data = fixture();
+    Object.assign(data.annualStatements[1]!, { eps, netIncome: 100, dilutedShares: 10 });
+    expect(extractFundamentalSeries(data, source()).map(({ value }) => value)).toEqual([5, 5.5, 6]);
+  }
+});
+
+test("zero TTM reported EPS is coverage, not permission to use aggregate income or annual EPS", () => {
+  for (const earnings of [[0, 0, 0, 0], [1, -1, 2, -2]]) {
+    const data = fixture();
+    data.annualStatements = [data.annualStatements[0]!];
+    data.quarterlyStatements = ["2025-06-30", "2025-09-30", "2025-12-31", "2026-03-31"]
+      .map((date, index) => ({ date, currency: "USD", eps: earnings[index], netIncome: 25, dilutedShares: 10 }));
+    for (const period of ["auto", "ttm"] as const) {
+      expect(extractFundamentalSeries(data, source(period))).toEqual([]);
+    }
+    data.quarterlyStatements = data.quarterlyStatements.map(({ eps, ...row }) => row);
+    for (const period of ["auto", "ttm"] as const) {
+      expect(extractFundamentalSeries(data, source(period)).at(-1)?.value).toBe(6);
+    }
+  }
+});
+
+test("reported zero EPS uses its own availability; absent EPS uses income and shares availability", () => {
+  const data = fixture();
+  const latest = data.annualStatements[1]!;
+  Object.assign(latest, { eps: 0, netIncome: 200, dilutedShares: 10,
+    fieldAvailability: { eps: "2026-03-01", netIncome: "2026-10-01", dilutedShares: "2026-10-01" } });
+  // The known zero is effective even though alternative inputs are unpublished.
+  expect(extractFundamentalSeries(data, source()).map(({ value }) => value)).toEqual([5]);
+  latest.fieldAvailability = { eps: "2026-10-01", netIncome: "2026-03-01", dilutedShares: "2026-03-01" };
+  // Before reported EPS is available, the older published period remains current.
+  expect(extractFundamentalSeries(data, source()).map(({ value }) => value)).toEqual([5, 6]);
+  latest.eps = undefined;
+  expect(extractFundamentalSeries(data, source()).map(({ value }) => value)).toEqual([5, 2.75, 3]);
+  latest.fieldAvailability.dilutedShares = "2026-10-01";
+  expect(extractFundamentalSeries(data, source()).find(({ periodLabel }) => periodLabel === "Current")?.value).toBe(6);
+});
+
 test("other current monetary ratios cannot skip a latest zero denominator", () => {
   const cases: Array<[string, Partial<FinancialStatement>, keyof FinancialStatement]> = [
     ["priceSales", { totalRevenue: 100, dilutedShares: 10 }, "totalRevenue"],
