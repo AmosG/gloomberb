@@ -331,29 +331,33 @@ function seriesCurrency(series: ResolvedSeries): string | null {
   return series.unit.match(/^([A-Z]{3})(?:$|\/)/i)?.[1]?.toUpperCase() ?? null;
 }
 
-function spreadUnit(series: ResolvedSeries): string | null {
+function unitFactorIdentity(value: string): string {
+  const token = value.trim();
+  if (/^[A-Za-z]{3}$/.test(token)) {
+    const { currency, divisor } = resolveCurrencyUnit(token);
+    return `${currency}:${divisor}`;
+  }
+  return token.toLowerCase().replace(/^shares$/, "share");
+}
+
+function knownUnitSignature(series: ResolvedSeries): string | null {
   const unit = series.unit.trim();
   if (!unit || /(?:^|\W)(?:currency|unknown|unspecified|n\/a)(?:$|\W)/i.test(unit)
     || /^(?:units?|[-?]+)$/i.test(unit)) return null;
+  if (unit.split("/").some((part) => !part.trim() || /^[-?]+$/.test(part.trim()))) return null;
 
-  // Keep currency scale in the comparison: GBp/GBX are pence, not pounds.
-  // Compound units retain their order, so USD/EUR cannot subtract EUR/USD.
-  const factor = (value: string) => {
-    const token = value.trim();
-    if (/^[A-Za-z]{3}$/.test(token)) {
-      const { currency, divisor } = resolveCurrencyUnit(token);
-      return `${currency}:${divisor}`;
-    }
-    return token.toLowerCase().replace(/^shares$/, "share");
-  };
   const monetary = series.unitGroup.match(/^(price|currency-total|per-share)(?::([^:]+))?$/);
   const currency = unit.match(/^([A-Za-z]{3})(?:$|\/)/)?.[1];
-  if (monetary && (!currency || (monetary[2] && factor(monetary[2]) !== factor(currency)))) return null;
+  if (monetary && (!currency || (monetary[2] && unitFactorIdentity(monetary[2]) !== unitFactorIdentity(currency)))) return null;
 
-  // A price with no declared per-unit basis is not a monetary total. Explicit
-  // USD/share price and EPS units, however, match despite different groups.
+  // Currency alone does not establish a price's physical/share basis. A scalar
+  // multiplier cannot establish it either. Explicit USD/share price and EPS
+  // units, however, match despite different groups.
+  if (monetary?.[1] === "price" && !unit.includes("/")) return null;
   const basis = monetary && !unit.includes("/") ? monetary[1] : "";
-  return `${basis ?? ""}|${unit.split("/").map(factor).join("/")}`;
+  // Keep currency scale and compound order: GBp/GBX are pence, not pounds;
+  // USD/EUR cannot subtract EUR/USD.
+  return `${basis ?? ""}|${unit.split("/").map(unitFactorIdentity).join("/")}`;
 }
 
 function unitFactors(unit: string): { numerator: string[]; denominator: string[] } {
@@ -373,13 +377,16 @@ function ratioUnit(left: ResolvedSeries, right: ResolvedSeries): {
   unit: string;
   unitGroup: string;
 } {
+  if (!knownUnitSignature(left) || !knownUnitSignature(right)) {
+    return { unit: "unknown", unitGroup: "derived-unit:unknown" };
+  }
   const leftFactors = unitFactors(left.unit);
   const rightFactors = unitFactors(right.unit);
   const numerator = [...leftFactors.numerator, ...rightFactors.denominator];
   const denominator = [...leftFactors.denominator, ...rightFactors.numerator];
   for (let index = numerator.length - 1; index >= 0; index -= 1) {
     const match = denominator.findIndex((factor) => (
-      factor.toLowerCase() === numerator[index]!.toLowerCase()
+      unitFactorIdentity(factor) === unitFactorIdentity(numerator[index]!)
     ));
     if (match < 0) continue;
     numerator.splice(index, 1);
@@ -388,9 +395,16 @@ function ratioUnit(left: ResolvedSeries, right: ResolvedSeries): {
   const unit = denominator.length === 0
     ? numerator.join("·") || "x"
     : `${numerator.join("·") || "1"}/${denominator.join("·")}`;
+  const groupFactor = (value: string) => {
+    const identity = unitFactorIdentity(value);
+    return (/^[A-Za-z]{3}$/.test(value.trim()) ? identity.replace(/:1$/, "") : identity).toLowerCase();
+  };
+  const groupNumerator = numerator.map(groupFactor).join("·");
+  const groupDenominator = denominator.map(groupFactor).join("·");
+  const group = groupDenominator ? `${groupNumerator || "1"}/${groupDenominator}` : groupNumerator;
   return {
     unit,
-    unitGroup: unit === "x" ? "ratio" : `derived-unit:${unit.toLowerCase()}`,
+    unitGroup: unit === "x" ? "ratio" : `derived-unit:${group}`,
   };
 }
 
@@ -632,8 +646,8 @@ export function resolveStudies(
     const input = inputs[0]!;
     if (spec.kind === "spread") {
       const pairedInput = inputs[1]!;
-      const inputUnit = spreadUnit(input);
-      if (inputUnit === null || inputUnit !== spreadUnit(pairedInput)) {
+      const inputUnit = knownUnitSignature(input);
+      if (inputUnit === null || inputUnit !== knownUnitSignature(pairedInput)) {
         errors.push(`${spec.id}: spread cannot subtract ${pairedInput.label} (${pairedInput.unit || "unit unknown"}) from ${input.label} (${input.unit || "unit unknown"}); inputs require matching known units, currencies and scales.`);
         return;
       }

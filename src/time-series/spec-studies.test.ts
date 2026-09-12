@@ -496,6 +496,14 @@ describe("study resolution", () => {
     ["placeholder units", "unknown", "unknown", "unknown", "unknown", false],
     ["untyped scalar unit", "unit", "unknown", "unit", "unknown", false],
     ["unspecified price versus total", "USD", "price:USD", "USD", "currency-total:USD", false],
+    ["two unspecified price bases", "USD", "price:USD", "USD", "price:USD", false],
+    ["trailing price denominator", "USD/", "price:USD", "USD/", "price:USD", false],
+    ["blank price denominator", "USD/   ", "price:USD", "USD/   ", "price:USD", false],
+    ["empty compound price denominator", "USD//barrel", "price:USD", "USD//barrel", "price:USD", false],
+    ["placeholder price denominator", "USD/?", "price:USD", "USD/?", "price:USD", false],
+    ["explicit common physical basis", "USD/barrel", "price:USD", "USD/barrel", "price:USD", true],
+    ["different physical bases", "USD/barrel", "price:USD", "USD/gallon", "price:USD", false],
+    ["physical basis with conflicting currency metadata", "USD/barrel", "price:EUR", "USD/barrel", "price:EUR", false],
     ["same totals", "USD", "currency-total:USD", "USD", "currency-total:USD", true],
     ["price versus EPS", "USD/share", "price:USD", "USD/share", "per-share:USD", true],
     ["known crypto units", "USD/unit", "price:USD", "USD/unit", "price:USD", true],
@@ -540,5 +548,66 @@ describe("study resolution", () => {
       expect(result.errors).toHaveLength(1);
       expect(result.errors[0]).toContain("spread: spread cannot subtract");
     }
+  });
+
+  test("a multiplier cannot establish missing physical price units even across interrupted history", () => {
+    const inputs = ["left", "right"].map((id) => ({ ...resolved(id), unit: "USD", unitGroup: "price:USD", priceAssetCategory: "FUTURE" }));
+    inputs[0]!.points[1] = { ...inputs[0]!.points[1]!, value: null, close: undefined };
+    for (const multiplier of [1, 42]) {
+      const result = resolveStudies(inputs, [study("spread", "spread", ["left", "right"], { multiplier })]);
+      expect(result.series).toEqual([]);
+      expect(result.errors).toHaveLength(1);
+    }
+  });
+
+  test.each([
+    ["missing price basis", "USD", "price:USD", "USD", "price:USD", "unknown"],
+    ["blank denominator", "USD/", "price:USD", "USD/", "price:USD", "unknown"],
+    ["placeholder denominator", "USD/-", "price:USD", "USD/?", "price:USD", "unknown"],
+    ["conflicting currency metadata", "USD/share", "price:EUR", "USD/share", "price:EUR", "unknown"],
+    ["explicit same physical basis", "USD/barrel", "price:USD", "USD/barrel", "price:USD", "x"],
+    ["explicit different physical bases", "USD/barrel", "price:USD", "USD/gallon", "price:USD", "gallon/barrel"],
+    ["same currency totals", "USD", "currency-total:USD", "USD", "currency-total:USD", "x"],
+    ["currency scales", "GBP/share", "price:GBP", "GBp/share", "price:GBp", "GBP/GBp"],
+    ["pence aliases", "GBp/share", "price:GBp", "GBX/share", "price:GBX", "x"],
+    ["currency and share aliases", "usd/shares", "price:USD", "USD/share", "price:USD", "x"],
+  ] as const)("retains ratio values with verified unit factors: %s", (_label, leftUnit, leftGroup, rightUnit, rightGroup, expected) => {
+    const inputs = [
+      { ...resolved("left"), unit: leftUnit, unitGroup: leftGroup },
+      { ...resolved("right", 2), unit: rightUnit, unitGroup: rightGroup },
+    ];
+    inputs[1]!.points[1] = { ...inputs[1]!.points[1]!, value: 0, close: 0 };
+    const result = resolveStudies(inputs, [study("ratio", "ratio", ["left", "right"])]);
+    expect(result.errors).toEqual([]);
+    expect(result.series[0]?.unit).toBe(expected);
+    expect(result.series[0]?.points[1]?.value).toBeNull();
+    expect(result.series[0]?.points.filter((_, index) => index !== 1).every(({ value }) => value === 0.5)).toBe(true);
+  });
+
+  test("unknown ratio units remain unknown through nested ratios and cannot establish a spread", () => {
+    const inputs = ["left", "right"].map((id) => ({ ...resolved(id), unit: "USD", unitGroup: "price:USD" }));
+    const first = resolveStudies(inputs, [study("ratio", "ratio", ["left", "right"])]);
+    const nested = resolveStudies(first.series, [study("nested", "ratio", ["ratio", "ratio"])]);
+    const combined = [...first.series, ...nested.series];
+    const spread = resolveStudies(combined, [study("spread", "spread", ["nested", "ratio"])]);
+    expect(combined.map(({ id, unit, unitGroup }) => ({ id, unit, unitGroup }))).toEqual([
+      { id: "ratio", unit: "unknown", unitGroup: "derived-unit:unknown" },
+      { id: "nested", unit: "unknown", unitGroup: "derived-unit:unknown" },
+    ]);
+    expect(combined.every(({ points }) => points.every(({ value }) => value === 1))).toBe(true);
+    expect(spread.errors).toEqual([expect.stringContaining("spread cannot subtract")]);
+  });
+
+  test("ratio axis groups distinguish opposite currency scales while retaining equivalent aliases", () => {
+    const inputs = ["GBP", "GBp", "GBX"].map((currency) => ({ ...resolved(currency), unit: `${currency}/share`, unitGroup: `price:${currency}` }));
+    const result = resolveStudies(inputs, [
+      study("up", "ratio", ["GBP", "GBp"]),
+      study("down", "ratio", ["GBp", "GBP"]),
+      study("alias", "ratio", ["GBP", "GBX"]),
+    ]);
+    expect(result.series.map(({ unit }) => unit)).toEqual(["GBP/GBp", "GBp/GBP", "GBP/GBX"]);
+    expect(result.series[0]!.unitGroup).not.toBe(result.series[1]!.unitGroup);
+    expect(result.series[0]!.unitGroup).toBe(result.series[2]!.unitGroup);
+    expect(result.series.every(({ points }) => points.every(({ value }) => value === 1))).toBe(true);
   });
 });
