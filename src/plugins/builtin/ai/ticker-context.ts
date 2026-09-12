@@ -31,7 +31,7 @@ export function buildTickerAiContext(
   const quote = financials?.quote;
   const fundamentals = financials?.fundamentals;
   const profile = financials?.profile;
-  const instrumentType = quote?.instrumentType ?? financials?.quoteMetadata?.instrumentType ?? metadata.assetCategory;
+  const instrumentType = quote?.instrumentType?.trim() || financials?.quoteMetadata?.instrumentType?.trim() || metadata.assetCategory;
   const lines: string[] = [
     `Company: ${metadata.name} (${metadata.ticker})`,
     `Exchange: ${metadata.exchange}`,

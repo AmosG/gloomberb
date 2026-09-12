@@ -1,4 +1,5 @@
 import { formatPriceEarnings } from "../../utils/price-earnings";
+import { describeFundamentalMarketCap, selectMarketCapitalization } from "../../utils/market-capitalization";
 import {
   formatCompact,
   formatCurrency,
@@ -287,8 +288,12 @@ export async function buildTickerReport({
     lines.push(cliStyles.muted(membershipParts.join("  |  ")));
   }
 
-  const marketCapText = quote?.marketCap != null
-    ? `${formatCompact(await toBase(quote.marketCap, quote.currency))} ${config.baseCurrency}`
+  const capitalization = selectMarketCapitalization(quote, fundamentals);
+  const convertedMarketCap = capitalization ? await toBase(capitalization.value, capitalization.currency) : Number.NaN;
+  const marketCapText = capitalization
+    ? Number.isFinite(convertedMarketCap)
+      ? `${formatCompact(convertedMarketCap)} ${config.baseCurrency}`
+      : `${formatCompact(capitalization.value)} ${capitalization.currency}`
     : "—";
 
   if (quote) {
@@ -346,6 +351,10 @@ export async function buildTickerReport({
     ["3Y Return", priceReturns.return3Y != null ? colorBySign(formatPercent(priceReturns.return3Y), priceReturns.return3Y) : "—"],
     ["Shares Outstanding", formatNullableCompact(fundamentals?.sharesOutstanding)],
   ]);
+
+  if (capitalization?.provenance.kind === "fundamentals") {
+    lines.push(cliStyles.muted(`Market cap: ${describeFundamentalMarketCap(capitalization.provenance)}.`));
+  }
 
   const latestAnnual = financials.annualStatements.at(-1);
   if (latestAnnual) {

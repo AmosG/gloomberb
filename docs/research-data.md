@@ -212,6 +212,8 @@ The existing `r` shortcut refreshes 8-K discovery and SEC filing lists. Same-com
 
 ## Fund profiles and ticker reports
 
-Overview and ticker reports identify the security using its reported quote type, then retained quote metadata, then the saved asset category. A broker's generic `STK` category remains part of the stored holding; it does not replace an explicit provider `ETF` classification in the research view. This classification does not establish domicile, fees, fund base currency, hedge policy, distribution policy or total return.
+Overview, ticker reports and AI context identify the security using its reported quote type, then retained quote metadata, then the saved asset category. Blank type fields do not stop that fallback. A broker's generic `STK` category remains part of the stored holding; it does not replace an explicit provider `ETF` classification in the research view. This classification does not establish domicile, fees, fund base currency, hedge policy, distribution policy or total return.
 
 A missing current quote does not discard independently available profile details, reported fundamentals or supported dated return summaries from `gloomberb ticker`. Text retains the quote-unavailable status; structured output has a null quote, a warning and any separately available quote metadata with its source information. Unknown and nonfinite values are not supplied zero, and cached undated return fields alone do not establish usable research coverage.
+
+Ticker text uses the same source-qualified market capitalization as Overview and AI context. It converts to the preferred base currency when an exchange rate is available; otherwise it retains the reported value and currency. Missing capitalization currency is not supplied from the listing. A fundamental snapshot retains its retrieval/stale provenance, separate from the unavailable valuation date.

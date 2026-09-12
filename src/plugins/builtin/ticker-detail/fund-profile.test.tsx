@@ -9,6 +9,7 @@ import { buildTickerReport, ticker as runTickerCommand } from "../../../cli/comm
 import type { MarketContext } from "../../../cli/types";
 import type { TickerFinancials } from "../../../types/financials";
 import { OverviewTab } from "./overview-tab";
+import { buildTickerAiContext } from "../ai/ticker-context";
 
 const config = createDefaultConfig("/tmp/gloom-fund-profile-test-unused");
 const ticker = createTestTicker("CLASSA", "Controlled accumulating fund", { assetCategory: "STK", exchange: "XETRA", currency: "EUR" });
@@ -83,4 +84,37 @@ for (const scenario of ["zero", "nonfinite", "empty", "legacy-return", "covered-
   if (valid) { await command; expect(scenario === "zero" ? captured.fundamentals.dividendYield : captured.fundamentals.return1Y).toBe(0); }
   else { await expect(command).rejects.toThrow("No research data available"); expect(captured).toBeUndefined(); }
   expect(closed).toBe(1);
+});
+
+
+test("blank source type cannot hide retained fund classification from AI while reports skip blanks", async () => {
+  const savedFund = createTestTicker("CLASSA", "Controlled fund", { assetCategory: "ETF" });
+  for (const quoted of [true, false]) {
+    const financials: TickerFinancials = {
+      ...(quoted ? { quote: { ...quote, instrumentType: " " } } : {}),
+      quoteMetadata: { symbol: "CLASSA", instrumentType: quoted ? "ETF" : " ", source: {} },
+      profile, annualStatements: [], quarterlyStatements: [], priceHistory: [],
+    };
+    expect(buildTickerAiContext(savedFund, financials, "USD")).toContain("Instrument type: ETF");
+    expect(await buildTickerReport({ symbol: "CLASSA", tickerFile: savedFund, financials, config, toBase: async v => v })).toContain("Type ETF");
+    expect(financials.quote?.instrumentType).toBe(quoted ? " " : undefined);
+    expect(financials.quoteMetadata?.instrumentType).toBe(quoted ? "ETF" : " ");
+  }
+});
+
+
+test("quote-free reported capitalization retains source units, zero, and provenance without borrowing unknown units", async () => {
+  for (const [marketCap, currency] of [[200_000_000, "GBP"], [0, "USD"], [200_000_000, undefined]] as const) {
+    const financials: TickerFinancials = { annualStatements: [], quarterlyStatements: [], priceHistory: [],
+      fundamentals: { marketCap, marketCapCurrency: currency, source: "yahoo", fetchedAt: "2026-09-11T14:00:00Z", stale: true },
+    };
+    const text = await buildTickerReport({ symbol: "CLASSA", tickerFile: ticker, financials, config, toBase: async () => Number.NaN });
+    if (currency) {
+      expect(text).toContain(currency === "GBP" ? "200M GBP" : "0 USD");
+      expect(text).toContain("yahoo fundamentals");
+      expect(text).toContain("stale; valuation date unavailable");
+    } else expect(text).not.toContain("Market Cap");
+    expect(text).toContain("Quote unavailable.");
+    expect(financials.fundamentals?.marketCap).toBe(marketCap);
+  }
 });
