@@ -4,9 +4,15 @@
 
 This reference describes how the terminal calculates and labels research data. Pane bodies show the data and current failures; recurring methodology belongs here. Headless reports and shared chart metadata retain source details and limitations.
 
+Instrument search keeps broker contract definitions distinct when an underlying symbol represents several expiries, strikes or deliverables. A contract selected from search is retained in that research pane, its followers and saved layout; opening another contract does not reorder the shared ticker's broker definitions. Symbol-only lookups that match several saved contracts require a search selection. Contract-specific prices must come from that contract's data context, rather than the app's symbol-only cache. Broker contract panes and charts are retained in local layouts and exports; public symbol-only sharing is unavailable for them because a recipient's market source cannot be assumed to identify the same contract or broker account.
+
+An explicitly selected public listing remains public even when the saved symbol also has broker contracts. The pane retains the selected result's name, venue, currency and instrument type separately from the shared ticker record. Public research shares identify the selected venue in the symbol; the recipient resolves public market data for that listing. A local layout can retain broker routing context, while a public URL does not carry it.
+
 A quote needs a finite, positive observation timestamp that is no later than the current clock. Missing, invalid or future source times cannot establish a current price, chart update or quote-derived valuation. Receipt time does not replace source time. Retained observations keep their values and existing stale/error status until valid data arrives; historical statement-price observations remain separate.
 
 ## Charts, comparisons, and correlations
+
+Local chart snapshots retain the full selected instrument with its captured quote and history, including multiple contracts that share one public symbol. Reconstruction uses only observations captured for that exact contract; older public-symbol snapshots remain usable for public listings. A missing contract capture may be loaded from the corresponding market source, but another contract’s capture does not supply it.
 
 Historical price charts retain explicit listing currency and instrument type independently of a current quote. A rejected stale quote can supply those static facts, with its original source timestamp and stale flag in exported `quoteMetadata`; it cannot add a price observation or daily change. Snapshot reloads retain those facts without a live lookup. When optional enrichment supplies a missing field, `fieldSources` preserves that field's separate provenance. Missing or mismatched metadata remains unknown; no currency, FX conversion, or share/contract basis is inferred from a price's magnitude.
 

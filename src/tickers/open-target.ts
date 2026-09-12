@@ -8,6 +8,7 @@ import {
   resolveTickerSearch,
   upsertTickerFromSearchResult,
 } from "./search";
+import { tickerSelectionFromSearchResult } from "./selection";
 import { normalizeTickerSymbol } from "./search/ranking";
 import type { TickerOpenTarget } from "./search/types";
 import { parsePublicTickerKey } from "../utils/exchanges";
@@ -21,12 +22,14 @@ export async function resolveTickerOpenTarget({
   dataProvider,
   tickerRepository,
   searchContext,
+  publicOnly = false,
 }: {
   query: string;
   tickers: ReadonlyMap<string, TickerRecord>;
   dataProvider: DataProvider;
   tickerRepository: AppTickerRepositoryPort;
   searchContext?: SearchRequestContext;
+  publicOnly?: boolean;
 }): Promise<TickerOpenTarget | null> {
   const symbol = normalizeTickerInput(null, query);
   if (!symbol) return null;
@@ -35,7 +38,7 @@ export async function resolveTickerOpenTarget({
 
   let resolved: Awaited<ReturnType<typeof resolveTickerSearch>> | null = null;
   try {
-    resolved = await resolveTickerSearch({
+    resolved = publicOnly ? null : await resolveTickerSearch({
       query: symbol,
       activeTicker: null,
       tickers,
@@ -70,11 +73,11 @@ export async function resolveTickerOpenTarget({
     const { ticker, created } = await upsertTickerFromSearchResult(tickerRepository, resolved.result, {
       tickerSymbol: preserveListingKey ? symbol : undefined,
     });
-    return { symbol: ticker.metadata.ticker, ticker, created };
+    return { symbol: ticker.metadata.ticker, ticker, created, ...tickerSelectionFromSearchResult(resolved.result) };
   }
 
   try {
-    const quote = await dataProvider.getQuote(symbol, "");
+    const quote = await dataProvider.getQuote(symbol, "", publicOnly ? { instrument: null } : undefined);
     const quoteExchange = quote.listingExchangeName ?? quote.exchangeName;
     if (preserveListingKey && quoteExchange) {
       const baseSymbol = requested.exchange ? requested.symbol : symbol.slice(0, symbol.lastIndexOf("."));
@@ -86,9 +89,11 @@ export async function resolveTickerOpenTarget({
       if (!explicitAliasMatches && !findExactTickerSearchMatch([{ label: quote.symbol, right: quoteExchange }], symbol)) return null;
     }
     const quoteSymbol = preserveListingKey ? symbol : normalizeTickerSymbol(quote.symbol || symbol);
+    const selection = publicOnly ? tickerSelectionFromSearchResult({ providerId: dataProvider.id, symbol: quoteSymbol,
+      name: quote.name || quoteSymbol, exchange: requested.exchange ?? quoteExchange ?? "", currency: quote.currency, type: quote.instrumentType || "" }) : {};
     const existing = await tickerRepository.loadTicker(quoteSymbol);
     if (existing) {
-      return { symbol: existing.metadata.ticker, ticker: existing, created: false };
+      return { symbol: existing.metadata.ticker, ticker: existing, created: false, ...selection };
     }
 
     const ticker = await tickerRepository.createTicker({
@@ -104,7 +109,7 @@ export async function resolveTickerOpenTarget({
       tags: [],
     });
 
-    return { symbol: ticker.metadata.ticker, ticker, created: true };
+    return { symbol: ticker.metadata.ticker, ticker, created: true, ...selection };
   } catch {
     return null;
   }

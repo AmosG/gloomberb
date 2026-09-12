@@ -6,7 +6,8 @@ import type { HeadlessPaneContext, HeadlessPaneDefinition, HeadlessSeriesResult 
 import type { ChartResolutionResult, ChartSeriesSpec, ChartSpec } from "../../../time-series/types";
 import { mergePriceHistoryWindows, resolveChartSpecData } from "../../../time-series/resolve";
 import { intradaySessionDates, loadIntradayWindow, resolveIntradayRequest, type IntradayRequest, type IntradayWindow, type LoadedIntradayWindow } from "../../../time-series/session-history";
-import { createSnapshotDataProvider } from "../../../market-data/snapshot-provider";
+import { createSnapshotDataProvider, snapshotInstrumentKey, type SnapshotMarketData } from "../../../market-data/snapshot-provider";
+import type { InstrumentRef } from "../../../market-data/request-types";
 import type { TickerFinancials, PricePoint } from "../../../types/financials";
 import { createChartSeriesResolver } from "../../../capabilities";
 import { parsePublicTickerKey, publicTickerKey, resolveExchangeTimeZone } from "../../../utils/exchanges";
@@ -19,9 +20,11 @@ export interface ChartPaneModel extends HeadlessSeriesResult {
   spec: ChartSpec;
   snapshot: {
     financials: Array<[string, TickerFinancials]>;
+    instrumentFinancials?: SnapshotMarketData["instrumentFinancials"];
     intradayHistories: Array<IntradayWindow & Pick<LoadedIntradayWindow, "quote" | "priceDomainFailure"> & {
       symbol: string;
       exchange: string;
+      target?: InstrumentRef;
       rangePreset: IntradayRequest["rangePreset"];
       resolution: IntradayRequest["resolution"];
       requestedSession: string | null;
@@ -36,6 +39,7 @@ export async function loadChartPaneModel(
 ): Promise<ChartPaneModel> {
   const financials = new Map<string, TickerFinancials>();
   const histories = new Map<string, PricePoint[]>();
+  const instruments = new Map<string, InstrumentRef>();
   const resolvedSeries = new Map<string, ChartSeriesSpec>();
   const chart = await resolveChartSpecData(spec, {
     dataProvider: context.marketData,
@@ -43,7 +47,8 @@ export async function loadChartPaneModel(
       const { source } = series;
       if (source.kind !== "security") return;
       resolvedSeries.set(series.id, series);
-      const key = publicTickerKey(source.instrument.symbol, source.instrument.exchange);
+      const key = snapshotInstrumentKey(source.instrument);
+      instruments.set(key, source.instrument);
       const previous = financials.get(key);
       financials.set(key, {
         ...previous, ...data,
@@ -83,7 +88,12 @@ export async function loadChartPaneModel(
     } : {}),
     ...(integrityNotices.length || valuationPriceIssues.length ? { complete: false } : {}),
     snapshot: {
-      financials: [...financials].map(([key, data]) => [key, { ...data, priceHistory: histories.get(key) ?? data.priceHistory }]),
+      financials: [...financials].filter(([key]) => !instruments.get(key)?.instrument).map(([key, data]) => [
+        publicTickerKey(instruments.get(key)!.symbol, instruments.get(key)!.exchange), { ...data, priceHistory: histories.get(key) ?? data.priceHistory },
+      ]),
+      instrumentFinancials: [...financials].filter(([key]) => instruments.get(key)?.instrument).map(([key, data]) => ({
+        instrument: instruments.get(key)!, financials: { ...data, priceHistory: histories.get(key) ?? data.priceHistory },
+      })),
       intradayHistories: [],
     },
     symbols: [...new Set(spec.series.flatMap(({ source }) => source.kind === "security"
@@ -93,7 +103,7 @@ export async function loadChartPaneModel(
       const kind = source?.kind === "security" && source.fieldId.startsWith("fundamental.") ? "fundamental"
         : source?.kind === "security" && source.fieldId.startsWith("valuation.") ? "valuation" : null;
       const growth = kind && source?.kind === "security" ? new Map(graphRowsForFinancials(
-        financials.get(publicTickerKey(source.instrument.symbol, source.instrument.exchange)) ?? null,
+        financials.get(snapshotInstrumentKey(source.instrument)) ?? null,
         kind, source.fieldId.split(".")[1]!, source.period === "quarterly" ? "quarterly" : "annual",
         source.instrument.symbol,
       ).map((row) => [row.date, row.growth])) : null;
@@ -150,10 +160,10 @@ export function chartHeadless(template: keyof typeof paneSchemas): HeadlessPaneD
           session: args.options.session,
         });
         const instruments = new Map(spec.series.flatMap(({ source }) => source.kind === "security"
-          ? [[publicTickerKey(source.instrument.symbol, source.instrument.exchange), source.instrument] as const] : []));
-        const histories = await Promise.all([...instruments.values()].map(async ({ symbol, exchange = "" }) => ({
-          symbol, exchange, resolution: request.resolution, rangePreset: request.rangePreset, requestedSession: request.session,
-          ...await loadIntradayWindow({ provider: context.marketData, symbol, exchange, request }),
+          ? [[snapshotInstrumentKey(source.instrument), source.instrument] as const] : []));
+        const histories = await Promise.all([...instruments.values()].map(async (target) => ({
+          target, symbol: target.symbol, exchange: target.exchange ?? "", resolution: request.resolution, rangePreset: request.rangePreset, requestedSession: request.session,
+          ...await loadIntradayWindow({ provider: context.marketData, symbol: target.symbol, exchange: target.exchange ?? "", request, context: { brokerId: target.brokerId, brokerInstanceId: target.brokerInstanceId, instrument: target.instrument } }),
         })));
         context.signal.throwIfAborted();
         intradayHistories.push(...histories.map(({ bufferedPoints: _buffer, ...history }) => history));
@@ -174,11 +184,14 @@ export function chartHeadless(template: keyof typeof paneSchemas): HeadlessPaneD
       const model = await loadChartPaneModel(spec, context);
       if (template === "graph-intraday-price-pane" && !intradayHistories.length && model.chart.viewport) {
         const { start, end } = model.chart.viewport;
-        for (const [key, data] of model.snapshot.financials) {
-          const { symbol, exchange = "" } = parsePublicTickerKey(key);
+        for (const { target, data } of [
+          ...model.snapshot.financials.map(([key, data]) => ({ target: { ...parsePublicTickerKey(key), instrument: null } as InstrumentRef, data })),
+          ...(model.snapshot.instrumentFinancials ?? []).map(({ instrument, financials }) => ({ target: instrument, data: financials })),
+        ]) {
+          const { symbol, exchange = "" } = target;
           const points = data.priceHistory.filter(({ date }) => date >= start && date <= end);
           intradayHistories.push({
-            symbol, exchange, points, start, end,
+            target, symbol, exchange, points, start, end,
             rangePreset: spec.viewport.range === "1W" ? "1W" : "1D",
             resolution: model.chart.resolution!, requestedSession: null,
             sessionDates: intradaySessionDates(points, resolveExchangeTimeZone(exchange) ?? "UTC"),
@@ -193,9 +206,13 @@ export function chartHeadless(template: keyof typeof paneSchemas): HeadlessPaneD
         model.complete = false;
         model.metadata = { ...model.metadata, intradayPriceDomainFailures: priceDomainFailures };
       }
-      for (const { symbol, exchange, points, unavailableReason } of intradayHistories) {
+      for (const { symbol, exchange, target, points, unavailableReason } of intradayHistories) {
         const key = publicTickerKey(symbol, exchange);
-        if (!model.snapshot.financials.some(([candidate]) => candidate === key)) {
+        if (target?.instrument) {
+          if (!model.snapshot.instrumentFinancials?.some(entry => snapshotInstrumentKey(entry.instrument) === snapshotInstrumentKey(target))) {
+            model.snapshot.instrumentFinancials = [...model.snapshot.instrumentFinancials ?? [], { instrument: target, financials: { annualStatements: [], quarterlyStatements: [], priceHistory: points } }];
+          }
+        } else if (!model.snapshot.financials.some(([candidate]) => candidate === key)) {
           model.snapshot.financials.push([key, { annualStatements: [], quarterlyStatements: [], priceHistory: points }]);
         }
         if (unavailableReason && !model.chart.errors.some((error) => error === unavailableReason || error.endsWith(`: ${unavailableReason}`))) {

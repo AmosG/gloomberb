@@ -150,7 +150,7 @@ function getTickerSearchListingKey(item: Pick<TickerSearchRankableItem, "label">
   const parsed = parsePublicTickerKey(normalizeTickerSymbol(item.symbol || item.label));
   const exchange = parsed.exchange || (item.exchangeLabel === "SMART" ? item.primaryExchangeLabel
     : item.exchangeLabel || item.primaryExchangeLabel || item.right);
-  return `${parsed.symbol}|${canonicalExchange(exchange)}`;
+  return `${parsed.symbol}|${canonicalExchange(exchange)}${item.contractKey ? `|${item.contractKey}` : ""}`;
 }
 
 export function rankTickerSearchItems<T extends Pick<TickerSearchRankableItem, "id" | "label" | "detail" | "kind" | "category" | "right"> & Partial<TickerSearchRankableItem>>(

@@ -69,7 +69,7 @@ export function TickerResearchPane({ focused, width, height }: PaneProps) {
   const dispatch = useAppDispatch();
   const config = useAppSelector((state) => state.config);
   const paneInstance = usePaneInstance();
-  const { ticker, financials } = usePaneTicker();
+  const { ticker, financials, error: instrumentError } = usePaneTicker();
   const liveStreaming = useLiveStreamingSetting();
   const streamingTarget = quoteSubscriptionTargetFromTicker(ticker, ticker?.metadata.ticker, "provider");
   const streamingTargets = useMemo(() => (
@@ -106,6 +106,11 @@ export function TickerResearchPane({ focused, width, height }: PaneProps) {
   useEffect(() => {
     if (!focused || !ticker || getCurrentPluginTarget() !== "web") return;
     const url = new URL(window.location.href);
+    if (ticker.metadata.broker_contracts?.length) {
+      for (const key of ["ticker", "exchange", "tab"]) url.searchParams.delete(key);
+      window.history.replaceState(window.history.state, "", url.href);
+      return;
+    }
     url.searchParams.set("ticker", ticker.metadata.ticker);
     // A bare ticker can name different issuers on different venues. Keep the
     // selected listing on reload, and replace any previous pane's venue.
@@ -116,7 +121,7 @@ export function TickerResearchPane({ focused, width, height }: PaneProps) {
     }
     url.searchParams.set("tab", activeTabId);
     window.history.replaceState(window.history.state, "", url.href);
-  }, [focused, ticker?.metadata.ticker, ticker?.metadata.exchange, activeTabId]);
+  }, [focused, ticker?.metadata.ticker, ticker?.metadata.exchange, activeTabId, ticker?.metadata.broker_contracts]);
   const [pluginCaptured, setPluginCaptured] = useState(false);
   useEffect(() => {
     if (focused && Number.isFinite(financials?.quote?.price) && (financials?.quote?.price ?? 0) > 0) {
@@ -210,9 +215,9 @@ export function TickerResearchPane({ focused, width, height }: PaneProps) {
 
   if (!ticker) {
     const isEmptyFollowCollection = paneInstance?.binding?.kind === "follow" && !!collectionId && collectionTickerCount === 0;
-    const message = isEmptyFollowCollection
+    const message = instrumentError ?? (isEmptyFollowCollection
       ? tf("No tickers in {name}.", { name: collectionName || t("this collection") })
-      : t("No ticker selected.");
+      : t("No ticker selected."));
 
     return (
       <Box flexDirection="column" flexGrow={1} paddingX={1}>

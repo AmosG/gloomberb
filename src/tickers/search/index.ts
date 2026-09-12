@@ -5,6 +5,8 @@ import { canonicalExchange, parsePublicTickerKey, publicTickerKey } from "../../
 import { tickerHasYahooSuffix } from "../../sources/yahoo-finance/symbols";
 import { parseOptionSymbol } from "../../utils/options";
 import { resolveCurrencyUnit } from "../../utils/currency-units";
+import { searchContractKey, searchInstrumentKey } from "./identity";
+import { tickerInstrumentLabel } from "../instrument-label";
 import {
   buildSymbolAliases,
   classifyInstrumentKind,
@@ -43,6 +45,14 @@ export class AmbiguousTickerError extends Error {
   }
 }
 
+export class AmbiguousContractError extends AmbiguousTickerError {
+  constructor(query: string, contracts: readonly string[]) {
+    super(query, contracts);
+    this.name = "AmbiguousContractError";
+    this.message = `Multiple contracts match ${query}. Choose a contract in search.`;
+  }
+}
+
 const OPTION_TYPES = new Set(["OPT", "OPTION", "OPTIONS"]);
 
 const SHARE_CLASS_SUFFIXES = new Set(["A", "B", "C", "D", "K"]);
@@ -64,7 +74,6 @@ export function createLocalTickerSearchCandidates(
   options: TickerSearchCandidateOptions = {},
 ): TickerSearchCandidate[] {
   return Array.from(tickers).flatMap((ticker) => {
-    if (options.includeOptionContracts === false && isOptionTickerRecord(ticker)) return [];
     const symbol = normalizeTickerSymbol(ticker.metadata.ticker);
     const hint = providerHints.get(symbol);
     const exchangeLabel = ticker.metadata.exchange || hint?.exchange || hint?.primaryExchange;
@@ -73,24 +82,41 @@ export function createLocalTickerSearchCandidates(
     const primaryExchangeLabel = !savedExchange || !hintPrimaryExchange || savedExchange === hintPrimaryExchange
       ? hint?.primaryExchange
       : undefined;
-    return [{
-      id: `goto:${ticker.metadata.ticker}`,
-      label: ticker.metadata.ticker,
-      symbol,
-      detail: resolveLocalSearchName(ticker, hint),
-      right: exchangeLabel,
-      exchangeLabel,
-      primaryExchangeLabel,
-      providerRank: options.providerRanks?.get(symbol),
-      category: "Saved",
-      kind: "ticker",
-      saved: true,
-      instrumentClass: classifyInstrumentKind(hint?.brokerContract?.secType || hint?.type || ticker.metadata.assetCategory),
-      instrumentType: hint?.brokerContract?.secType || hint?.type || ticker.metadata.assetCategory,
-      searchAliases: buildSymbolAliases(symbol),
-      ticker,
-      result: hint,
-    }];
+    const contractResults = (ticker.metadata.broker_contracts ?? [])
+      .filter((brokerContract) => searchContractKey({ brokerContract, type: ticker.metadata.assetCategory || "" }))
+      .map((brokerContract): InstrumentSearchResult => ({
+        providerId: brokerContract.brokerId, brokerInstanceId: brokerContract.brokerInstanceId,
+        symbol: ticker.metadata.ticker, name: tickerInstrumentLabel(ticker.metadata.ticker, brokerContract),
+        exchange: brokerContract.exchange || "", primaryExchange: brokerContract.primaryExchange, currency: brokerContract.currency,
+        type: brokerContract.secType || ticker.metadata.assetCategory || "", brokerContract,
+      }));
+    if (!contractResults.length && options.includeOptionContracts === false && isOptionTickerRecord(ticker)) return [];
+    return (contractResults.length ? contractResults : [hint])
+      .filter((result) => options.includeOptionContracts !== false || !result || !isOptionSearchResult(result))
+      .map((result) => {
+        const contractKey = result ? searchContractKey(result) : null;
+        const instrumentType = contractKey ? result!.type : hint?.brokerContract?.secType || hint?.type || ticker.metadata.assetCategory;
+        const venue = contractKey ? result!.exchange : exchangeLabel;
+        return {
+          id: `goto:${ticker.metadata.ticker}`,
+          label: ticker.metadata.ticker,
+          symbol,
+          detail: contractKey ? result!.name : resolveLocalSearchName(ticker, hint),
+          right: venue,
+          exchangeLabel: venue,
+          primaryExchangeLabel: contractKey ? result!.primaryExchange : primaryExchangeLabel,
+          providerRank: options.providerRanks?.get(symbol),
+          category: "Saved",
+          kind: "ticker",
+          saved: true,
+          instrumentClass: classifyInstrumentKind(instrumentType),
+          instrumentType,
+          searchAliases: buildSymbolAliases(symbol),
+          ticker,
+          result,
+          ...(contractKey ? { contractKey, id: `goto:${ticker.metadata.ticker}:${contractKey}` } : {}),
+        } as TickerSearchCandidate;
+      });
   });
 }
 
@@ -110,6 +136,7 @@ function createProviderTickerSearchCandidates(
       && publicTickerKey(savedTicker.metadata.ticker, savedTicker.metadata.exchange) === listingKey;
     return [{
       id: buildProviderCandidateId(result, symbol),
+      contractKey: searchContractKey(result),
       label: symbol,
       symbol,
       detail: [result.name, result.brokerLabel, result.type].filter(Boolean).join(" | "),
@@ -216,6 +243,12 @@ export async function resolveTickerSearch({
     ?? findExactTickerSearchMatch(createLocalTickerSearchCandidates(tickers.values()), symbol)?.ticker
     ?? null;
   if (local) {
+    const contracts = new Map((local.metadata.broker_contracts ?? []).flatMap((brokerContract) => {
+      const key = searchContractKey({ brokerContract, type: local.metadata.assetCategory || "" });
+      return key ? [[key, brokerContract] as const] : [];
+    }));
+    if (contracts.size > 1) throw new AmbiguousContractError(symbol,
+      [...contracts.values()].map((contract) => tickerInstrumentLabel(local.metadata.ticker, contract)));
     return { kind: "local", symbol: local.metadata.ticker, ticker: local };
   }
 
@@ -229,6 +262,10 @@ export async function resolveTickerSearch({
   let exactMatch = matches[0];
   if (!exactMatch?.result) return null;
 
+  const contracts = new Set(matches.map((item) => item.contractKey).filter(Boolean));
+  if (contracts.size > 1 || (contracts.size && matches.some((item) => !item.contractKey))) {
+    throw new AmbiguousContractError(symbol, matches.map((item) => tickerInstrumentLabel(item.symbol, item.result?.brokerContract)));
+  }
   const listings = new Set(matches.map((item) => publicTickerKey(item.symbol, listingExchange(item.result!))));
   if (listings.size > 1 && !parsePublicTickerKey(symbol).exchange && !tickerHasYahooSuffix(symbol)) {
     // Search order is relevance, not a canonical listing identifier. Align bare
@@ -409,13 +446,7 @@ function buildCompactShareClassAliases(query: string): string[] {
 }
 
 function buildProviderSearchResultKey(result: InstrumentSearchResult): string {
-  return [
-    normalizeTickerSymbol(result.symbol),
-    normalizeSearchText(result.exchange || ""),
-    normalizeSearchText(result.type || ""),
-    normalizeSearchText(result.primaryExchange || ""),
-    normalizeSearchText(result.currency || ""),
-  ].join("|");
+  return searchInstrumentKey(result);
 }
 
 function buildProviderCandidateId(result: InstrumentSearchResult, symbol: string): string {
@@ -425,6 +456,7 @@ function buildProviderCandidateId(result: InstrumentSearchResult, symbol: string
     normalizeSearchText(result.exchange || result.primaryExchange || result.type || ""),
     normalizeSearchText(result.currency || ""),
     normalizeSearchText(result.providerId || ""),
+    searchContractKey(result),
   ].filter(Boolean).join(":");
 }
 

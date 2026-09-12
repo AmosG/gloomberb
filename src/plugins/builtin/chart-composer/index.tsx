@@ -6,7 +6,8 @@ import type {
 } from "../../../types/plugin";
 import { CHART_COMPOSER_PANE_ID } from "../../../types/config";
 import { parseTickerListInput } from "../../../tickers/list";
-import { publicTickerKey } from "../../../utils/exchanges";
+import { canonicalExchange, parsePublicTickerKey, publicTickerKey } from "../../../utils/exchanges";
+import { tickerInstrumentLabel } from "../../../tickers/instrument-label";
 import type { ChartSpec } from "../../../time-series/types";
 import { ChartComposerPane, ChartComposerResearchTab } from "./pane";
 import { DataCatalogPane } from "./data-catalog-pane";
@@ -75,10 +76,29 @@ function primarySecuritySymbol(spec: ChartSpec): string | null {
     : null;
 }
 
+function bindSelectedContract(spec: ChartSpec, context: PaneTemplateContext, options?: PaneTemplateCreateOptions): ChartSpec {
+  const contract = options?.instrument !== undefined ? options.instrument : context.activeInstrument;
+  const listing = options?.listing ?? context.activeListing;
+  const selected = options?.symbol ?? context.activeTicker;
+  if (contract === undefined || !selected) return spec;
+  const selectedSymbol = parsePublicTickerKey(selected).symbol;
+  const selectedExchange = canonicalExchange(parsePublicTickerKey(selected).exchange
+    || listing?.exchange || (contract?.exchange === "SMART" ? contract.primaryExchange : contract?.exchange));
+  return { ...spec, series: spec.series.map((series) => (
+    series.source.kind === "security" && !series.source.instrument.instrument
+      && parsePublicTickerKey(series.source.instrument.symbol).symbol === selectedSymbol
+      && (!series.source.instrument.exchange || canonicalExchange(series.source.instrument.exchange) === selectedExchange)
+      ? { ...series, source: { ...series.source, instrument: {
+        ...series.source.instrument, exchange: listing?.exchange || contract?.exchange || series.source.instrument.exchange,
+        brokerId: contract?.brokerId, brokerInstanceId: contract?.brokerInstanceId, instrument: contract,
+      } } } : series
+  )) };
+}
+
 function chartTitle(spec: ChartSpec, prefix = "G"): string {
   const labels = spec.series.slice(0, 3).map((series) => (
     series.source.kind === "security"
-      ? publicTickerKey(series.source.instrument.symbol, series.source.instrument.exchange)
+      ? tickerInstrumentLabel(publicTickerKey(series.source.instrument.symbol, series.source.instrument.exchange), series.source.instrument.instrument)
       : series.source.kind === "economic"
         ? `FRED:${series.source.seriesId}`
         : series.label?.trim() || series.source.seriesId
@@ -99,10 +119,12 @@ interface SharedChartState {
 
 function instanceFor(spec: ChartSpec, prefix: string, shared: SharedChartState = {}) {
   const symbol = primarySecuritySymbol(spec);
+  const primary = spec.series.find((series) => series.source.kind === "security")?.source;
+  const instrument = primary?.kind === "security" ? primary.instrument.instrument : null;
   return {
     title: chartTitle(spec, prefix),
     placement: "floating" as const,
-    ...(symbol ? { binding: { kind: "fixed" as const, symbol } } : {}),
+    ...(symbol ? { binding: { kind: "fixed" as const, symbol, ...(instrument !== undefined ? { instrument } : {}) } } : {}),
     settings: {
       [CHART_SPEC_SETTING_KEY]: spec,
       ...(shared.drawings?.length
@@ -113,6 +135,22 @@ function instanceFor(spec: ChartSpec, prefix: string, shared: SharedChartState =
         : {}),
     },
   };
+}
+
+function selectedInstanceFor(spec: ChartSpec, prefix: string, context: PaneTemplateContext, options?: PaneTemplateCreateOptions) {
+  const bound = bindSelectedContract(spec, context, options);
+  const instance = instanceFor(bound, prefix);
+  const primaryIndex = spec.series.findIndex(series => series.source.kind === "security");
+  const primary = bound.series[primaryIndex]?.source;
+  const symbol = options?.symbol ?? context.activeTicker;
+  // Keep the saved ticker key for followers; the series and listing retain its venue.
+  if (symbol && primary?.kind === "security" && primary !== spec.series[primaryIndex]?.source) {
+    const listing = options?.listing ?? context.activeListing;
+    return { ...instance, binding: { kind: "fixed" as const, symbol,
+      instrument: primary.instrument.instrument, ...(listing ? { listing } : {}),
+    } };
+  }
+  return instance;
 }
 
 function securityTemplate({
@@ -154,7 +192,7 @@ function securityTemplate({
     canCreate: (context, options) => templateSymbols(context, options).length >= minimumSymbols,
     createInstance: (context, options) => {
       const symbols = templateSymbols(context, options);
-      return symbols.length >= minimumSymbols ? instanceFor(build(symbols), prefix) : null;
+      return symbols.length >= minimumSymbols ? selectedInstanceFor(build(symbols), prefix, context, options) : null;
     },
   };
 }
@@ -188,12 +226,14 @@ const chartComposerTemplates: PaneTemplateDef[] = [
         });
       }
       const expression = options?.arg?.trim() || options?.values?.series?.trim() || context.activeTicker || "";
-      return instanceFor(buildCustomChartPreset(expression, context.activeTicker), "G");
+      return selectedInstanceFor(buildCustomChartPreset(expression, context.activeTicker), "G", context, options);
     },
     publicShare: {
       serialize: ({ pane }) => {
         const spec = parseChartSpec(pane.settings?.[CHART_SPEC_SETTING_KEY]);
         if (!spec) return null;
+        if (spec.series.some((series) => series.source.kind === "security"
+          && (series.source.instrument.instrument || series.source.instrument.brokerId || series.source.instrument.brokerInstanceId))) return null;
         const drawings = parseChartDrawings(pane.settings?.[CHART_DRAWINGS_SETTING_KEY]);
         const viewport = parseChartInteractionViewport(
           pane.settings?.[CHART_INTERACTION_VIEWPORT_SETTING_KEY],

@@ -1,4 +1,4 @@
-import type { DataProvider } from "../types/data-provider";
+import type { DataProvider, MarketDataRequestContext } from "../types/data-provider";
 import type { PricePoint, Quote } from "../types/financials";
 import type { TimeRange } from "./range";
 import {
@@ -224,6 +224,7 @@ async function loadTrailingHistory(
   symbol: string,
   exchange: string,
   request: IntradayRequest,
+  context?: MarketDataRequestContext,
 ): Promise<PricePoint[]> {
   if (!provider.getPriceHistoryForResolution) return [];
   const fetchRange: TimeRange = request.rangePreset === "1W" && request.resolution !== "1m"
@@ -234,7 +235,7 @@ async function loadTrailingHistory(
       symbol,
       exchange,
       fetchRange,
-      request.resolution,
+      request.resolution, context,
     );
   } catch {
     return [];
@@ -247,6 +248,7 @@ async function loadHistoricalFallback(
   exchange: string,
   request: IntradayRequest,
   now: Date,
+  context?: MarketDataRequestContext,
 ): Promise<PricePoint[]> {
   if (!provider.getDetailedPriceHistory) return [];
   if (request.session) {
@@ -257,7 +259,7 @@ async function loadHistoricalFallback(
       exchange,
       bounds.start,
       bounds.end,
-      request.resolution,
+      request.resolution, context,
     ).catch(() => []);
   }
   const end = new Date(now.getTime() - HISTORICAL_RETRY_DELAY_MS);
@@ -268,7 +270,7 @@ async function loadHistoricalFallback(
     exchange,
     start,
     end,
-    request.resolution,
+    request.resolution, context,
   ).catch(() => []);
 }
 
@@ -278,6 +280,7 @@ export async function loadIntradayWindow(options: {
   exchange: string;
   request: IntradayRequest;
   now?: Date;
+  context?: MarketDataRequestContext;
 }): Promise<LoadedIntradayWindow> {
   const timeZone = resolveExchangeTimeZone(options.exchange) ?? "UTC";
   let raw = options.request.session
@@ -286,13 +289,13 @@ export async function loadIntradayWindow(options: {
         options.symbol,
         options.exchange,
         options.request,
-        options.now ?? new Date(),
+        options.now ?? new Date(), options.context,
       )
     : await loadTrailingHistory(
         options.provider,
         options.symbol,
         options.exchange,
-        options.request,
+        options.request, options.context,
       );
   let window = resolveIntradaySessionWindow(raw, {
     rangePreset: options.request.rangePreset,
@@ -307,14 +310,14 @@ export async function loadIntradayWindow(options: {
           options.provider,
           options.symbol,
           options.exchange,
-          options.request,
+          options.request, options.context,
         )
       : await loadHistoricalFallback(
           options.provider,
           options.symbol,
           options.exchange,
           options.request,
-          options.now ?? new Date(),
+          options.now ?? new Date(), options.context,
         );
     window = resolveIntradaySessionWindow(raw, {
       rangePreset: options.request.rangePreset,
@@ -360,7 +363,7 @@ export async function loadIntradayWindow(options: {
   if (nonpositive.length) {
     // Metadata is needed only at this boundary. Do not infer a futures domain
     // from a ticker suffix, a contract multiplier, or an option security type.
-    const reportedQuote = await options.provider.getQuote(options.symbol, options.exchange).catch(() => undefined);
+    const reportedQuote = await options.provider.getQuote(options.symbol, options.exchange, options.context).catch(() => undefined);
     const quote = reportedQuote?.symbol.trim().toUpperCase() === options.symbol.trim().toUpperCase()
       ? reportedQuote : undefined;
     const instrumentType = quote?.instrumentType?.trim().toUpperCase() || null;

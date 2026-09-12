@@ -1,4 +1,4 @@
-import type { InstrumentSearchResult } from "../../types/instrument";
+import type { BrokerContractRef, InstrumentSearchResult, TickerListingRef } from "../../types/instrument";
 import type { TickerRecord } from "../../types/ticker";
 
 export type TickerSearchInstrumentClass = "equity" | "fund" | "derivative" | "other";
@@ -15,6 +15,7 @@ export interface TickerSearchRankableItem {
   saved?: boolean;
   instrumentClass?: TickerSearchInstrumentClass;
   instrumentType?: string;
+  contractKey?: string;
   exchangeLabel?: string;
   primaryExchangeLabel?: string;
   providerRank?: number;
@@ -40,4 +41,6 @@ export interface TickerOpenTarget {
   symbol: string;
   ticker: TickerRecord;
   created: boolean;
+  instrument?: BrokerContractRef | null;
+  listing?: TickerListingRef;
 }

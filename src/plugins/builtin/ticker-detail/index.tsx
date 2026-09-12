@@ -1,3 +1,4 @@
+import { publicTickerBindingSymbol } from "../../../tickers/selection";
 import type { PluginModule } from "../plugin-module";
 import { TICKER_RESEARCH_PANE_ID } from "../../../types/config";
 import { normalizeTickerInput } from "../../../tickers/search";
@@ -94,11 +95,11 @@ export const tickerDetailModule: PluginModule = {
           : {}
       ),
       publicShare: {
-        serialize: ({ pane }) => pane.binding?.kind === "fixed" && pane.binding.symbol.trim()
-          ? { title: pane.title?.trim() || pane.binding.symbol, data: { symbol: pane.binding.symbol.trim().toUpperCase() } }
+        serialize: ({ pane }) => pane.binding?.kind === "fixed" && publicTickerBindingSymbol(pane.binding)
+          ? { title: pane.title?.trim() || pane.binding.symbol, data: { symbol: publicTickerBindingSymbol(pane.binding)! } }
           : null,
         restore: (data) => Object.keys(data).length === 1 && typeof data.symbol === "string" && data.symbol.trim()
-          ? { symbol: data.symbol.trim().toUpperCase() }
+          ? { symbol: data.symbol.trim().toUpperCase(), instrument: null }
           : null,
       },
     },
