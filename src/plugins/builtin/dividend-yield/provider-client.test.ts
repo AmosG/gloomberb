@@ -33,16 +33,16 @@ test("browser income distinguishes confirmed no cash from unknown coverage, fail
   }), "ACC", 100, "LSE", "EUR");
   expect(empty.metrics.trailingYield).toBe(0);
   for (const coverage of [undefined, { dividends: "unavailable" as const }]) {
-    await expect(fetchProviderDividendData(createTestDataProvider({
+    expect(await fetchProviderDividendData(createTestDataProvider({
       getCorporateActions: async () => actions({ dividends: [], coverage }),
-    }), "FUND", 100, "AMS", "EUR")).rejects.toThrow("Dividend history is unavailable");
+    }), "FUND", 100, "AMS", "EUR")).toMatchObject({ historyAvailable: false, historyError: expect.stringContaining("Dividend history is unavailable"), metrics: { trailingRate: null, trailingYield: null } });
   }
   const noQuote = await fetchProviderDividendData(createTestDataProvider({ getCorporateActions: async () => actions() }), "FUND", null, "AMS");
   expect(noQuote.metrics).toMatchObject({ trailingRate: 4, trailingYield: null });
   for (const exDate of ["broken", "2026-02-30", "2025-02-29", "2026-04-31"]) {
-    await expect(fetchProviderDividendData(createTestDataProvider({
+    expect(await fetchProviderDividendData(createTestDataProvider({
       getCorporateActions: async () => actions({ dividends: [{ exDate, amount: 4 }] }),
-    }), "FUND", 100, "AMS", "EUR")).rejects.toThrow("records are invalid");
+    }), "FUND", 100, "AMS", "EUR")).toMatchObject({ historyAvailable: false, historyError: expect.stringContaining("Incomplete cash history"), payments: [], metrics: { trailingRate: null, trailingYield: null } });
   }
 });
 

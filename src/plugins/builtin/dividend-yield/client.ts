@@ -12,6 +12,8 @@ import { parsePublicTickerKey } from "../../../utils/exchanges";
 import { dividendPriceAsOf } from "./reference-price";
 
 export const YAHOO_DIVIDENDS_CONNECTION_ID = "yahoo-dividends";
+export const INCOMPLETE_DIVIDEND_HISTORY = "Incomplete cash history; totals unavailable.";
+export const MISSING_DIVIDEND_CURRENCY = "Dividend currency is unavailable; cash amounts cannot be compared safely.";
 const yahoo = new YahooHttpClient();
 
 let connectionHealth: ConnectionHealthRegistry | null = null;
@@ -103,7 +105,9 @@ export interface DividendData {
   metrics: DividendMetrics;
   price: number | null;
   currency?: string;
+  /** False when reported records are missing or invalid, even if some rows remain usable. */
   historyAvailable?: boolean;
+  historyError?: string;
   notes?: string[];
   providerId?: string;
   /** Source fetch time, not the last ex-date or this pane's cache-read time. */
@@ -157,23 +161,31 @@ async function fetchDividendDataForSymbol(
     ? extractDividendFields(quoteResult.value)
     : null;
 
-  const rawCurrency = (chartResult.status === "fulfilled" ? chartResult.value.meta.currency ?? null : null)
-    ?? quoteFields?.currency ?? "USD";
-  const { currency, divisor } = resolveCurrencyUnit(rawCurrency);
+  // Cash events and chart prices need their own denomination. A summary's
+  // currency cannot establish the units of a chart that omitted them.
+  const chart = chartResult.status === "fulfilled" ? chartResult.value : null;
+  const chartUnit = resolveCurrencyUnit(chart?.meta.currency);
+  const summaryUnit = resolveCurrencyUnit(quoteFields?.currency);
+  const currency = chartUnit.currency || summaryUnit.currency;
+  let historyError = chart && !chartUnit.currency ? MISSING_DIVIDEND_CURRENCY : undefined;
+  if (!currency && (quoteFields?.trailingAnnualDividendRate != null || quoteFields?.forwardAnnualDividendRate != null)) {
+    historyError = MISSING_DIVIDEND_CURRENCY;
+  }
 
   const payments: DividendPayment[] = [];
-  if (chartResult.status === "fulfilled") {
-    for (const dividend of mapYahooDividends(chartResult.value.events, chartResult.value.meta)) {
-      const payment = toDividendPayment(dividend.exDate, dividend.amount, rawCurrency);
+  if (chart && chartUnit.currency) {
+    for (const dividend of mapYahooDividends(chart.events, chart.meta)) {
+      const payment = toDividendPayment(dividend.exDate, dividend.amount, chart.meta.currency!);
       if (payment) payments.push(payment);
     }
     payments.sort((a, b) => b.exDate.getTime() - a.exDate.getTime());
+    if (payments.length !== Object.keys(chart.events?.dividends ?? {}).length) historyError = INCOMPLETE_DIVIDEND_HISTORY;
   }
 
-  const chartPrice = chartResult.status === "fulfilled" ? chartResult.value.meta.regularMarketPrice : null;
+  const chartPrice = chartUnit.currency ? chart?.meta.regularMarketPrice : null;
   const suppliedPrice = dividendReferencePrice(currentPrice, currentPriceCurrency, currency);
   const resolvedPrice = suppliedPrice
-    ?? (chartPrice != null && Number.isFinite(chartPrice) && chartPrice > 0 ? chartPrice / divisor : null);
+    ?? (chartPrice != null && Number.isFinite(chartPrice) && chartPrice > 0 ? chartPrice / chartUnit.divisor : null);
   const selectedChart = suppliedPrice == null && resolvedPrice != null && chartResult.status === "fulfilled"
     ? chartResult.value.meta : null;
   const priceAsOf = selectedChart ? dividendPriceAsOf((selectedChart.regularMarketTime ?? NaN) * 1000) : undefined;
@@ -181,20 +193,23 @@ async function fetchDividendDataForSymbol(
     ? isTimestampStaleForExchangeSession(Date.parse(priceAsOf), selectedChart.exchangeName, Date.now(), deriveMarketState(selectedChart))
     : undefined;
 
-  const historyAvailable = chartResult.status === "fulfilled";
+  const historyAvailable = chart !== null && !historyError;
   // Yahoo annual-rate fields can use a different denomination from its pence
   // charts (VOD.L is one example). Cash history has explicit chart units.
-  const summaryUnit = resolveCurrencyUnit(quoteFields?.currency);
-  const summaryRatesComparable = divisor === 1
-    && (!quoteFields?.currency || (summaryUnit.currency === currency && summaryUnit.divisor === 1));
-  const metrics = buildDividendMetrics(payments, quoteFields, resolvedPrice, { historyAvailable, summaryRatesComparable });
+  const summaryRatesComparable = chartUnit.divisor === 1
+    && !!summaryUnit.currency && summaryUnit.currency === currency && summaryUnit.divisor === 1;
+  // A summary's trailing rate must not conceal an incomplete cash series.
+  // Its separately reported forward rate remains usable with known units.
+  const metricFields = historyError && quoteFields ? { ...quoteFields, trailingAnnualDividendRate: null } : quoteFields;
+  const metrics = buildDividendMetrics(payments, metricFields, resolvedPrice, { historyAvailable, summaryRatesComparable });
 
-  if (!historyAvailable && metrics.trailingRate == null && metrics.forwardRate == null) {
+  if (!historyAvailable && !historyError && metrics.trailingRate == null && metrics.forwardRate == null) {
     throw new Error(`No dividend data found for ${symbol}`);
   }
 
-  return { payments, metrics, price: resolvedPrice, priceAsOf, priceStale, currency, historyAvailable,
-    providerId: "yahoo", ...(historyAvailable ? { fetchedAt: new Date().toISOString() } : {}),
+  return { payments, metrics, price: resolvedPrice, priceAsOf, priceStale, currency: currency || undefined, historyAvailable,
+    ...(historyError ? { historyError } : {}),
+    providerId: "yahoo", ...(chartResult.status === "fulfilled" ? { fetchedAt: new Date().toISOString() } : {}),
     notes: ["Cash yield excludes taxes and reinvestment. SEC yield, tax components and future payments are not modeled."],
   };
 }
@@ -241,7 +256,7 @@ export function buildDividendMetrics(
     payoutRatio: quoteFields?.payoutRatio ?? null,
     growth1Y,
     growth3Y,
-    paymentFrequency: inferFrequency(eligible, now),
+    paymentFrequency: options.historyAvailable !== false ? inferFrequency(eligible, now) : null,
     exDividendDate,
     nextPayDate,
   }, currentPrice);

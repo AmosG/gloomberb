@@ -19,7 +19,7 @@ import { resolveCurrencyUnit } from "../../../utils/currency-units";
 import { handleRefreshKey, loadingErrorFooterInfo } from "../shared/table-pane";
 import { SignInWall } from "../cloud/auth-actions";
 import { isCloudSessionRequired, useResearchCloudSession } from "../shared/research-cloud-session";
-import { dividendReferencePrice, fetchDividendData, repriceDividendMetrics } from "./client";
+import { dividendReferencePrice, fetchDividendData, repriceDividendMetrics, type DividendData } from "./client";
 import { buildTrailingCashChartPoints, formatDividendYield } from "./view";
 import {
   DEFAULT_SORT_PREFERENCE,
@@ -191,10 +191,18 @@ export function DividendYieldPane({ focused, width, height, loadData = fetchDivi
 
   const request = useCallback(() => loadData(symbol!, quoteRef.current.price, exchange, quoteRef.current.currency), [exchange, loadData, symbol, cloudSession.requestKey]);
   const { data, loading, error, updatedAt, reload: refresh } = useAsyncResource(symbol ? request : null);
+  // An integrity response may contain no usable rows. Retain only historical
+  // rows from this resource; its new unavailable metrics remain authoritative.
+  const lastHistory = useRef<{ request: typeof request; data: DividendData } | null>(null);
+  useEffect(() => {
+    if (data && (data.historyAvailable !== false || data.payments.length > 0)) lastHistory.current = { request, data };
+  }, [data, request]);
+  const historyData = data?.historyError && data.payments.length === 0 && lastHistory.current?.request === request
+    ? lastHistory.current.data : data;
   const authWall = !data && isCloudSessionRequired(error);
   useEffect(() => { if (updatedAt !== null) setSelectedIdx(0); }, [updatedAt]);
 
-  const payments = data?.payments ?? [];
+  const payments = historyData?.payments ?? [];
   const currency = data?.currency ?? payments[0]?.currency ?? resolveCurrencyUnit(ticker?.metadata.currency).currency;
   const paneReferencePrice = dividendReferencePrice(quotePrice, quoteCurrency, currency);
   const currentPrice = paneReferencePrice ?? data?.price ?? null;
@@ -204,18 +212,18 @@ export function DividendYieldPane({ focused, width, height, loadData = fetchDivi
   const priceStatus = dividendPriceStatus(currentPrice, priceAsOf, priceMetadata?.priceStale);
 
   usePaneFooter("dividend-yield", () => {
-    const active = loadingErrorFooterInfo(loading, authWall ? null : error);
+    const active = loadingErrorFooterInfo(loading, authWall ? null : error ?? data?.historyError ?? null);
     if (active.length > 0) return { info: active };
     const priceText = priceStatus === "unknown-time" ? "Reference price time unavailable"
       : priceStatus === "stale" ? `Stale price${priceAsOf ? ` ${priceAsOf}` : ""}`
       : currentPrice != null && priceAsOf ? `Price ${priceAsOf}` : "";
-    const historyText = data?.fetchedAt ? `History fetched ${data.fetchedAt}` : "";
+    const historyText = historyData?.fetchedAt ? `History fetched ${historyData.fetchedAt}` : "";
     const showHistory = historyText && (!priceText || priceText.length + historyText.length + 3 <= width - 4);
     return { info: priceText || showHistory ? [{ id: "source-time", parts: [
       ...(priceText ? [{ text: priceText, tone: priceStatus ? "warning" as const : "muted" as const }] : []),
       ...(showHistory ? [{ text: `${priceText ? " · " : ""}${historyText}`, tone: "muted" as const }] : []),
     ] }] : [] };
-  }, [authWall, currentPrice, data?.fetchedAt, error, loading, priceAsOf, priceStatus, width]);
+  }, [authWall, currentPrice, historyData?.fetchedAt, data?.historyError, error, loading, priceAsOf, priceStatus, width]);
 
   const sourceWarnings = [
     ...(data?.stale ? ["Stale cash history; recent distributions may be missing."] : []),
@@ -225,8 +233,8 @@ export function DividendYieldPane({ focused, width, height, loadData = fetchDivi
   const sortedRows = useMemo(() => sortRows(rows, sortPreference), [rows, sortPreference]);
   const columns = useMemo(() => buildDividendColumns(width), [width]);
   const chartPoints = useMemo(
-    () => buildTrailingCashChartPoints(payments),
-    [payments],
+    () => data?.historyAvailable === false ? [] : buildTrailingCashChartPoints(payments),
+    [data?.historyAvailable, payments],
   );
 
   const handleHeaderClick = useCallback((columnId: string) => {
