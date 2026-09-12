@@ -15,6 +15,7 @@ import {
 import { exchangeShortName, marketStateLabel } from "../../market-data/market/status";
 import type { AppConfig } from "../../types/config";
 import type { FinancialStatement, TickerFinancials } from "../../types/financials";
+import { computeTickerPriceReturns } from "../../market-data/ticker-price-returns";
 import type { SecFilingItem } from "../../types/data-provider";
 import type { NewsArticle } from "../../news/types";
 import type { TickerRecord } from "../../types/ticker";
@@ -240,6 +241,7 @@ export async function buildTickerReport({
 }): Promise<string> {
   const quote = financials.quote;
   const fundamentals = financials.fundamentals;
+  const priceReturns = computeTickerPriceReturns(financials, tickerFile?.metadata.assetCategory);
   const profile = financials.profile;
   const name = quote?.name || tickerFile?.metadata.name || symbol;
   const quoteOptions = quoteFormatOptions(quote, tickerFile?.metadata.assetCategory, financials.quoteMetadata?.instrumentType);
@@ -337,8 +339,8 @@ export async function buildTickerReport({
     ["Profit Margin", fundamentals?.profitMargin != null ? formatPercent(fundamentals.profitMargin) : "—"],
     ["Revenue Growth", fundamentals?.revenueGrowth != null ? colorBySign(formatPercent(fundamentals.revenueGrowth), fundamentals.revenueGrowth) : "—"],
     ["Last Quarter Growth", fundamentals?.lastQuarterGrowth != null ? colorBySign(formatPercent(fundamentals.lastQuarterGrowth), fundamentals.lastQuarterGrowth) : "—"],
-    ["1Y Return", fundamentals?.return1Y != null ? colorBySign(formatPercent(fundamentals.return1Y), fundamentals.return1Y) : "—"],
-    ["3Y Return", fundamentals?.return3Y != null ? colorBySign(formatPercent(fundamentals.return3Y), fundamentals.return3Y) : "—"],
+    ["1Y Return", priceReturns.return1Y != null ? colorBySign(formatPercent(priceReturns.return1Y), priceReturns.return1Y) : "—"],
+    ["3Y Return", priceReturns.return3Y != null ? colorBySign(formatPercent(priceReturns.return3Y), priceReturns.return3Y) : "—"],
     ["Shares Outstanding", formatNullableCompact(fundamentals?.sharesOutstanding)],
   ]);
 
@@ -440,7 +442,10 @@ function buildTickerStructuredData({
       watchlists: formatWatchlistNames(config, tickerFile.metadata.watchlists),
       positions: tickerFile.metadata.positions,
     } : null,
-    fundamentals: financials.fundamentals,
+    fundamentals: financials.fundamentals ? {
+      ...financials.fundamentals,
+      ...computeTickerPriceReturns(financials, tickerFile?.metadata.assetCategory),
+    } : undefined,
     profile: financials.profile,
     latestAnnual: financials.annualStatements.at(-1) ?? null,
     latestQuarter: financials.quarterlyStatements.at(-1) ?? null,

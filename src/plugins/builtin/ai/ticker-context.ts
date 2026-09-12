@@ -1,5 +1,6 @@
 import { selectMarketCapitalization } from "../../../utils/market-capitalization";
 import { hasValidQuoteObservationTime } from "../../../market-data/quotes/freshness";
+import { computeTickerPriceReturns } from "../../../market-data/ticker-price-returns";
 import type { FinancialStatement, TickerFinancials } from "../../../types/financials";
 import type { TickerRecord } from "../../../types/ticker";
 
@@ -104,7 +105,7 @@ export function buildTickerAiContext(
     add("Profit Margin", fundamentals.profitMargin, fraction);
     add("Free Cash Flow", fundamentals.freeCashFlow, reportedMoney);
     add(`Dividend Yield${fundamentals.dividendYieldBasis ? ` (${fundamentals.dividendYieldBasis})` : ""}${fundamentals.dividendYieldSource ? ` [${fundamentals.dividendYieldSource}]` : ""}`, fundamentals.dividendYield, fraction);
-    add("1Y Return", fundamentals.return1Y, fraction);
+    add("1Y Return", computeTickerPriceReturns(financials, metadata.assetCategory).return1Y, fraction);
   }
 
   if (financials?.annualStatements.length) {

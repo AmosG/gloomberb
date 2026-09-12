@@ -22,6 +22,10 @@ Historical price charts retain explicit listing currency and instrument type ind
 
 Normalized price charts show closing-price returns in each listing's currency. They exclude cash distributions, reinvestment, and FX conversion. They are not total-return or investor-currency performance charts.
 
+Overview, ticker reports and AI ticker context require dated prices covering each fixed return horizon. A newly listed fund's since-inception change cannot stand in for a one-year or three-year return. These outputs recalculate from available observations rather than trusting undated summary percentages in an older cache. A covered, unchanged price has a zero return; insufficient history remains unavailable. Year boundaries use calendar years, including leap years.
+
+Fund overview does not currently model expense ratios, NAV premiums or discounts, fund domicile, or distribution and hedging share-class policies. Listing currency is not fund base currency or hedge policy. Dividend cash yield is separate from SEC yield and total return; see [Dividends](#dividends-and-sectors).
+
 Daily, weekly, and monthly comparisons use shared calendar dates, with each market retaining its source timestamps. Intraday comparisons require exact shared timestamps. Exchange closing times may differ; weekly and monthly bars can cover a partial period. See [comparison alignment and baselines](price-comparisons.md).
 
 Correlation and relationship views calculate close-to-close returns between shared observations. Missing dates are not filled to manufacture a sample. Returns use local prices without currency conversion; different exchanges can close at different times. Correlation requires enough shared returns and nonzero variance.

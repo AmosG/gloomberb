@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { buildYahooStatements } from "./financials";
+import { buildYahooStatements, computeYahooReturn } from "./financials";
 import { loadYahooTickerFinancials } from "./snapshots";
 
 test("Yahoo preserves report currency and calculates operating margin from operating income", async () => {
@@ -27,4 +27,32 @@ test("Yahoo never overwrites statement currency while adding another metric", ()
     annualTotalRevenue: [{ asOfDate: "2025-12-31", value: 3000, currency: "TWD" }],
     annualNetIncome: [{ asOfDate: "2025-12-31", value: 50, currency: "USD" }],
   }, "annual")).toEqual([{ date: "2025-12-31", totalRevenue: 3000, currency: "TWD" }]);
+});
+
+test("Yahoo snapshot does not label a young fund's since-inception change as full-year performance", async () => {
+  const financials = await loadYahooTickerFinancials("NEWF", {
+    providerId: "yahoo",
+    fetchAssetProfile: async () => undefined,
+    fetchChart: async () => ({
+      meta: { currency: "USD", instrumentType: "ETF", regularMarketPrice: 105, regularMarketTime: Date.parse("2026-09-10") / 1000 },
+      history: [{ date: new Date("2026-08-06"), close: 100 }, { date: new Date("2026-09-10"), close: 105 }],
+    }),
+    fetchExtendedHoursData: async () => ({}),
+    fetchQuoteSupplement: async () => ({}),
+    fetchTimeseries: async () => [],
+  });
+  expect(financials.fundamentals?.return1Y).toBeUndefined();
+  expect(financials.fundamentals?.return3Y).toBeUndefined();
+  expect(financials.priceHistory.map(point => point.close)).toEqual([100, 105]);
+});
+
+test("Yahoo calendar horizons preserve zero and use the covered year boundary across leap years", () => {
+  const history = [
+    { date: new Date("2023-03-01"), close: 100 },
+    { date: new Date("2023-03-02"), close: 110 },
+    { date: new Date("2024-03-01"), close: 100 },
+  ];
+  expect(computeYahooReturn(history, 1)).toBe(0);
+  expect(computeYahooReturn(history, 3)).toBeUndefined();
+  expect(computeYahooReturn([...history].reverse(), 1)).toBe(0);
 });

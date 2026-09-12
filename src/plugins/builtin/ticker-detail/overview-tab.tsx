@@ -117,16 +117,7 @@ export function OverviewTab({
   });
   const performanceFields = buildPriceReturnFields(
     appendQuoteToPriceReturnHistory(financials?.priceHistory ?? [], historyQuote),
-  ).map((field) => {
-    if (field.value != null || field.unavailableReason) return field;
-    if (field.id === "1Y" && fundamentals?.return1Y != null) {
-      return { ...field, value: fundamentals.return1Y };
-    }
-    if (field.id === "3Y" && fundamentals?.return3Y != null) {
-      return { ...field, value: fundamentals.return3Y };
-    }
-    return field;
-  });
+  );
   const hasPerformance = performanceFields.some((field) => field.value != null || field.unavailableReason);
   const positionRows = buildPositionRows({
     ticker,
