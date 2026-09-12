@@ -94,7 +94,7 @@ export const quoteComparisonHeadless: HeadlessPaneDefinition<"rows"> = {
     { key: "name", header: "Name" },
     { key: "price", header: "Last", align: "right", format: (value, row) => quoteAmount(value, row) },
     { key: "change", header: "Change", align: "right", format: (value, row) => quoteAmount(value, row, true) },
-    { key: "changePercent", header: "Change %", align: "right", format: (value) => formatPercentRaw(Number(value)) },
+    { key: "changePercent", header: "Change %", align: "right", format: (value) => formatPercentRaw(typeof value === "number" && Number.isFinite(value) ? value : undefined) },
   ],
   async load({ symbols }, ctx) {
     const loaded = await loadHeadlessSymbols(symbols, ctx, async (key) => {
