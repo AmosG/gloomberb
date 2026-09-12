@@ -29,10 +29,13 @@ The desktop app and TUI share the command language and plugin system. The [brows
 | `Tab` | Switch panes |
 | `j` / `k` | Navigate lists |
 | `h` / `l` | Switch tabs |
+| `Ctrl+Left` / `Ctrl+Right` | Scroll a focused table horizontally |
 | `m` | Cycle chart mode |
 | `q` | Quit |
 
 Desktop builds also accept `Cmd/Ctrl+K` for the command bar, the matching `Cmd` shortcuts on macOS, `Cmd/Ctrl+Shift+O` to pop out a pane, and `Cmd/Ctrl+Shift+C` to copy a focused pane screenshot.
+
+Wide tables retain their columns in narrow panes. Use their horizontal scrollbar or horizontal wheel/trackpad scrolling to reach additional fields; `Ctrl+Left` / `Ctrl+Right` moves by half a table viewport. Plain arrows keep their existing navigation behavior, and text-field shortcuts remain with the editor.
 
 ## Command Reference
 

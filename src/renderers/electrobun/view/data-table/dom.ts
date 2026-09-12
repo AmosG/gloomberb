@@ -131,6 +131,9 @@ export function useScrollBoxHandle(
       if (options.headerOnly) return 1;
       return toCellY(Math.max(0, element.scrollHeight - (options.viewportTopInsetPx ?? 0)));
     },
+    get scrollWidth() {
+      return toCellX(elementRef.current?.scrollWidth ?? 0);
+    },
     get viewport() {
       const element = elementRef.current;
       if (options.headerOnly) {

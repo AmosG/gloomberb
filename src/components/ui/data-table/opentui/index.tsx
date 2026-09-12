@@ -8,7 +8,7 @@ import { measurePerf } from "../../../../utils/perf-marks";
 import { useDoubleClickActivation } from "../../../use-double-click-activation";
 import { useScrollBoxScrollActivity } from "../../../table-view-shared";
 import { EmptyState } from "../../status";
-import { observeScrollBoxContentSize } from "../../../../renderers/opentui/scrollbox-layout";
+import { observeScrollBoxContentSize, observeScrollBoxViewportSize } from "../../../../renderers/opentui/scrollbox-layout";
 import {
   expandTableColumns,
   fitTableCellText,
@@ -339,6 +339,17 @@ export function OpenTuiDataTable<T, C extends DataTableColumn = DataTableColumn>
     onVerticalScroll: handleBodyScrollActivity,
     onHorizontalScroll: syncHeaderScroll,
   });
+  const syncBodyScroll = useCallback(() => {
+    const header = headerScrollRef.current;
+    const body = scrollRef.current;
+    if (!header || !body || body.scrollLeft === header.scrollLeft) return;
+    body.scrollLeft = header.scrollLeft;
+    nativeRenderer.requestRender();
+  }, [headerScrollRef, nativeRenderer, scrollRef]);
+  useScrollBoxScrollActivity({
+    scrollRef: headerScrollRef,
+    onHorizontalScroll: syncBodyScroll,
+  });
   const handleBodySizeChange = useCallback(() => {
     measureContentWidth();
     setScrollVersion((current) => current + 1);
@@ -346,6 +357,7 @@ export function OpenTuiDataTable<T, C extends DataTableColumn = DataTableColumn>
   }, [emitVisibleRange, measureContentWidth]);
 
   useEffect(() => observeScrollBoxContentSize(scrollRef.current, handleBodySizeChange), [handleBodySizeChange, scrollRef]);
+  useEffect(() => observeScrollBoxViewportSize(scrollRef.current, handleBodySizeChange), [handleBodySizeChange, scrollRef]);
 
   useEffect(() => {
     emitVisibleRange();
@@ -472,7 +484,7 @@ export function OpenTuiDataTable<T, C extends DataTableColumn = DataTableColumn>
       <ScrollBox
         id={headerScrollId}
         ref={headerScrollRef}
-        width="100%"
+        width={measuredViewportWidth || "100%"}
         height={1}
         backgroundColor={colors.panel}
         scrollX={showHorizontalScrollbar}
