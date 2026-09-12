@@ -490,16 +490,18 @@ function cursorPointForSeries(
 function buildCursorValues(
   panels: CompositePanelScene[],
   cursorDate: Date | null,
-  viewport: Pick<CompositeChartScene, "startTime" | "endTime">,
+  viewport: Pick<CompositeChartScene, "startTime" | "endTime" | "timeScale">,
 ): CompositeCursorValue[] {
   const cursorTime = cursorDate?.getTime() ?? viewport.endTime;
   return panels.flatMap((panel) => panel.series.map((entry) => {
     let projected = cursorPointForSeries(entry, cursorTime);
-    const integrityGap = normalizedSourcePoints(entry.source).findLast(({ timestamp, point }) => (
+    // Sparse observations can carry forward, but an explicitly unavailable
+    // observation ends that value when inspecting its date or a later date.
+    const gap = normalizedSourcePoints(entry.source, viewport.timeScale).findLast(({ timestamp, point, value }) => (
       timestamp <= cursorTime && timestamp > (projected?.timestamp ?? Number.NEGATIVE_INFINITY)
-      && point.provenance?.priceHistoryIntegrity
+      && (point.provenance?.priceHistoryIntegrity || (cursorDate !== null && value === null))
     ));
-    if (integrityGap) projected = null;
+    if (gap) projected = null;
     // The drawn navigation buffer can include observations after the chosen
     // end. An unarmed legend describes the active window, including when the
     // pointer leaves; explicitly inspected cursor dates keep their own behavior.
@@ -510,7 +512,7 @@ function buildCursorValues(
       color: entry.source.color,
       unit: entry.source.unit,
       value: projected?.value ?? null,
-      point: projected?.point ?? integrityGap?.point ?? null,
+      point: projected?.point ?? gap?.point ?? null,
     };
   }));
 }
@@ -662,7 +664,7 @@ export function buildCompositeChartScene(
     panels: panelScenes,
     cursorDate,
     cursorXRatio,
-    cursorValues: buildCursorValues(panelScenes, cursorDate, { startTime, endTime }),
+    cursorValues: buildCursorValues(panelScenes, cursorDate, { startTime, endTime, timeScale }),
   };
 }
 
