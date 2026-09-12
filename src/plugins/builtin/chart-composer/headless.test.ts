@@ -142,7 +142,8 @@ test("explicit financial periods replay available SEC history and expose actual 
   const partial = await chartHeadless("fundamental-graph-pane").load(args, { ...context, marketData: createTestDataProvider({
     getTickerFinancials: async () => ({ annualStatements: actual.cloudAnnual, quarterlyStatements: [], priceHistory: [] }),
   }) });
-  expect(partial.series[0]!.points).toHaveLength(4);
+  expect(partial.series[0]!.points).toHaveLength(5);
+  expect(partial.series[0]!.points.filter((point) => point.value !== null)).toHaveLength(4);
   expect(partial.complete).toBe(false);
   expect(partial.unavailableSymbols).toEqual([]);
   expect(partial.metadata?.periodCoverage).toEqual([expect.objectContaining({ requested: 10, returned: 4, complete: false })]);

@@ -238,6 +238,11 @@ function mergeStatementPeriodGroup(statements: readonly InternalStatement[]): In
 
   merged.fieldAvailability = fieldAvailability;
   merged.availableAt = completeStatementAvailability(merged);
+  if (NUMERIC_STATEMENT_FIELDS.every(field => statementNumber(merged, field) === null)) {
+    // Even an empty statement can establish when a missing period became
+    // known. Its empty field map still cannot date any numeric metric.
+    merged.availableAt = completeAvailability([dateSource.availableAt]);
+  }
   if (derivedFields.length > 0) merged.__timeSeriesDerivedFields = derivedFields;
   return merged;
 }
@@ -362,13 +367,17 @@ function buildTtmStatements(statements: readonly FinancialStatement[]): Internal
   const result: InternalStatement[] = [];
   for (let index = 3; index < sorted.length; index += 1) {
     const window = sorted.slice(index - 3, index + 1);
+    const latest = window.at(-1)!;
     const times = window.map(statementTime);
     if (new Set(window.map((statement) => statement.currency)).size > 1
       || times.some((time, index) => !Number.isFinite(time) || (index > 0 && (time - times[index - 1]! < 60 * DAY_MS || time - times[index - 1]! > 120 * DAY_MS)))) {
+      // Retain the known period as a gap. Removing an incomplete window joins
+      // the last usable TTM observation to the first recovered one.
+      result.push({ date: latest.date, currency: latest.currency, availableAt: latest.availableAt,
+        __timeSeriesTtm: true });
       continue;
     }
 
-    const latest = window.at(-1)!;
     const ttm: InternalStatement = {
       date: latest.date,
       currency: latest.currency,
@@ -596,7 +605,10 @@ function pointForStatement(
 ): TimeSeriesPoint | null {
   const observedAt = validDate(statement.date);
   if (!observedAt) return null;
-  const availableAtString = metricAvailability(statement, metric);
+  // A missing metric is known to be unavailable with its statement. It has
+  // no metric-specific publication date to substitute for that boundary.
+  const availableAtString = metricAvailability(statement, metric)
+    ?? (value === null ? statement.availableAt : undefined);
   const availableAt = validDate(availableAtString);
   const date = timestampMode !== "period-end" && availableAt ? availableAt : observedAt;
   return {
@@ -743,15 +755,6 @@ export function valuationSeriesUsesLiveQuote(fieldId: string): boolean {
   return namespace === "valuation" && QUOTE_DERIVED_VALUATION_IDS.has(metric);
 }
 
-function dedupeAndSortPoints(points: readonly TimeSeriesPoint[]): TimeSeriesPoint[] {
-  const byTimestamp = new Map<number, TimeSeriesPoint>();
-  for (const point of points) {
-    const time = point.date.getTime();
-    if (Number.isFinite(time)) byTimestamp.set(time, point);
-  }
-  return [...byTimestamp.values()].sort((left, right) => left.date.getTime() - right.date.getTime());
-}
-
 function preferredPeriodPoint(
   existing: TimeSeriesPoint,
   candidate: TimeSeriesPoint,
@@ -818,9 +821,10 @@ export function extractFundamentalSeries(
   const [namespace, metric = ""] = canonicalId.split(".");
   if (namespace === "fundamental" && FUNDAMENTAL_IDS.has(metric)) {
     const selected = sourceStatements(financials, source.period);
+    let hasObservation = false;
     const points = selected.statements.flatMap((statement) => {
       const result = fundamentalValue(statement, metric);
-      if (result.value === null) return [];
+      if (result.value !== null) hasObservation = true;
       const point = pointForStatement(
         statement,
         metric,
@@ -831,6 +835,7 @@ export function extractFundamentalSeries(
       );
       return point ? [point] : [];
     });
+    if (!hasObservation) return [];
     const deduped = dedupeFundamentalPeriods(points);
     return getTimeSeriesField(canonicalId)?.unit.startsWith("currency")
       ? reportingCurrencySeries(deduped, financials.financialCurrency).points : deduped;
@@ -844,25 +849,32 @@ export function extractFundamentalSeries(
 
   const selected = sourceStatements(financials, source.period, metric);
   const currencies = createValuationCurrencyContext(financials);
+  let hasHistoricalObservation = false;
   const historical = selected.statements.flatMap((statement) => {
     const historical = historicalValuation(financials, statement, metric, currencies);
-    if (historical === null) return [];
+    if (historical !== null) hasHistoricalObservation = true;
     const point = pointForStatement(
       statement,
       metric,
-      historical.value,
+      historical?.value ?? null,
       selected.period,
       source.timestampMode,
       true,
     );
-    if (point && historical.integrity) point.provenance = { ...point.provenance, priceHistoryIntegrity: historical.integrity };
-    if (point && historical.issue) point.provenance = { ...point.provenance,
+    if (point && historical?.integrity) point.provenance = { ...point.provenance, priceHistoryIntegrity: historical.integrity };
+    if (point && historical?.issue) point.provenance = { ...point.provenance,
       valuationPriceIssues: [{ ...historical.issue, affectedAt: point.date.toISOString() }] };
     return point ? [point] : [];
   });
   const current = currentDerivedValuationPoint(financials, selected.statements, metric, currencies);
+  if (!hasHistoricalObservation && !current) return [];
   const dedupedHistorical = dedupeFundamentalPeriods(historical);
-  return dedupeAndSortPoints(current ? [...dedupedHistorical, current] : dedupedHistorical);
+  // Publication timestamps can be shared by distinct fiscal periods. Their
+  // period identities were deduplicated above; a gap must not overwrite a
+  // different period's usable observation released on the same date.
+  return (current ? [...dedupedHistorical, current] : dedupedHistorical).sort((left, right) => (
+    left.date.getTime() - right.date.getTime() || left.observedAt.getTime() - right.observedAt.getTime()
+  ));
 }
 
 export function fundamentalSeriesUsesAvailabilityFallback(

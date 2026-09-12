@@ -73,7 +73,8 @@ test("historical currency changes prevent filling missing row units from the cur
     { ...data.annualStatements[0]!, date: "2025-12-31" },
   ];
   const points = extractFundamentalSeries(data, source("trailingPE"));
-  expect(points.map((point) => point.observedAt.toISOString().slice(0, 10))).toEqual(["2023-12-31"]);
+  expect(points.map((point) => point.observedAt.toISOString().slice(0, 10))).toEqual(["2023-12-31", "2024-12-31", "2025-12-31"]);
+  expect(points.map((point) => point.value)).toEqual([10, null, null]);
   expect(valuationCurrencyWarning(data, source("trailingPE"))).toContain("EUR/unknown");
 });
 

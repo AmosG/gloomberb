@@ -480,19 +480,32 @@ describe("composite chart scene", () => {
     });
   }
 
-  test("releasing a cursor keeps the separate latest-finite legend policy and source date", () => {
+  test("the idle and released cursor retain an explicit latest gap and its source date", () => {
     const known = point("2026-09-01", 0.45);
     const gap = { ...point("2026-09-02", 0), value: null };
     const interrupted = series({ id: "ratio", style: "step", points: [known, gap] });
     const clock = series({ id: "clock", points: [point("2026-09-01", 100), point("2026-09-03", 102)] });
     const idle = buildCompositeChartScene([interrupted, clock], [{ id: "main" }], { width: 80, height: 10 })!;
-    expect(idle.cursorValues[0]?.value).toBe(0.45);
-    expect(idle.cursorValues[0]?.point).toBe(known);
+    expect(idle.cursorValues[0]?.value).toBeNull();
+    expect(idle.cursorValues[0]?.point).toBe(gap);
     const inspected = applyCompositeChartCursor(idle, new Date("2026-09-03"));
     expect(inspected.cursorValues[0]?.value).toBeNull();
     expect(inspected.cursorValues[0]?.point).toBe(gap);
     const released = applyCompositeChartCursor(inspected, null);
     expect(released.cursorValues).toEqual(idle.cursorValues);
+  });
+
+  test("a missing latest market bar withholds the price marker until a finite close returns", () => {
+    const known = point("2026-09-01", 100);
+    const gap = { ...point("2026-09-02", 0), value: null };
+    const market = series({ id: "price", unitGroup: "price:USD", timeBasis: { kind: "market", timeZone: "America/New_York" }, points: [known, gap] });
+    const missing = buildCompositeChartScene([market], [{ id: "main" }], { width: 80, height: 10 })!;
+    expect(missing.panels[0]!.lastPrice).toBeUndefined();
+    expect(missing.cursorValues[0]!.value).toBeNull();
+    expect(missing.dates.map(date => date.toISOString().slice(0, 10))).toContain("2026-09-02");
+    const recovered = buildCompositeChartScene([{ ...market, points: [known, gap, point("2026-09-03", 0)] }], [{ id: "main" }], { width: 80, height: 10 })!;
+    expect(recovered.panels[0]!.lastPrice?.value).toBe(0);
+    expect(recovered.cursorValues[0]!.value).toBe(0);
   });
 
   test("a publication gap blocks a market cursor only once the missing observation is available", () => {
