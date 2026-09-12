@@ -1,4 +1,5 @@
 import type { FinancialStatement, TickerFinancials } from "../../../../types/financials";
+import { formatPerShareNumber } from "../../../../utils/reported-money";
 import {
   formatGrowthShort,
   formatNumber,
@@ -139,7 +140,7 @@ export function formatFinancialValue(
   row: Pick<FinancialTableRow, "format" | "divisor">,
 ): string {
   if (value == null || !Number.isFinite(value)) return "—";
-  if (row.format === "eps") return formatNumber(value, 2);
+  if (row.format === "eps") return formatPerShareNumber(value);
   if (row.format === "percent") return `${formatNumber(value * 100, 1)}%`;
   return formatWithDivisor(value, row.divisor);
 }

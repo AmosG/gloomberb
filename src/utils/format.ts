@@ -31,9 +31,9 @@ function getNumberFormatter(decimals: number): Intl.NumberFormat {
 }
 
 /** Format a number as currency (e.g., $1,234.56) */
-export function formatCurrency(value: number | undefined, currency = "USD"): string {
+export function formatCurrency(value: number | undefined, currency = "USD", maximumFractionDigits = 2): string {
   if (value == null || !Number.isFinite(value)) return "—";
-  return getCurrencyFormatter(currency).format(value);
+  return getCurrencyFormatter(currency, maximumFractionDigits).format(value);
 }
 
 /** Preserve fractional per-share distributions, including split-adjusted history. */
