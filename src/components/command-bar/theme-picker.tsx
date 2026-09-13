@@ -41,8 +41,9 @@ export interface ThemeOption {
 
 /**
  * With one style shipping there is nothing to group by, so the list sorts by
- * scheme name and drops the style column. The moment a second style ships the
- * entries group by style again without any change here.
+ * scheme name and drops the style column. With several, the entries keep the
+ * order the presets were curated in: grouped by style, the default style
+ * first, each group's palettes in the order they suit the style best.
  */
 const SHOW_STYLE_COLUMN = stylesAreSelectable();
 
@@ -59,9 +60,7 @@ const PRESET_OPTIONS: ThemeOption[] = getPresets()
       dark: labels.dark,
     };
   })
-  .sort((a, b) => (SHOW_STYLE_COLUMN
-    ? a.styleName.localeCompare(b.styleName) || a.schemeName.localeCompare(b.schemeName)
-    : a.schemeName.localeCompare(b.schemeName)));
+  .sort((a, b) => (SHOW_STYLE_COLUMN ? 0 : a.schemeName.localeCompare(b.schemeName)));
 
 const SCHEME_OPTIONS: ThemeOption[] = getThemeIds()
   .map((id) => ({

@@ -271,7 +271,7 @@ export function StaticXMarkerOverlay({
           >
             {Array.from({ length: height }, (_, row) => (
               <Text key={row} fg={marker.color}>
-                {marker.lineChar ?? glyphs.border.vertical}
+                {marker.lineChar ?? glyphs.line.vertical}
               </Text>
             ))}
           </Box>

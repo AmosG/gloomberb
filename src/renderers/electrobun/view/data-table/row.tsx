@@ -109,7 +109,10 @@ export function WebDataTableHeader<C extends DataTableColumn>({
             data-gloom-interactive="true"
             style={{
               minWidth: 0,
-              height: WEB_CELL_HEIGHT,
+              // The row's content box, not a fixed cell: a header rule takes
+              // its pixel from the box, and a cell painted a full cell tall
+              // would cover the rule everywhere but the column gaps.
+              height: "100%",
               overflow: "hidden",
               backgroundColor: column.headerBackgroundColor ?? tokens.table.headerBg,
             }}

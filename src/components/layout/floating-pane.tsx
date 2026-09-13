@@ -35,22 +35,25 @@ interface FloatingPaneWrapperProps {
   children: ReactNode;
 }
 
-function TerminalFloatingPaneBorder({ width, height }: { width: number; height: number }) {
+function TerminalFloatingPaneBorder({ width, height, focused }: { width: number; height: number; focused: boolean }) {
   const glyphs = useGlyphs();
   const { pane } = useThemeTokens();
   const borderWidth = Math.max(0, Math.floor(width));
   const borderHeight = Math.max(0, Math.floor(height));
   const bodyHeight = Math.max(0, borderHeight - 2);
-  if (!pane.chrome.drawsBorder || borderWidth < 2 || bodyHeight <= 0) return null;
+  if (!pane.chrome.drawsBorder || pane.chrome.ruleHeader || borderWidth < 2 || bodyHeight <= 0) return null;
   const rule = glyphs.border.vertical.repeat(bodyHeight);
+  // A framed style lights the whole frame on focus; a border-focus style
+  // only reaches here for an idle pane, whose sides stay quiet.
+  const color = focused && pane.chrome.framed ? pane.border.focused : pane.border.idle;
 
   return (
     <>
       <Box position="absolute" top={1} left={0} width={1} height={bodyHeight}>
-        <Text fg={pane.border.idle} selectable={false}>{rule}</Text>
+        <Text fg={color} selectable={false}>{rule}</Text>
       </Box>
       <Box position="absolute" top={1} left={borderWidth - 1} width={1} height={bodyHeight}>
-        <Text fg={pane.border.idle} selectable={false}>{rule}</Text>
+        <Text fg={color} selectable={false}>{rule}</Text>
       </Box>
     </>
   );
@@ -150,7 +153,7 @@ export function FloatingPaneWrapper({
       )}
 
       {!nativePaneChrome && (!focused || pane.chrome.focusMode !== "border")
-        && <TerminalFloatingPaneBorder width={width} height={height} />}
+        && <TerminalFloatingPaneBorder width={width} height={height} focused={focused} />}
 
       {nativePaneChrome ? (
         <Box

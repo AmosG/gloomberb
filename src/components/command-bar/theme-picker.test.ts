@@ -23,21 +23,36 @@ describe("theme picker matching", () => {
     }
   });
 
-  test("while one style ships, the theme list is the scheme list", () => {
-    // The style half is not selectable yet, so a theme is a scheme again and
-    // the picker must not show a column with one repeated value in it.
-    expect(stylesAreSelectable()).toBe(false);
+  test("with several styles on offer, the list groups by style with the default first", () => {
+    expect(stylesAreSelectable()).toBe(true);
     const options = matchThemeOptions("", "theme");
-    expect(options.length).toBe(getSchemeIds().length);
-    expect(options.every((option) => option.styleId === DEFAULT_STYLE)).toBe(true);
-    expect(options.map((option) => option.name))
-      .toEqual(matchThemeOptions("", "colors").map((option) => option.name));
+    expect(options[0]!.styleId).toBe(DEFAULT_STYLE);
+    // Every option names both halves, so a row reads as one theme.
+    for (const option of options) {
+      expect(option.name).toBe(`${option.styleName} ${option.schemeName}`);
+    }
+    // Grouped: a style's entries are contiguous.
+    const seen = new Set<string>();
+    let previous = "";
+    for (const option of options) {
+      if (option.styleId !== previous) {
+        expect(seen.has(option.styleId), option.styleId).toBe(false);
+        seen.add(option.styleId);
+        previous = option.styleId;
+      }
+    }
   });
 
-  test("a filter matches a scheme by name or id", () => {
+  test("a filter matches a scheme or a style by name or id", () => {
     expect(matchThemeOptions("amber", "theme").every((option) => option.schemeId === "amber")).toBe(true);
-    expect(matchThemeOptions("nord", "theme").map((option) => option.schemeId).sort())
-      .toEqual(["nord", "nord-light"]);
+    expect(matchThemeOptions("amber", "theme").length).toBeGreaterThan(1);
+    expect(new Set(matchThemeOptions("nord", "theme").map((option) => option.schemeId)))
+      .toEqual(new Set(["nord", "nord-light"]));
+    // "Green Phosphor" is a scheme name too, so the style filter also finds
+    // those; what matters is that every phosphor preset is in the result.
+    expect(matchThemeOptions("rounded", "theme").every((option) => option.styleId === "rounded")).toBe(true);
+    expect(matchThemeOptions("phosphor", "theme").filter((option) => option.styleId === "phosphor").length)
+      .toBe(getPresets().filter((preset) => preset.styleId === "phosphor").length);
   });
 
   test("a filter with no match returns nothing rather than everything", () => {
@@ -45,8 +60,8 @@ describe("theme picker matching", () => {
     expect(matchThemeOptions("zzzz", "colors")).toEqual([]);
   });
 
-  test("the list is sorted by the name shown, so it can be read to find one", () => {
-    const names = matchThemeOptions("", "theme").map((option) => option.name);
+  test("the colors list is sorted by name, so it can be read to find one", () => {
+    const names = matchThemeOptions("", "colors").map((option) => option.name);
     expect([...names].sort((a, b) => a.localeCompare(b))).toEqual(names);
   });
 });
@@ -61,16 +76,19 @@ describe("preset selection", () => {
     expect(resolvePresetSelection("nord", "terminal")).toEqual({ styleId: "terminal", schemeId: "nord" });
   });
 
-  // "paper" is both a scheme and an experimental style. While the style is not
-  // offered, the scheme is what a user means by it.
-  test("an ambiguous name resolves to the scheme while the style is not offered", () => {
+  // "paper" is both a scheme and a style. A bare name is read as the scheme,
+  // which is what a pre-styles config meant by it; the style is reached by
+  // its preset id.
+  test("an ambiguous bare name resolves to the scheme", () => {
     expect(resolvePresetSelection("paper", "terminal")).toEqual({ styleId: "terminal", schemeId: "paper" });
+    expect(resolvePresetSelection("paper-paper")).toEqual({ styleId: "paper", schemeId: "paper" });
   });
 
-  // The dev tooling still has to reach an experimental style by composite id,
-  // which is how the shot CLI keeps capturing them for review.
-  test("a composite id reaches an experimental style", () => {
+  test("a composite id reaches any style and scheme pair, curated or not", () => {
     expect(resolvePresetSelection("modern-catppuccin")).toEqual({ styleId: "modern", schemeId: "catppuccin" });
     expect(resolvePresetSelection("phosphor-amber")).toEqual({ styleId: "phosphor", schemeId: "amber" });
+    expect(resolvePresetSelection("minimal-nord-light")).toEqual({ styleId: "minimal", schemeId: "nord-light" });
+    // Not a curated pairing, still a valid one.
+    expect(resolvePresetSelection("rounded-amber")).toEqual({ styleId: "rounded", schemeId: "amber" });
   });
 });

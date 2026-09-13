@@ -33,15 +33,46 @@ describe("resolveTheme", () => {
     expect(terminal.tokens.pane.body.bg.idle).not.toBe(modern.tokens.pane.body.bg.idle);
   });
 
-  test("an inverted header swaps the title's ink and ground", () => {
+  test("an embedded header sits in the frame and lights with it", () => {
     for (const schemeId of SAMPLE_SCHEMES) {
       const { tokens } = resolveTheme(schemeId, "phosphor");
-      const { title, body } = tokens.pane;
-      expect(tokens.pane.chrome.invertHeader).toBe(true);
-      // The strip takes the ink, the words take the body it sits on.
+      const { title, body, border, chrome } = tokens.pane;
+      expect(chrome.framed).toBe(true);
+      expect(chrome.headerMode).toBe("embedded");
+      // The title is type on the body, not a plate; focus moves the frame
+      // and the title's ink together.
+      expect(title.bg.idle).toBe(body.bg.idle);
+      expect(title.text.idle).not.toBe(title.text.focused);
+      expect(border.idle).not.toBe(border.focused);
       expect(contrastRatio(title.text.focused, title.bg.focused)).toBeGreaterThanOrEqual(4.5);
-      expect(contrastRatio(title.bg.focused, body.bg.focused)).toBeGreaterThan(1.5);
     }
+  });
+
+  test("a running head trails a rule that takes the accent on focus", () => {
+    for (const schemeId of SAMPLE_SCHEMES) {
+      const { tokens, palette } = resolveTheme(schemeId, "paper");
+      const { title, chrome } = tokens.pane;
+      expect(chrome.ruleHeader).toBe(true);
+      expect(title.rule.idle).not.toBe(title.rule.focused);
+      expect(contrastRatio(title.rule.focused, title.bg.focused)).toBeGreaterThanOrEqual(3.0);
+      expect(contrastRatio(title.rule.focused, palette.bg)).toBeGreaterThan(contrastRatio(title.rule.idle, palette.bg));
+    }
+  });
+
+  test("a raised surface puts a card above a darker backdrop", () => {
+    for (const schemeId of SAMPLE_SCHEMES) {
+      const { tokens, dark } = resolveTheme(schemeId, "modern");
+      expect(tokens.pane.chrome.surface).toBe("raised");
+      expect(tokens.surface.backdrop).not.toBe(tokens.pane.body.bg.idle);
+      // A dark scheme's cards are lighter than the field they sit on; a light
+      // scheme's cards are whiter. Either way the card is the lighter one.
+      expect(contrastRatio("#ffffff", tokens.surface.backdrop)).toBeGreaterThan(contrastRatio("#ffffff", tokens.pane.body.bg.idle));
+      expect(typeof dark).toBe("boolean");
+      // The gutter is the backdrop itself, not a line across it.
+      expect(tokens.pane.divider.idle).toBe(tokens.surface.backdrop);
+    }
+    // A flat style leaves the backdrop on the app background.
+    expect(resolveTheme("amber", "terminal").tokens.surface.backdrop).toBe(resolveTheme("amber", "terminal").palette.bg);
   });
 
   test("a plain header sits flush on the pane body", () => {
@@ -81,9 +112,11 @@ describe("resolveTheme", () => {
 
     const terminal = resolveTheme("amber", "terminal").tokens.pane.chrome;
     expect(terminal.drawsBorder).toBe(true);
+    expect(terminal.framed).toBe(false);
     expect(terminal.padding).toEqual({ x: 1, y: 0 });
     expect(terminal.boxBorderStyle).toBe("single");
-    expect(resolveTheme("amber", "phosphor").tokens.pane.chrome.boxBorderStyle).toBe("heavy");
+    expect(resolveTheme("amber", "phosphor").tokens.pane.chrome.boxBorderStyle).toBe("double");
+    expect(resolveTheme("amber", "rounded").tokens.pane.chrome.boxBorderStyle).toBe("rounded");
   });
 
   test("chart indicators stay clear of the price line colours", () => {
@@ -103,8 +136,11 @@ describe("resolveTheme", () => {
     const terminal = resolveTheme("catppuccin", "terminal").tokens;
     const modern = resolveTheme("catppuccin", "modern").tokens;
 
-    expect(modern.spacing.rowHeight).toBeGreaterThan(terminal.spacing.rowHeight);
+    // Rows keep the grid's height in every style: a positions table that
+    // shows half as many holdings is a different product, not a theme.
+    expect(modern.spacing.rowHeight).toBe(terminal.spacing.rowHeight);
     expect(modern.spacing.columnGap).toBeGreaterThan(terminal.spacing.columnGap);
+    expect(modern.spacing.padX).toBeGreaterThan(terminal.spacing.padX);
     expect(modern.spacing.sectionGap).toBeGreaterThan(terminal.spacing.sectionGap);
     expect(modern.table.layout.rowHeight).toBe(modern.spacing.rowHeight);
     expect(modern.table.row.stripe).toBeString();

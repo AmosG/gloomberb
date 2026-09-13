@@ -91,7 +91,8 @@ describe("the default style keeps the shipped look", () => {
     }
   });
 
-  test("only the default style is offered to users", () => {
-    expect(getStyleIds()).toEqual([DEFAULT_STYLE]);
+  test("the default style is listed first, so a legacy theme resolves to it", () => {
+    expect(getStyleIds()[0]).toBe(DEFAULT_STYLE);
+    expect(getStyleIds().length).toBeGreaterThan(1);
   });
 });

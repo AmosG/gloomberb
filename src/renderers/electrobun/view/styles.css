@@ -588,8 +588,9 @@ body.gloom-dragging [data-gloom-role="chart-surface"] {
  * Style projections
  *
  * Everything above reads the style through vars. What is left are the effects
- * with no terminal counterpart, so they are keyed on the style id rather than
- * pushed into a var no other style would set.
+ * with no terminal counterpart. They are keyed on what a style asked for
+ * (its surface, focus mode, header mode, effects) rather than on its id, so a
+ * style that reuses a recipe gets the CSS with it.
  * -------------------------------------------------------------------------- */
 
 /* Sans UI type wherever the copy is prose rather than a column of numbers. */
@@ -603,42 +604,138 @@ body.gloom-dragging [data-gloom-role="chart-surface"] {
   letter-spacing: var(--gloom-letter-spacing, 0);
 }
 
-/* Borderless: the surface, not a rule, separates one pane from the next. */
-[data-gloom-style="modern"] [data-gloom-role="pane-window"][data-floating="false"],
-[data-gloom-style="minimal"] [data-gloom-role="pane-window"][data-floating="false"] {
-  box-shadow: none;
+/* The shell paints the backdrop; a raised style sets it a step below the cards. */
+html[data-gloom-surface] { background: var(--gloom-backdrop, var(--gloom-bg)); }
+html[data-gloom-surface] body,
+html[data-gloom-surface] #root { background: var(--gloom-backdrop, var(--gloom-bg)); }
+
+/* Dividers take the gutter colour the style resolved: a line, a hairline, or
+ * the backdrop itself, in which case there is nothing to see. */
+[data-gloom-role="dock-divider"]::before {
+  background: var(--divider-color, var(--gloom-divider, var(--gloom-border)));
 }
-[data-gloom-style="modern"] [data-gloom-role="pane-window"][data-floating="false"][data-focused="true"] {
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--gloom-border-focused) 30%, transparent);
+html[data-gloom-separators="whitespace"] [data-gloom-role="dock-divider"]:not([data-active="true"])::before {
+  opacity: 0;
 }
-[data-gloom-style="modern"] [data-gloom-role="pane-header"],
-[data-gloom-style="minimal"] [data-gloom-role="pane-header"],
-[data-gloom-style="modern"] [data-gloom-role="pane-footer"],
-[data-gloom-style="minimal"] [data-gloom-role="pane-footer"] {
+
+/* --- Raised: panes are cards --------------------------------------------- */
+
+html[data-gloom-surface="raised"] [data-gloom-role="pane-window"][data-floating="false"] {
+  border-radius: var(--gloom-radius-pane, 0px);
+  overflow: hidden;
+  box-shadow:
+    0 1px 0 color-mix(in srgb, var(--gloom-text-bright) 4%, transparent) inset,
+    0 1px 2px color-mix(in srgb, var(--gloom-backdrop) 60%, transparent);
+}
+html[data-gloom-surface="raised"] [data-gloom-role="pane-window"][data-floating="false"][data-focused="true"] {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--gloom-border-focused) 55%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--gloom-border-focused) 12%, transparent),
+    0 8px 24px color-mix(in srgb, var(--gloom-backdrop) 55%, transparent);
+}
+html[data-gloom-surface="raised"] [data-gloom-role="pane-header"],
+html[data-gloom-surface="raised"] [data-gloom-role="pane-footer"] {
   border-top-color: transparent;
   border-bottom-color: transparent;
   box-shadow: none;
 }
-[data-gloom-style="modern"] [data-gloom-role="dock-divider"]::before,
-[data-gloom-style="minimal"] [data-gloom-role="dock-divider"]::before {
-  opacity: 0;
+html[data-gloom-surface="raised"] [data-gloom-role="pane-footer"]:not([data-empty="true"]) {
+  border-top: 1px solid color-mix(in srgb, var(--gloom-border) 45%, transparent);
 }
-[data-gloom-style="modern"] [data-gloom-role="data-table-row"]:nth-child(even):not([data-selected="true"]),
-[data-gloom-style="minimal"] [data-gloom-role="data-table-row"]:nth-child(even):not([data-selected="true"]) {
+html[data-gloom-surface="raised"] [data-gloom-role="pane-title"] {
+  font-size: 12.5px;
+}
+html[data-gloom-surface="raised"] [data-gloom-role="status-bar"] {
+  border-top-color: transparent;
+}
+
+/* --- Framed: every pane is a closed box ----------------------------------- */
+
+html[data-gloom-focus-mode="frame"] [data-gloom-role="pane-window"][data-floating="false"] {
+  box-shadow: none;
+}
+html[data-gloom-focus-mode="frame"] [data-gloom-role="pane-window"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 100;
+  border: var(--gloom-pane-frame, 1px solid) var(--pane-border-color, var(--gloom-border));
+  border-radius: var(--gloom-radius-pane, 0px);
+}
+html[data-gloom-focus-mode="frame"] [data-gloom-role="pane-header"],
+html[data-gloom-focus-mode="frame"] [data-gloom-role="pane-footer"] {
+  border-top-color: transparent;
+  border-bottom-color: transparent;
+  box-shadow: none;
+}
+/* An embedded title: the top rule runs through the middle of the header row
+ * and the title, the grip and the buttons sit on it with the body behind
+ * them, the way a DOS window carried its name in its frame. The rule is one
+ * pixel lower than the text's centre so a rounded corner meets it cleanly. */
+html[data-gloom-header-mode="embedded"] [data-gloom-role="pane-window"]::after {
+  top: calc(var(--cell-h) / 2 - 1px);
+}
+html[data-gloom-header-mode="embedded"] [data-gloom-role="pane-header"] > * {
+  position: relative;
+  z-index: 101;
+  background-color: inherit;
+}
+html[data-gloom-header-mode="embedded"] [data-gloom-role="pane-header"] {
+  padding-inline: calc(var(--cell-w) * 2 - 1px);
+}
+html[data-gloom-header-mode="embedded"] [data-gloom-role="pane-title"] {
+  padding-inline: 6px;
+  border-radius: var(--gloom-radius-control, 0px);
+}
+html[data-gloom-header-mode="embedded"] [data-gloom-role="pane-header"][data-focused="true"] [data-gloom-role="pane-title"],
+html[data-gloom-header-mode="embedded"] [data-gloom-role="pane-header"][data-window-mode-selected="true"] [data-gloom-role="pane-title"] {
+  color: var(--gloom-bg) !important;
+  background: var(--gloom-border-focused) !important;
+}
+
+/* --- Rule: a running head ------------------------------------------------- */
+
+html[data-gloom-header-mode="rule"] [data-gloom-role="pane-header"] {
+  border-bottom-color: transparent;
+}
+
+/* --- Accent: a mark at the left edge of the focused pane ------------------ */
+
+html[data-gloom-focus-mode="accent"] [data-gloom-role="pane-window"][data-floating="false"][data-focused="true"] {
+  box-shadow: inset 2px 0 0 var(--gloom-border-focused);
+}
+html[data-gloom-focus-mode="accent"] [data-gloom-role="pane-header"],
+html[data-gloom-focus-mode="accent"] [data-gloom-role="pane-footer"] {
+  border-top-color: transparent;
+  border-bottom-color: transparent;
+  box-shadow: none;
+}
+html[data-gloom-focus-mode="accent"] [data-gloom-role="pane-accent"] {
+  display: none;
+}
+
+/* --- Glow: a soft ring, no line ------------------------------------------- */
+
+html[data-gloom-focus-mode="glow"] [data-gloom-role="pane-window"][data-floating="false"]:not([data-focused="true"]) {
+  box-shadow: none;
+}
+
+/* --- Header-carried focus leaves the frame alone -------------------------- */
+
+html[data-gloom-focus-mode="header"] [data-gloom-role="pane-window"][data-floating="false"][data-focused="true"] {
+  box-shadow: inset 0 0 0 1px var(--pane-border-color, var(--gloom-border));
+}
+
+/* --- Tables --------------------------------------------------------------- */
+
+html[data-gloom-style] [data-gloom-role="data-table-row"]:nth-child(even):not([data-selected="true"]) {
   background-color: var(--gloom-table-stripe, transparent);
 }
 
-/* Paper: a printed rule and an offset drop, no glow, no translucency. */
-[data-gloom-style="paper"] [data-gloom-role="pane-window"][data-floating="false"] {
-  box-shadow: inset 0 0 0 1px var(--pane-border-color, var(--gloom-border));
-}
-[data-gloom-style="paper"] [data-gloom-ui="section-heading"] span {
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
+/* --- Effects: things a tube does that a grid cannot ----------------------- */
 
-/* Phosphor: a CRT, so the whole app carries scanlines and the type blooms. */
-[data-gloom-style="phosphor"] #root::after {
+html[data-gloom-effects~="scanlines"] #root::after {
   content: "";
   position: fixed;
   inset: 0;
@@ -646,28 +743,33 @@ body.gloom-dragging [data-gloom-role="chart-surface"] {
   pointer-events: none;
   background: repeating-linear-gradient(
     to bottom,
-    color-mix(in srgb, var(--gloom-bg) 22%, transparent) 0px,
-    color-mix(in srgb, var(--gloom-bg) 22%, transparent) 1px,
+    color-mix(in srgb, #000 9%, transparent) 0px,
+    color-mix(in srgb, #000 9%, transparent) 1px,
     transparent 1px,
     transparent 3px
   );
-  mix-blend-mode: multiply;
 }
-[data-gloom-style="phosphor"] [data-gloom-role="pane-title"],
-[data-gloom-style="phosphor"] [data-gloom-ui="section-heading"] span {
-  text-shadow: 0 0 6px currentColor;
+html[data-gloom-effects~="vignette"] #root::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 19999;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 64%, color-mix(in srgb, #000 22%, transparent) 100%);
 }
-[data-gloom-style="phosphor"] [data-gloom-role="pane-window"][data-floating="false"][data-focused="true"] {
-  box-shadow:
-    inset 0 0 0 1px var(--pane-border-color, var(--gloom-border-focused)),
-    inset 0 0 18px color-mix(in srgb, var(--gloom-border-focused) 12%, transparent);
+html[data-gloom-effects~="glow"] [data-gloom-role="pane-title"],
+html[data-gloom-effects~="glow"] [data-gloom-ui="section-heading"] span {
+  text-shadow: 0 0 5px color-mix(in srgb, currentColor 45%, transparent);
+}
+html[data-gloom-effects~="glow"][data-gloom-surface="flat"] [data-gloom-role="pane-window"][data-floating="false"][data-focused="true"] {
+  box-shadow: inset 0 0 22px color-mix(in srgb, var(--gloom-border-focused) 9%, transparent);
 }
 
 /* A style that opts out of motion opts out everywhere, not just where a rule
  * happened to name the transition var. */
-[data-gloom-style="phosphor"] *,
-[data-gloom-style="phosphor"] *::before,
-[data-gloom-style="phosphor"] *::after {
+html[data-gloom-effects~="still"] *,
+html[data-gloom-effects~="still"] *::before,
+html[data-gloom-effects~="still"] *::after {
   transition-duration: 0ms !important;
   animation-duration: 0ms !important;
 }
@@ -713,15 +815,15 @@ body.gloom-dragging [data-gloom-role="chart-surface"] {
 /* The scale only spreads where the style asked for it. `flat` leaves every
  * role at the cell's own size, which is what keeps the terminal styles honest
  * on the desktop too. */
-[data-gloom-style="modern"] {
+html[data-gloom-scale="wide"] {
   --gloom-type-label-size: 0.85em;
   --gloom-type-label-tracking: 0.08em;
-  --gloom-type-label-opacity: 0.75;
+  --gloom-type-label-opacity: 0.8;
   --gloom-type-caption-size: 0.92em;
   --gloom-type-display-size: 1.35em;
 }
-[data-gloom-style="paper"],
-[data-gloom-style="minimal"] {
+html[data-gloom-scale="subtle"] {
+  --gloom-type-label-tracking: 0.04em;
   --gloom-type-caption-size: 0.95em;
   --gloom-type-display-size: 1.15em;
 }

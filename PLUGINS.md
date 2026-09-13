@@ -1162,7 +1162,7 @@ export default {
 
 A theme is a colour **scheme** and a structural **style**. The scheme is the 18 palette entries you already know through `colors`. The style is the structural half: pane borders, header treatment, focus channel, density, glyph repertoire, chart treatment, and (on the desktop and web only) type and material.
 
-**Only one style ships today.** `terminal` is the look the app has always had, and it is the only entry users can pick. The other styles are defined and tested but marked experimental, because the vocabulary is finished and the designs are not. Run one during development with `GLOOMBERB_THEME_STYLE=modern`, or capture one with `gloomberb shot <pane> --theme modern-catppuccin`.
+Six styles ship. `terminal` is the look the app has always had: the focused pane boxed, title bars on a tinted strip, tight rows. `phosphor` frames every pane in a double rule with its title set into the rule in capitals, and on the desktop adds scanlines and a vignette. `rounded` frames every pane in rounded corners with the title in the edge. `modern` sits each pane on a card above a darker backdrop, with a soft focus ring, roomier columns and a sans face on the desktop. `paper` sets each title as a running head with a rule to the pane's edge, rules under table headers and rows, and a serif on the desktop. `minimal` draws no frames at all and marks the focused pane with an accent at its left edge. `TH` picks a curated style and scheme pairing; `CO` swaps the scheme under the current style. Capture any pairing with `gloomberb shot <pane> --theme modern-catppuccin`, or the whole workspace with `gloomberb shot workspace --theme paper-solarized-light`.
 
 That does not make this section optional. A pane written against the kit and the tokens is a pane that will not need revisiting when a style ships; a pane written against raw palette entries and hard-coded row heights is one that will.
 
@@ -1189,7 +1189,7 @@ function Sparkline({ ratios }: { ratios: number[] }) {
 - `useThemeStyle()` exposes the structural decisions themselves (`chrome.density`, `chrome.separators`, `charts.candles`) for the rare case where a domain drawing has to change shape rather than colour.
 - `tokens` and `glyphs` are also exported from `gloomberb/theme` as live module-level views, for formatting helpers that run outside React.
 
-Do not hard-code a radius, a shadow, or a font in a `style={{}}` prop. The DOM renderer publishes `--gloom-radius-pane`, `--gloom-radius-control`, `--gloom-shadow-floating`, `--gloom-shadow-popover`, `--gloom-font-ui`, `--gloom-font-mono`, `--gloom-heading-weight`, `--gloom-letter-spacing`, `--gloom-row-h` and `--gloom-transition`, and `<html>` carries `data-gloom-style`, so a role selector can respond to the style without a prop.
+Do not hard-code a radius, a shadow, or a font in a `style={{}}` prop. The DOM renderer publishes `--gloom-radius-pane`, `--gloom-radius-control`, `--gloom-shadow-floating`, `--gloom-shadow-popover`, `--gloom-font-ui`, `--gloom-font-mono`, `--gloom-heading-weight`, `--gloom-letter-spacing`, `--gloom-row-h` and `--gloom-transition`, and `<html>` carries `data-gloom-style` along with the structural decisions it was made from (`data-gloom-surface`, `data-gloom-focus-mode`, `data-gloom-header-mode`, `data-gloom-separators`, `data-gloom-scale`, `data-gloom-effects`), so a role selector can respond to what a style asked for without naming the style.
 
 ## Example: adding a command
 

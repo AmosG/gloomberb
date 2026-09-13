@@ -113,13 +113,13 @@ function renderArcRows(
     const x = Math.round(centerX + Math.cos(angle) * radiusX);
     const y = Math.round(centerY - Math.sin(angle) * radiusY);
     if (dial[y]?.[x]) {
-      dial[y]![x] = { char: glyphs.border.vertical, color: colors.textDim };
+      dial[y]![x] = { char: glyphs.line.vertical, color: colors.textDim };
     }
   }
 
   const pointerAngle = valueToAngle(value, min, max);
   const pointerChar = Math.abs(Math.cos(pointerAngle)) < 0.22
-    ? glyphs.border.vertical
+    ? glyphs.line.vertical
     : Math.cos(pointerAngle) > 0
       ? "/"
       : "\\";

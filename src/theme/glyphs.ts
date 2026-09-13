@@ -28,6 +28,13 @@ export interface BorderChars {
 export interface GlyphSet {
   mode: GlyphMode;
   border: BorderChars;
+  /**
+   * Single-weight line drawing for plots: candle wicks, OHLC ticks, grid
+   * rules, the crosshair. A chart is not a frame, so it keeps a plain stroke
+   * whatever the style boxes its panes with; only the ascii repertoire
+   * changes it.
+   */
+  line: BorderChars;
   /** True when the style asked for no pane border at all. */
   borderless: boolean;
   arrow: { up: string; down: string; left: string; right: string };
@@ -186,6 +193,7 @@ export function resolveGlyphs(mode: GlyphMode, border: PaneBorderKind): GlyphSet
   const set: GlyphSet = {
     mode,
     border: borderChars,
+    line: mode === "ascii" ? BORDERS.ascii : BORDERS.line,
     borderless: border === "none",
     ...marks,
   };

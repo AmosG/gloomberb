@@ -257,8 +257,9 @@ export function PaneFooterBar({
   }
 
   // Matches the header: a border-focus style boxes only the focused pane, and
-  // every other focus mode boxes them all so the frame stays closed.
-  if (pane.chrome.drawsBorder && (focused || showBorder || pane.chrome.focusMode !== "border")) {
+  // every other focus mode boxes them all so the frame stays closed. A running
+  // head has no box to close, so its footer is content on the body.
+  if (pane.chrome.drawsBorder && !pane.chrome.ruleHeader && (focused || showBorder || pane.chrome.focusMode !== "border")) {
     const contentWidth = Math.max(0, Math.floor(width) - 1 - reservedRight - (reservedRight > 0 ? 0 : 1));
     const { bottomLeft, bottomRight, horizontal } = glyphs.border;
     return (

@@ -3,9 +3,10 @@ import { DEFAULT_STYLE, getStyle, getStyleIds, hasAnyStyle, hasStyle } from "./s
 
 /**
  * The curated pairings. A scheme and a style compose freely, but most of the
- * 23 x 5 grid is noise, so the picker ships a shortlist where the palette and
+ * 22 x 6 grid is noise, so the picker ships a shortlist where the palette and
  * the structure were chosen together. Anything outside the list is still
- * reachable: `colors` swaps the scheme under whatever style is active.
+ * reachable: `colors` swaps the scheme under whatever style is active, and a
+ * config written before styles existed keeps its scheme under `terminal`.
  */
 export interface ThemePreset {
   id: string;
@@ -14,28 +15,48 @@ export interface ThemePreset {
 }
 
 const PRESET_PAIRS: Array<[styleId: string, schemeId: string]> = [
+  // The default, and the schemes people have been using under it.
   ["terminal", "amber"],
-  ["terminal", "nord"],
+  ["terminal", "green"],
+  ["terminal", "cyan"],
+  ["terminal", "white"],
   ["terminal", "tokyo"],
+  ["terminal", "nord"],
+  ["terminal", "dracula"],
   ["terminal", "gruvbox"],
   ["terminal", "github-light"],
-  ["phosphor", "amber"],
+  // A tube wants a single phosphor on black.
   ["phosphor", "green"],
+  ["phosphor", "amber"],
   ["phosphor", "cyan"],
+  ["phosphor", "white"],
+  // Rounded frames read best on the mid-tone editor palettes.
+  ["rounded", "catppuccin"],
+  ["rounded", "tokyo"],
+  ["rounded", "rosepine"],
+  ["rounded", "nord-light"],
+  // Cards need a scheme with two distinct surfaces to sit one on the other.
   ["modern", "catppuccin"],
   ["modern", "midnight"],
-  ["modern", "nord-light"],
+  ["modern", "nord"],
+  ["modern", "github-light"],
+  // Print is made for the light schemes.
   ["paper", "paper"],
   ["paper", "solarized-light"],
+  ["paper", "gruvbox-light"],
+  ["paper", "solarized"],
+  // Nothing but type: the quiet palettes.
   ["minimal", "rosepine"],
   ["minimal", "white"],
+  ["minimal", "nord-light"],
+  ["minimal", "tokyo"],
 ];
 
 /**
- * While only one style ships, a theme is a scheme again, so the shortlist is
- * every scheme under the default style. That is the flat list the picker has
- * always shown. As soon as a second style stops being experimental the
- * curated pairings take over on their own.
+ * The curated pairings, filtered to the styles on offer. Should every style
+ * but one ever be pulled, a theme is a scheme again and the shortlist becomes
+ * every scheme under that style, which is the flat list the picker used to
+ * show.
  */
 function resolvePresetPairs(): Array<[string, string]> {
   const stable = getStyleIds();

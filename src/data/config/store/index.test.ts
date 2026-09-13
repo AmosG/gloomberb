@@ -420,16 +420,17 @@ describe("loadConfig theme selection", () => {
       .toEqual({ theme: "catppuccin", themeStyle: "terminal" });
   });
 
-  test("an experimental style is not accepted from the config file", async () => {
-    // A config written while a style was in development must not strand
-    // someone in it. Opting in is GLOOMBERB_THEME_STYLE's job.
+  test("every offered style is accepted from the config file", async () => {
     expect(await loadWithTheme({ theme: "catppuccin", themeStyle: "modern" }))
-      .toEqual({ theme: "catppuccin", themeStyle: "terminal" });
+      .toEqual({ theme: "catppuccin", themeStyle: "modern" });
+    expect(await loadWithTheme({ theme: "green", themeStyle: "phosphor" }))
+      .toEqual({ theme: "green", themeStyle: "phosphor" });
   });
 
-  test("a theme naming an unoffered style falls back rather than half-applying", async () => {
+  test("a theme naming a style rather than a scheme is read as the style", async () => {
+    // A hand-edited config saying `"theme": "phosphor"` does the obvious thing.
     expect(await loadWithTheme({ theme: "phosphor" }))
-      .toEqual({ theme: "amber", themeStyle: "terminal" });
+      .toEqual({ theme: "amber", themeStyle: "phosphor" });
   });
 
   test("falls back for an unknown scheme or style rather than rendering nothing", async () => {

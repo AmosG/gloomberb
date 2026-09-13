@@ -173,12 +173,12 @@ function hollowBodyChar(
   const onBottom = row === bottom;
   const onLeft = offset === -half;
   const onRight = offset === half;
-  if (onTop && onLeft) return set.border.topLeft;
-  if (onTop && onRight) return set.border.topRight;
-  if (onBottom && onLeft) return set.border.bottomLeft;
-  if (onBottom && onRight) return set.border.bottomRight;
-  if (onTop || onBottom) return set.border.horizontal;
-  return set.border.vertical;
+  if (onTop && onLeft) return set.line.topLeft;
+  if (onTop && onRight) return set.line.topRight;
+  if (onBottom && onLeft) return set.line.bottomLeft;
+  if (onBottom && onRight) return set.line.bottomRight;
+  if (onTop || onBottom) return set.line.horizontal;
+  return set.line.vertical;
 }
 
 /** True for a cell that carries nothing but the grid, so an overlay may claim it. */
@@ -208,7 +208,7 @@ function renderOhlc(
     const highRow = valueRow(high, domain, height);
     const lowRow = valueRow(low, domain, height);
     if (closeRow === null || highRow === null || lowRow === null) continue;
-    drawLine(rows, x, highRow, x, lowRow, glyphs.border.vertical);
+    drawLine(rows, x, highRow, x, lowRow, glyphs.line.vertical);
     if (series.source.style === "candles" && openRow !== null && candles !== "ohlc") {
       const bodyTop = Math.min(openRow, closeRow);
       const bodyBottom = Math.max(openRow, closeRow);
@@ -226,9 +226,9 @@ function renderOhlc(
     }
     const tickWidth = Math.max(1, halfCandleWidth);
     if (openRow !== null && (series.source.style === "ohlc" || candles === "ohlc")) {
-      drawLine(rows, Math.max(0, x - tickWidth), openRow, x, openRow, glyphs.border.horizontal);
+      drawLine(rows, Math.max(0, x - tickWidth), openRow, x, openRow, glyphs.line.horizontal);
     }
-    drawLine(rows, x, closeRow, Math.min(width - 1, x + tickWidth), closeRow, glyphs.border.horizontal);
+    drawLine(rows, x, closeRow, Math.min(width - 1, x + tickWidth), closeRow, glyphs.line.horizontal);
   }
 }
 
@@ -254,7 +254,7 @@ export function renderCompositePanelText(
   const plotWidth = Math.max(1, width);
   const rows = Array.from({ length: height }, () => Array(plotWidth).fill(" "));
   const grid = getCurrentStyle().charts.grid;
-  const gridChar = grid === "lines" ? glyphs.border.horizontal : glyphs.dot;
+  const gridChar = grid === "lines" ? glyphs.line.horizontal : glyphs.dot;
   const gridStep = grid === "lines" ? 1 : 3;
   if (grid !== "none") {
     for (let index = 1; index <= 3; index += 1) {
@@ -310,14 +310,14 @@ export function renderCompositePanelText(
     const cursorX = clamp(Math.round(cursorXRatio * Math.max(plotWidth - 1, 0)), 0, Math.max(plotWidth - 1, 0));
     for (let y = 0; y < height; y += 1) {
       const current = rows[y]?.[cursorX];
-      setCell(rows, cursorX, y, isBackdropCell(current, gridChar) ? glyphs.border.vertical : glyphs.border.cross);
+      setCell(rows, cursorX, y, isBackdropCell(current, gridChar) ? glyphs.line.vertical : glyphs.line.cross);
     }
   }
   if (cursorYRatio !== null) {
     const cursorY = clamp(Math.round(cursorYRatio * Math.max(height - 1, 0)), 0, Math.max(height - 1, 0));
     for (let x = 0; x < plotWidth; x += 1) {
       const current = rows[cursorY]?.[x];
-      setCell(rows, x, cursorY, isBackdropCell(current, gridChar) ? glyphs.border.horizontal : glyphs.border.cross);
+      setCell(rows, x, cursorY, isBackdropCell(current, gridChar) ? glyphs.line.horizontal : glyphs.line.cross);
     }
   }
 

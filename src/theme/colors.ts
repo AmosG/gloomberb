@@ -187,6 +187,20 @@ function syncThemeCssVariables(): void {
   element?.setAttribute?.("data-gloom-style", currentResolved.styleId);
   element?.setAttribute?.("data-gloom-scheme", currentResolved.schemeId);
   element?.setAttribute?.("data-gloom-appearance", currentResolved.dark ? "dark" : "light");
+  // Effects and surface are attributes of their own so the stylesheet keys on
+  // what a style asked for rather than on which style asked.
+  const { effects, chrome } = currentResolved.style;
+  element?.setAttribute?.("data-gloom-surface", chrome.surface);
+  element?.setAttribute?.("data-gloom-focus-mode", chrome.focus);
+  element?.setAttribute?.("data-gloom-header-mode", chrome.paneHeader);
+  element?.setAttribute?.("data-gloom-separators", chrome.separators);
+  element?.setAttribute?.("data-gloom-scale", currentResolved.style.content.scale);
+  element?.setAttribute?.(
+    "data-gloom-effects",
+    [effects.scanlines && "scanlines", effects.vignette && "vignette", effects.glow && "glow", !effects.transitions && "still"]
+      .filter(Boolean)
+      .join(" "),
+  );
 }
 
 const SHADOW_RECIPES = {
@@ -212,6 +226,8 @@ export function themeCssVariables(resolved: ResolvedTheme = currentResolved): Ar
   const radius = style.effects.radius;
   return [
     ["--gloom-hover-bg", themeTokens.surface.hover],
+    ["--gloom-backdrop", themeTokens.surface.backdrop],
+    ["--gloom-divider", themeTokens.pane.divider.idle],
     ["--gloom-radius-pane", `${radius}px`],
     ["--gloom-radius-control", `${Math.max(0, Math.round(radius * 0.6))}px`],
     ["--gloom-shadow-floating", shadow.floating],
@@ -225,7 +241,11 @@ export function themeCssVariables(resolved: ResolvedTheme = currentResolved): Ar
     ["--gloom-pane-pad-y", `${themeTokens.pane.chrome.padding.y}`],
     ["--gloom-transition", style.effects.transitions ? "120ms cubic-bezier(0.23, 1, 0.32, 1)" : "0ms linear"],
     ["--gloom-pane-border-width", themeTokens.pane.chrome.drawsBorder ? "1px" : "0px"],
+    // The frame a framed style draws around every pane: three pixels for a
+    // double rule, two for a heavy one, one for anything else.
+    ["--gloom-pane-frame", style.chrome.paneBorder === "double" ? "3px double" : style.chrome.paneBorder === "heavy" ? "2px solid" : "1px solid"],
     ["--gloom-table-stripe", themeTokens.table.row.stripe ?? "transparent"],
+    ["--gloom-table-header-rule", themeTokens.table.layout.headerRule ?? "transparent"],
   ];
 }
 

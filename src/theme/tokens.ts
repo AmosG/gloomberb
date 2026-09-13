@@ -18,6 +18,7 @@ import {
   type PaneHeaderMode,
   type SeparatorMode,
   type StyleSpec,
+  type SurfaceMode,
   type TableHeaderMode,
   type TypeRole,
 } from "./styles";
@@ -33,6 +34,11 @@ const TITLE_TEXT_MIN = 4.5;
 
 export interface SurfaceTokens {
   app: string;
+  /**
+   * What the shell paints behind and between panes. The app background for
+   * a flat style; a step darker (or greyer) than the cards for a raised one.
+   */
+  backdrop: string;
   panel: string;
   raised: string;
   overlay: string;
@@ -60,6 +66,7 @@ export interface PaneChromeTokens {
   headerMode: PaneHeaderMode;
   focusMode: FocusMode;
   separators: SeparatorMode;
+  surface: SurfaceMode;
   density: Density;
   grip: string;
   upperCaseTitles: boolean;
@@ -68,10 +75,20 @@ export interface PaneChromeTokens {
   rowHeight: number;
   /** False when the style draws no pane box, so callers can skip the frame. */
   drawsBorder: boolean;
+  /**
+   * True when every docked pane is a closed box: top rule, side rules and
+   * bottom rule, focused or not. The terminal draws the sides in the columns
+   * it already keeps clear of content.
+   */
+  framed: boolean;
   /** True when the header should be painted with reverse video. */
   invertHeader: boolean;
   /** True when the header carries a rule on its bottom edge. */
   underlineHeader: boolean;
+  /** True when the title is followed by a rule to the pane's right edge. */
+  ruleHeader: boolean;
+  /** True when focus is a mark at the pane's left edge. */
+  accentFocus: boolean;
 }
 
 export interface PaneStateColors {
@@ -82,6 +99,8 @@ export interface PaneStateColors {
 export interface PaneTokens {
   chrome: PaneChromeTokens;
   border: { idle: string; focused: string; selected: string };
+  /** The gutter between docked panes, at rest and while being dragged. */
+  divider: { idle: string; active: string };
   body: { bg: PaneStateColors };
   floatingBody: { bg: PaneStateColors };
   title: {
@@ -90,6 +109,8 @@ export interface PaneTokens {
     text: PaneStateColors;
     floatingText: PaneStateColors;
     grip: PaneStateColors;
+    /** The rule after a `rule` header, and the accent mark of `accent` focus. */
+    rule: PaneStateColors;
   };
   footer: { bg: PaneStateColors; text: string; border: PaneStateColors };
 }
@@ -251,7 +272,42 @@ function paletteOf(scheme: Theme): ThemePalette {
 /* Pane recipes                                                               */
 /* -------------------------------------------------------------------------- */
 
+/** The lighter of the scheme's two surfaces, which is what a card is made of. */
+function lighterSurface(palette: ThemePalette): string {
+  return relativeLuminance(palette.panel) > relativeLuminance(palette.bg) ? palette.panel : palette.bg;
+}
+
+function darkerSurface(palette: ThemePalette): string {
+  return relativeLuminance(palette.panel) > relativeLuminance(palette.bg) ? palette.bg : palette.panel;
+}
+
+/**
+ * What the shell paints behind the panes. A raised style pushes it a step
+ * past the darker surface so a card sits visibly above it; on a light scheme
+ * that step is towards the border grey rather than towards black, since a
+ * white card on a dark field is a different product.
+ */
+function backdrop(palette: ThemePalette, style: StyleSpec, dark: boolean): string {
+  if (style.chrome.surface !== "raised") return palette.bg;
+  const base = darkerSurface(palette);
+  return dark ? blendHex(base, "#000000", 0.32) : blendHex(base, palette.border, 0.38);
+}
+
+/** The card surface of a raised style: the lighter surface, lifted a touch. */
+function cardSurface(palette: ThemePalette, dark: boolean): string {
+  const base = lighterSurface(palette);
+  return dark ? blendHex(base, palette.textBright, 0.025) : base;
+}
+
 function paneBodyBg(palette: ThemePalette, style: StyleSpec, focused: boolean, floating: boolean): string {
+  const dark = relativeLuminance(palette.text) > relativeLuminance(palette.bg);
+  if (style.chrome.surface === "raised") {
+    // A card is the same surface focused or not; the ring and the title
+    // carry focus. A floating card sits a step higher than a docked one.
+    const card = cardSurface(palette, dark);
+    const lifted = floating ? blendHex(card, palette.textBright, dark ? 0.03 : 0) : card;
+    return focused && style.chrome.focus === "glow" ? blendHex(lifted, palette.borderFocused, 0.04) : lifted;
+  }
   const lift = floating ? 0.08 : 0.06;
   const rest = floating ? 0.18 : 0.08;
   switch (style.chrome.focus) {
@@ -262,8 +318,13 @@ function paneBodyBg(palette: ThemePalette, style: StyleSpec, focused: boolean, f
         ? blendHex(palette.bg, palette.borderFocused, floating ? 0.1 : 0.07)
         : blendHex(palette.panel, palette.border, floating ? 0.14 : 0.04);
     case "header":
-      // Focus is carried entirely by the title, so both bodies match.
-      return floating ? blendHex(palette.panel, palette.border, 0.14) : blendHex(palette.panel, palette.border, 0.06);
+    case "accent":
+      // Focus is carried entirely by the title, so both bodies match, and a
+      // flat style keeps them on the app background itself.
+      return floating ? blendHex(palette.panel, palette.border, 0.14) : palette.bg;
+    case "frame":
+      // The frame carries focus; the body stays put so the box reads as one.
+      return floating ? blendHex(palette.panel, palette.border, 0.12) : palette.bg;
     default:
       return focused ? blendHex(palette.bg, palette.borderFocused, lift) : blendHex(palette.panel, palette.border, rest);
   }
@@ -305,10 +366,8 @@ function paneTitleBg(
       : higherContrast(palette.textDim, palette.border, body);
     return blendForContrast(ink, body, higherContrast("#ffffff", "#000000", body), 3.0);
   }
-  if (mode === "underline") {
-    // A printed heading sits on the page, not on a plate.
-    return body;
-  }
+  // `embedded`, `rule`, `underline`, `inline` and `plain` all sit the title on
+  // the body: the header reads as type, not as a plate.
   return body;
 }
 
@@ -325,10 +384,23 @@ function paneTitleText(
     const body = paneBodyBg(palette, style, focused, floating);
     return blendForContrast(body, background, higherContrast("#ffffff", "#000000", background), 4.5);
   }
+  const extreme = higherContrast("#ffffff", "#000000", background);
+  if (mode === "embedded") {
+    // Set into the rule, the title is part of the frame and takes its ink:
+    // the frame colour at rest, and the brightest ink when the frame lights.
+    const preferred = focused ? palette.textBright : palette.textDim;
+    return blendForContrast(preferred, background, higherContrast(palette.text, extreme, background), focused ? TITLE_TEXT_MIN + 0.7 : TITLE_TEXT_MIN);
+  }
+  if (mode === "rule") {
+    // A running head is body ink at rest and accent ink when it is the page
+    // being read, and the rule after it follows.
+    const preferred = focused ? higherContrast(palette.borderFocused, palette.textBright, background) : palette.text;
+    return blendForContrast(preferred, background, higherContrast(palette.text, extreme, background), focused ? TITLE_TEXT_MIN + 0.7 : TITLE_TEXT_MIN);
+  }
   const preferred = focused
     ? higherContrast(palette.textBright, palette.borderFocused, background)
     : mode === "plain" || mode === "inline" ? palette.textDim : palette.text;
-  const fallback = higherContrast(palette.text, higherContrast("#ffffff", "#000000", background), background);
+  const fallback = higherContrast(palette.text, extreme, background);
   return blendForContrast(preferred, background, fallback, focused ? TITLE_TEXT_MIN + 0.7 : TITLE_TEXT_MIN);
 }
 
@@ -339,10 +411,22 @@ function paneGrip(palette: ThemePalette, style: StyleSpec, focused: boolean): st
   return blendForContrast(preferred, background, higherContrast(palette.text, palette.textBright, background), 3.0);
 }
 
+/**
+ * The rule that trails a running head, and the mark that flags accent focus.
+ * At rest it is the frame colour; focused it is the accent, floored so a
+ * scheme whose accent is close to its surface still shows the change.
+ */
+function paneRule(palette: ThemePalette, style: StyleSpec, focused: boolean): string {
+  const background = paneTitleBg(palette, style, focused, false);
+  if (!focused) return blendHex(palette.border, background, style.chrome.separators === "hairline" ? 0.35 : 0);
+  return blendForContrast(palette.borderFocused, background, higherContrast(palette.textBright, palette.text, background), 3.0);
+}
+
 function paneBorder(palette: ThemePalette, style: StyleSpec): PaneTokens["border"] {
   const focusedBorder = palette.borderFocused;
   switch (style.chrome.focus) {
     case "header":
+    case "accent":
       // The border is decoration once the header carries focus, so it stays put.
       return { idle: palette.border, focused: palette.border, selected: focusedBorder };
     case "glow":
@@ -351,8 +435,29 @@ function paneBorder(palette: ThemePalette, style: StyleSpec): PaneTokens["border
         focused: blendHex(palette.borderFocused, palette.bg, 0.35),
         selected: focusedBorder,
       };
+    case "frame":
+      // Every pane is boxed, so the idle frame is quieter than a lone border
+      // would be and the focused one is the accent at full strength.
+      return {
+        idle: blendHex(palette.border, palette.textDim, 0.25),
+        focused: focusedBorder,
+        selected: focusedBorder,
+      };
     default:
       return { idle: palette.border, focused: focusedBorder, selected: focusedBorder };
+  }
+}
+
+/** The gutter between docked panes: a line, a hairline, or the backdrop itself. */
+function paneDivider(palette: ThemePalette, style: StyleSpec, backdropColor: string): PaneTokens["divider"] {
+  const active = palette.borderFocused;
+  switch (style.chrome.separators) {
+    case "whitespace":
+      return { idle: backdropColor, active };
+    case "hairline":
+      return { idle: blendHex(palette.border, backdropColor, 0.55), active };
+    default:
+      return { idle: palette.border, active };
   }
 }
 
@@ -515,9 +620,11 @@ function chartIndicatorPalette(palette: ThemePalette): string[] {
 
 function buildTokens(palette: ThemePalette, style: StyleSpec): ThemeTokens {
   const { chrome, content } = style;
+  const dark = relativeLuminance(palette.text) > relativeLuminance(palette.bg);
   const padding = densityPadding(chrome.density);
   const hover = blendHex(palette.bg, palette.selected, 0.5);
   const border = paneBorder(palette, style);
+  const backdropColor = backdrop(palette, style, dark);
   const bodyBg = {
     idle: paneBodyBg(palette, style, false, false),
     focused: paneBodyBg(palette, style, true, false),
@@ -574,6 +681,7 @@ function buildTokens(palette: ThemePalette, style: StyleSpec): ThemeTokens {
   return {
     surface: {
       app: palette.bg,
+      backdrop: backdropColor,
       panel: palette.panel,
       raised: blendHex(palette.panel, palette.border, 0.18),
       overlay: blendHex(palette.bg, palette.panel, 0.6),
@@ -606,16 +714,21 @@ function buildTokens(palette: ThemePalette, style: StyleSpec): ThemeTokens {
         headerMode: chrome.paneHeader,
         focusMode: chrome.focus,
         separators: chrome.separators,
+        surface: chrome.surface,
         density: chrome.density,
         grip: chrome.headerGrip,
         upperCaseTitles: chrome.headerCase === "upper",
         padding,
         rowHeight: content.rowHeight,
         drawsBorder: chrome.paneBorder !== "none",
+        framed: chrome.paneBorder !== "none" && (chrome.focus === "frame" || chrome.paneHeader === "embedded"),
         invertHeader: chrome.paneHeader === "inverted",
         underlineHeader: chrome.paneHeader === "underline",
+        ruleHeader: chrome.paneHeader === "rule",
+        accentFocus: chrome.focus === "accent",
       },
       border,
+      divider: paneDivider(palette, style, backdropColor),
       body: { bg: bodyBg },
       floatingBody: { bg: floatingBodyBg },
       title: {
@@ -639,6 +752,10 @@ function buildTokens(palette: ThemePalette, style: StyleSpec): ThemeTokens {
           idle: paneGrip(palette, style, false),
           focused: paneGrip(palette, style, true),
         },
+        rule: {
+          idle: paneRule(palette, style, false),
+          focused: paneRule(palette, style, true),
+        },
       },
       footer: {
         bg: bodyBg,
@@ -652,13 +769,16 @@ function buildTokens(palette: ThemePalette, style: StyleSpec): ThemeTokens {
       // its own plate, and an inverted one takes the ink.
       // `filled` is the plain panel the app has always used for a table
       // header; the other modes are what a style changes it to.
+      // An inverted header is a plate of dim ink with the body showing
+      // through as text: enough to read as reverse video, not so bright that
+      // every table shouts. Floored against its own text, not the body.
       headerBg: content.table.header === "filled"
         ? palette.panel
         : content.table.header === "inverted"
-          ? blendForContrast(textDim, bodyBg.idle, higherContrast("#ffffff", "#000000", bodyBg.idle), 3.0)
+          ? blendForContrast(blendHex(textDim, bodyBg.idle, 0.45), bodyBg.idle, higherContrast("#ffffff", "#000000", bodyBg.idle), 3.0)
           : bodyBg.idle,
       headerText: content.table.header === "inverted" ? bodyBg.idle : textDim,
-      border: chrome.separators === "whitespace" ? blendHex(palette.border, palette.bg, 0.6) : palette.border,
+      border: chrome.separators === "lines" ? palette.border : blendHex(palette.border, palette.bg, 0.6),
       row: {
         hover,
         selected: palette.selected,
@@ -745,7 +865,7 @@ function buildTokens(palette: ThemePalette, style: StyleSpec): ThemeTokens {
     },
     chart: {
       indicator: Object.freeze(chartIndicatorPalette(palette)),
-      grid: blendHex(palette.bg, palette.border, chrome.separators === "whitespace" ? 0.5 : 0.8),
+      grid: blendHex(palette.bg, palette.border, chrome.separators === "lines" ? 0.8 : 0.5),
       axis: palette.textMuted,
       crosshair: palette.borderFocused,
     },

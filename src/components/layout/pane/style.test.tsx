@@ -50,11 +50,22 @@ describe("pane chrome per style", () => {
     expect(frame).toContain("└");
   });
 
-  test("phosphor boxes in ascii and shouts the title", async () => {
-    const frame = await frameFor("phosphor");
-    expect(frame).toContain("+-POSITIONS");
-    expect(frame).not.toContain("┌");
-    expect(frame).not.toContain("::");
+  test("phosphor frames every pane in a double rule with the title set in it, in capitals", async () => {
+    for (const focused of [true, false]) {
+      const frame = await frameFor("phosphor", focused);
+      expect(frame).toContain("╔═ POSITIONS ═");
+      expect(frame).toContain("╚═");
+      // The sides close the box on every body row.
+      expect(frame.split("\n").filter((line) => line.startsWith("║") && line.endsWith("║")).length).toBe(HEIGHT - 2);
+      expect(frame).not.toContain("::");
+    }
+  });
+
+  test("rounded frames every pane in rounded corners, title as written", async () => {
+    const frame = await frameFor("rounded", false);
+    expect(frame).toContain("╭─ Positions ─");
+    expect(frame).toContain("╰─");
+    expect(frame).toContain("╯");
   });
 
   test("a borderless style draws no box at all", async () => {
@@ -67,10 +78,23 @@ describe("pane chrome per style", () => {
     }
   });
 
-  test("a border-focus style boxes only the focused pane; a header-focus style boxes both", async () => {
+  test("a running head is the title and then a rule to the edge, boxed by nothing", async () => {
+    for (const focused of [true, false]) {
+      const frame = await frameFor("paper", focused);
+      expect(frame).toMatch(/Positions ─+/);
+      for (const character of ["┌", "└", "│"]) {
+        expect(frame, character).not.toContain(character);
+      }
+    }
+  });
+
+  test("accent focus is a mark in the gutter of the focused pane only", async () => {
+    expect(await frameFor("minimal", true)).toMatch(/^▌ Positions/);
+    expect(await frameFor("minimal", false)).toMatch(/^  Positions/);
+  });
+
+  test("a border-focus style boxes only the focused pane", async () => {
     expect(await frameFor("terminal", true)).toContain("┌");
     expect(await frameFor("terminal", false)).not.toContain("┌");
-    expect(await frameFor("paper", true)).toContain("┌");
-    expect(await frameFor("paper", false)).toContain("┌");
   });
 });
