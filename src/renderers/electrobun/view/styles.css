@@ -702,8 +702,19 @@ html[data-gloom-header-mode="rule"] [data-gloom-role="pane-header"] {
 
 /* --- Accent: a mark at the left edge of the focused pane ------------------ */
 
-html[data-gloom-focus-mode="accent"] [data-gloom-role="pane-window"][data-floating="false"][data-focused="true"] {
-  box-shadow: inset 2px 0 0 var(--gloom-border-focused);
+html[data-gloom-focus-mode="accent"] [data-gloom-role="pane-window"][data-floating="false"] {
+  box-shadow: none;
+}
+html[data-gloom-focus-mode="accent"] [data-gloom-role="pane-window"][data-focused="true"]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--gloom-border-focused);
+  pointer-events: none;
+  z-index: 100;
 }
 html[data-gloom-focus-mode="accent"] [data-gloom-role="pane-header"],
 html[data-gloom-focus-mode="accent"] [data-gloom-role="pane-footer"] {
