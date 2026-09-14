@@ -1,3 +1,4 @@
+import { yahooSuffixExchange } from "../yahoo-finance/symbols";
 import type { CachedResourceRecord, ResourceStore } from "../../data/resource-store";
 import type { TimeRange } from "../../time-series/range";
 import type { BrokerContractRef } from "../../types/instrument";
@@ -52,7 +53,11 @@ export function buildVariantKey(parts: Array<[string, string | number | undefine
 
 export function getRouterEntityKey(ticker: string, instrument?: BrokerContractRef | null): string {
   if (instrument) return `contract:${brokerContractIdentityKey(instrument)}`;
-  return normalizeTicker(ticker);
+  const target = parsePublicTickerKey(ticker);
+  const suffixExchange = !target.exchange && yahooSuffixExchange(target.symbol);
+  // Earlier bare-suffix caches may have parsed dates using unrelated exchange
+  // metadata or UTC. A qualified entity bypasses those records on upgrade.
+  return suffixExchange ? `${target.symbol}:${suffixExchange}` : normalizeTicker(ticker);
 }
 
 export function getTickerVariantCandidates(exchange?: string): string[] {

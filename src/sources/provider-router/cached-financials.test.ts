@@ -2,6 +2,7 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { AppPersistence } from "../../data/app-persistence";
 import type { DataProvider } from "../../types/data-provider";
 import { AssetDataRouter } from "./index";
+import { getRouterEntityKey } from "./cache";
 import { mergeFinancials, sanitizeCachedFinancials } from "./financials";
 import {
   cleanupProviderRouterTestFiles,
@@ -414,7 +415,7 @@ describe("AssetDataRouter cached financials", () => {
       {
         namespace: "market",
         kind: "financials",
-        entityKey: "4092.T",
+        entityKey: getRouterEntityKey("4092.T"),
         variantKey: "exchange=JPX",
         sourceKey: "provider:yahoo",
       },

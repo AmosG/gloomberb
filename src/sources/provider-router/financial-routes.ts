@@ -247,8 +247,7 @@ export class ProviderRouterFinancialRoutes {
     includeStale = false,
   ): Quote | null {
     const entityKey = this.deps.getEntityKey(ticker, context?.instrument);
-    const entityKeys = context?.instrument
-      ? [entityKey] : [...new Set([entityKey, normalizeTicker(ticker)])];
+    const entityKeys = [entityKey];
     const variantKeys = this.deps.getTickerVariantCandidates(exchange);
     const sourceKeys = this.deps.getProviderSourceKeys();
     for (const candidateEntityKey of entityKeys) {
@@ -294,8 +293,8 @@ export class ProviderRouterFinancialRoutes {
     const providerSourceKeys = this.deps.getProviderSourceKeys();
     const requiresContractPrice = context?.instrument != null;
     const includeSymbolProviderFallback = options.includeSymbolProviderFallback !== false;
-    const providerEntityKeys = includeSymbolProviderFallback
-      ? [...new Set([entityKey, normalizeTicker(ticker)])]
+    const providerEntityKeys = includeSymbolProviderFallback && requiresContractPrice
+      ? [...new Set([entityKey, this.deps.getEntityKey(ticker), normalizeTicker(ticker)])]
       : [entityKey];
     const providerRecords = sortCachedRecords(
       providerEntityKeys.flatMap((providerEntityKey) => listCachedResources<TickerFinancials>(
