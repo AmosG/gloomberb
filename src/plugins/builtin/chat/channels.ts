@@ -150,6 +150,8 @@ export function buildDmCommandResults(ctx: GloomPluginContext, arg: string): Com
 export function channelPrefix(channel: ChatChannel | undefined, active: boolean) {
   if (channel?.kind === "direct") return " ";
   if (channel?.kind === "group") return active ? "+" : " ";
+  // Team channels are indented under their team header.
+  if (channel?.kind === "team") return active ? " #" : "  ";
   return active ? "#" : " ";
 }
 

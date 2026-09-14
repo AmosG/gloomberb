@@ -62,6 +62,7 @@ import {
   useShellVisibleLayout,
 } from "./layout-state";
 import { AuthDialogHost } from "../../../plugins/builtin/cloud/auth-dialog";
+import { TeamFlowHost } from "../../../plugins/builtin/cloud/team/flow-host";
 import { DeviceSignInDialogHost } from "../../../plugins/builtin/cloud/device-signin-dialog";
 import { useShellPaneActions } from "./pane/actions";
 import { resolvePaneFocusSourceLayout } from "./fullscreen";
@@ -631,6 +632,11 @@ export function Shell({
       {/* Render nothing; give the auth commands always-mounted components with dialog access. */}
       <DeviceSignInDialogHost />
       <AuthDialogHost />
+      <TeamFlowHost
+        copyText={(text) => rendererHost.copyText(text)}
+        notify={(request) => pluginRegistry.notify(request)}
+        createPaneFromTemplate={(templateId, options) => pluginRegistry.createPaneFromTemplate(templateId, options)}
+      />
       <Box
         position="absolute"
         left={0}

@@ -6,8 +6,13 @@ import type {
   QuoteStreamTarget,
   ScannerFeedEvent,
   ScannerKind,
+  TeamNotification,
 } from "./types";
-import { normalizeChatMessage, normalizeChatNotification } from "./normalizers";
+import {
+  normalizeChatMessage,
+  normalizeChatNotification,
+  normalizeTeamNotification,
+} from "./normalizers";
 import { debugLog } from "../utils/debug-log";
 import { canonicalExchange, normalizeSymbol } from "../utils/exchanges";
 import { mergeQuoteSubscriptionTargets } from "../market-data/quote-subscription-target";
@@ -23,6 +28,8 @@ const cloudApiLog = debugLog.createLogger("cloud-api");
 type ChannelListener = (message: ChatMessage) => void;
 type ChatNotificationListener = (notification: ChatNotification) => void;
 type ChatPresenceListener = (onlineCount: number) => void;
+type TeamNotificationListener = (notification: TeamNotification) => void;
+type CloudEventListener = (data: unknown) => void;
 type QuoteListener = (
   target: QuoteStreamTarget,
   quote: CloudQuotePayload,
@@ -83,6 +90,12 @@ export class CloudApiSocket {
   private readonly chatNotificationListeners =
     new Set<ChatNotificationListener>();
   private readonly chatPresenceListeners = new Set<ChatPresenceListener>();
+  private readonly teamNotificationListeners =
+    new Set<TeamNotificationListener>();
+  private readonly cloudEventListeners = new Map<
+    string,
+    Set<CloudEventListener>
+  >();
   private nextQuoteSubscriptionId = 1;
   private readonly quoteSubscriptions = new Map<
     string,
@@ -218,6 +231,38 @@ export class CloudApiSocket {
     this.chatPresenceListeners.add(listener);
     return () => {
       this.chatPresenceListeners.delete(listener);
+    };
+  }
+
+  subscribeTeamNotifications(listener: TeamNotificationListener): () => void {
+    this.teamNotificationListeners.add(listener);
+    this.syncAuthState();
+    return () => {
+      this.teamNotificationListeners.delete(listener);
+      if (!this.shouldKeepSocketOpen()) {
+        this.teardown();
+      }
+    };
+  }
+
+  /** Subscribes to a server push frame by type, e.g. a team layout update. */
+  subscribeCloudEvent(type: string, listener: CloudEventListener): () => void {
+    const listeners =
+      this.cloudEventListeners.get(type) ?? new Set<CloudEventListener>();
+    listeners.add(listener);
+    this.cloudEventListeners.set(type, listeners);
+    this.syncAuthState();
+    return () => {
+      const current = this.cloudEventListeners.get(type);
+      if (current) {
+        current.delete(listener);
+        if (current.size === 0) {
+          this.cloudEventListeners.delete(type);
+        }
+      }
+      if (!this.shouldKeepSocketOpen()) {
+        this.teardown();
+      }
     };
   }
 
@@ -376,6 +421,8 @@ export class CloudApiSocket {
     this.channelListeners.clear();
     this.chatNotificationListeners.clear();
     this.chatPresenceListeners.clear();
+    this.teamNotificationListeners.clear();
+    this.cloudEventListeners.clear();
     this.quoteSubscriptions.clear();
     this.quoteTargets.clear();
     this.pendingQuoteSubscribes.clear();
@@ -453,6 +500,16 @@ export class CloudApiSocket {
       return;
     }
 
+    if (parsed?.type === "team.notification" && parsed.data) {
+      const notification = normalizeTeamNotification(
+        parsed.data as TeamNotification,
+      );
+      for (const listener of this.teamNotificationListeners) {
+        listener(notification);
+      }
+      return;
+    }
+
     if (
       parsed?.type === "chat.presence" &&
       typeof parsed.onlineCount === "number"
@@ -502,6 +559,17 @@ export class CloudApiSocket {
         []) {
         subscription.listener(subscription.target, quote);
       }
+      return;
+    }
+
+    if (typeof parsed?.type === "string") {
+      const listeners = this.cloudEventListeners.get(parsed.type);
+      if (listeners && listeners.size > 0) {
+        for (const listener of listeners) {
+          listener(parsed.data);
+        }
+        return;
+      }
     }
   }
 
@@ -527,7 +595,9 @@ export class CloudApiSocket {
     return (
       this.delegate.hasSessionCredential() &&
       this.delegate.hasVerifiedUser() &&
-      this.channelListeners.size > 0
+      (this.channelListeners.size > 0 ||
+        this.teamNotificationListeners.size > 0 ||
+        this.cloudEventListeners.size > 0)
     );
   }
 

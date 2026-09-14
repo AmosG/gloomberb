@@ -26,6 +26,8 @@ import { registerCloudAuthCommands } from "./auth-commands";
 import { registerCloudUpgradeCommand } from "./upgrade-command";
 import { CloudUpgradeStatusWidget } from "./upgrade-status-widget";
 import { createPublicPaneShare } from "../shared/public-pane";
+import { teamChannelId } from "./team/model";
+import { teamModule, teamStore } from "./team/module";
 
 interface GloomberbCloudPluginComponents {
   ChatPane: (props: PaneProps) => ReactNode;
@@ -75,7 +77,11 @@ function createChatModule(
       keywords: ["new", "chat", "pane", "message"],
       shortcut: { prefix: "CHAT", argPlaceholder: "channel", argKind: "text" },
       createInstance: async (context, options) => {
-        const channelId = options?.arg
+        // `CHAT MD` or `CHAT "Macro Desk"` opens that team's #general.
+        const team = options?.arg ? teamStore.findTeam(options.arg) : null;
+        const channelId = team
+          ? teamChannelId(team.id)
+          : options?.arg
           ? await chatController.resolveRequiredChannelId(normalizeShortcutChannelId(options.arg))
           : await chatController.resolvePreferredChannelId(
             getPreferredChatOpenChannelId(context.config, chatController.getSnapshot()),
@@ -241,6 +247,7 @@ export function createGloomberbCloudPlugin({
     modules: [
       createCloudDataModule(),
       createChatModule(ChatPane, ChatStatusWidget),
+      teamModule,
       accountModule,
       askgModule,
       ...extraModules,

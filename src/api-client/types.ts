@@ -39,8 +39,9 @@ export interface ChatMessage {
 export interface ChatChannel {
   id: string;
   name: string;
-  kind?: "public" | "direct" | "group";
+  kind?: "public" | "direct" | "group" | "team";
   created_at: string;
+  teamId?: string;
   dmUser?: ChatUserSummary | null;
   members?: ChatUserSummary[];
 }
@@ -1317,4 +1318,124 @@ export interface QuoteStreamTarget {
   visible?: boolean;
   selected?: boolean;
   weight?: number;
+}
+
+export const TEAM_ACCENT_COLORS = [
+  "amber",
+  "blue",
+  "cyan",
+  "green",
+  "magenta",
+  "orange",
+  "red",
+  "violet",
+] as const;
+
+export type TeamAccentColor = (typeof TEAM_ACCENT_COLORS)[number];
+
+export type TeamRole = "owner" | "admin" | "member";
+
+export interface TeamSummary {
+  id: string;
+  name: string;
+  slug: string;
+  accentColor: TeamAccentColor;
+  shortName: string;
+  allowMemberInvites: boolean;
+  channelId: string;
+  createdAt: string;
+  role: TeamRole;
+  memberCount: number;
+}
+
+export interface TeamMember {
+  id: string;
+  role: TeamRole;
+  joinedAt: string;
+  user: { id: string; username: string | null; displayName: string };
+}
+
+export interface TeamInviteLink {
+  token: string;
+  url: string;
+  teamId: string;
+  createdBy: string;
+  expiresAt: string;
+  maxUses: number | null;
+  uses: number;
+  createdAt: string;
+}
+
+export interface TeamInvitePreview {
+  team: {
+    id: string;
+    name: string;
+    accentColor: TeamAccentColor;
+    shortName: string;
+    memberCount: number;
+  };
+  expiresAt: string;
+  viewer: { signedIn: boolean; emailVerified: boolean; role: TeamRole | null };
+}
+
+/** A Better Auth organization invitation as returned by /auth/organization/* endpoints. */
+export interface TeamInvitation {
+  id: string;
+  organizationId: string;
+  email: string;
+  role: string;
+  status: "pending" | "accepted" | "rejected" | "canceled";
+  expiresAt: string;
+  inviterId: string;
+  organizationName?: string;
+  organizationSlug?: string;
+  inviterEmail?: string;
+}
+
+export interface TeamUsernameInvitation {
+  id: string;
+  status: string;
+  expiresAt: string;
+  invitee: { id: string; username: string | null; displayName: string };
+}
+
+interface TeamActor {
+  id: string;
+  username: string | null;
+  displayName: string;
+}
+
+interface TeamNotificationTeam {
+  id: string;
+  name: string;
+  accentColor: TeamAccentColor;
+  shortName: string;
+}
+
+export type TeamNotificationData =
+  | {
+      kind: "team-invite";
+      team: TeamNotificationTeam;
+      invitationId: string;
+      expiresAt: string;
+      inviter: TeamActor;
+    }
+  | { kind: "team-joined"; team: TeamNotificationTeam; member: TeamActor }
+  | {
+      kind: "layout-updated";
+      team: TeamNotificationTeam;
+      layoutId: string;
+      layoutName: string;
+      revision: number;
+      author: TeamActor;
+    };
+
+export type TeamNotificationType = TeamNotificationData["kind"];
+
+export interface TeamNotification {
+  id: string;
+  type: TeamNotificationType;
+  channelId: string;
+  createdAt: string;
+  data: TeamNotificationData;
 }

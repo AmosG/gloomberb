@@ -12,6 +12,7 @@ import type { SelectControl } from "../../../components/ui/select-button";
 import { apiClient, type AccountProfile, type CloudPricing } from "../../../api-client";
 import { chatController } from "../chat/controller";
 import { SignInWall } from "../cloud/auth-actions";
+import { TeamsAccountTab } from "../cloud/team/acm-tab";
 import {
   AccountTextField,
   CheckboxRow,
@@ -66,6 +67,7 @@ const ACCOUNT_TAB_DEFS: Array<{ label: string; value: AccountManagementTab }> = 
   { label: "Profile", value: "profile" },
   { label: "Emails", value: "emails" },
   { label: "Pro", value: "pro" },
+  { label: "Teams", value: "teams" },
   { label: "Advanced", value: "advanced" },
 ];
 
@@ -89,6 +91,8 @@ const ACCOUNT_TAB_FIELD_ORDER: Record<AccountManagementTab, AccountFieldKey[]> =
     "emailAlertsOffAction",
   ],
   pro: ["upgradeAction"],
+  // The Teams tab owns its own keyboard handling (a list, not form fields).
+  teams: [],
   advanced: ["passwordAction", "deleteAccountAction"],
 };
 
@@ -816,7 +820,7 @@ export function AccountManagementPane({ focused, width, height }: PaneProps) {
     cyclePortfolio,
     deleteAccount,
     draftRef,
-    focused,
+    focused: focused && activeTab !== "teams",
     openPasswordDialog,
     openPortfolioDialog: openPortfolioPicker,
     openUpgrade,
@@ -1083,6 +1087,9 @@ export function AccountManagementPane({ focused, width, height }: PaneProps) {
             </>
           ) : null}
 
+          {activeTab === "teams" ? (
+            <TeamsAccountTab focused={focused} width={contentWidth} />
+          ) : null}
           {activeTab === "advanced" ? (
             <>
               <Box flexDirection="row" gap={1}>

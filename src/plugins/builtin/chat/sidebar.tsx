@@ -1,5 +1,5 @@
 import { ActionRow } from "../../../components/ui/action-row";
-import { useMemo } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import {
   getPaneSidebarWidth,
   PaneSidebar,
@@ -11,7 +11,9 @@ import { Box, Span, Text, useUiCapabilities } from "../../../ui";
 import { TextAttributes } from "../../../ui";
 import { colors } from "../../../theme/colors";
 import { t, tf } from "../../../i18n";
-import type { ChatChannel } from "../../../api-client";
+import type { ChatChannel, TeamSummary } from "../../../api-client";
+import { teamAccentHex, teamPrefix } from "../cloud/team/model";
+import { teamStore } from "../cloud/team/store";
 import type { ChatController } from "./controller";
 import {
   channelPrefix,
@@ -186,11 +188,35 @@ export function ChannelSidebar({
   const publicChannels = useMemo(() => channels.filter((channel) => (channel.kind ?? "public") === "public"), [channels]);
   const conversationChannels = useMemo(() => channels.filter((channel) => channel.kind === "direct" || channel.kind === "group"), [channels]);
   const conversationUnread = conversationChannels.some((channel) => (channelStateById.get(channel.id)?.unreadCount ?? 0) > 0);
+  const teamSnapshot = useSyncExternalStore(
+    (onChange) => teamStore.subscribe(onChange),
+    () => teamStore.getSnapshot(),
+  );
+  // Team channels sit between the public channels and DMs, one section per
+  // team in the team's accent. A channel whose team is not loaded yet still
+  // shows, under its own id, so nothing disappears while the store refreshes.
+  const teamSections = useMemo(() => {
+    const byTeam = new Map<string, { team: TeamSummary | null; channels: ChatChannel[] }>();
+    for (const channel of channels) {
+      if (channel.kind !== "team") continue;
+      const teamId = channel.teamId ?? channel.id;
+      const entry = byTeam.get(teamId) ?? { team: teamStore.getTeam(channel.teamId) ?? null, channels: [] };
+      entry.channels.push(channel);
+      byTeam.set(teamId, entry);
+    }
+    return [...byTeam.entries()]
+      .map(([teamId, entry]) => ({ teamId, ...entry }))
+      .sort((a, b) => (a.team?.name ?? "").localeCompare(b.team?.name ?? ""));
+  }, [channels, teamSnapshot.teams]);
   const sidebarRows = useMemo(() => [
     ...publicChannels.map((channel) => ({ kind: "channel" as const, channel })),
+    ...teamSections.flatMap((section) => [
+      { kind: "team-header" as const, teamId: section.teamId, team: section.team, channels: section.channels },
+      ...section.channels.map((channel) => ({ kind: "channel" as const, channel })),
+    ]),
     ...(conversationChannels.length > 0 || canCreateConversation ? [{ kind: "direct-header" as const }] : []),
     ...(directExpanded ? conversationChannels.map((channel) => ({ kind: "channel" as const, channel })) : []),
-  ], [canCreateConversation, conversationChannels, directExpanded, publicChannels]);
+  ], [canCreateConversation, conversationChannels, directExpanded, publicChannels, teamSections]);
 
   return (
     <PaneSidebar
@@ -204,6 +230,24 @@ export function ChannelSidebar({
         return (
           <>
             {sidebarRows.map((row) => {
+              if (row.kind === "team-header") {
+                const unread = row.channels.some((channel) => (channelStateById.get(channel.id)?.unreadCount ?? 0) > 0);
+                const accent = row.team ? teamAccentHex(row.team.accentColor) : colors.textDim;
+                const label = row.team ? `${teamPrefix(row.team)} ${row.team.name}` : "Team";
+                return (
+                  <Box
+                    key={`team-header:${row.teamId}`}
+                    height={1}
+                    width={listWidth}
+                    flexDirection="row"
+                    backgroundColor={sidebarBg}
+                  >
+                    <Text fg={accent} attributes={unread ? TextAttributes.BOLD : 0} selectable={false}>
+                      {truncateChannelLabel(label, Math.max(1, listWidth - 1))}
+                    </Text>
+                  </Box>
+                );
+              }
               if (row.kind === "direct-header") {
                 return (
                   <Box
