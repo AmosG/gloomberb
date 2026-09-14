@@ -9,7 +9,7 @@ import { quoteMetadataFromQuote } from "../../market-data/quotes/metadata";
 import { createTestDataProvider } from "../../test-support/data-provider";
 import type { Quote, TickerFinancials } from "../../types/financials";
 import { AssetDataRouter } from "./index";
-import { mergeFinancials, sanitizeCachedFinancials } from "./financials";
+import { mergeFinancials, mergeRefreshedFinancials, sanitizeCachedFinancials } from "./financials";
 
 let clock: ReturnType<typeof spyOn>;
 beforeEach(() => { clock = spyOn(Date, "now").mockReturnValue(Date.parse("2026-09-14T18:00:00Z")); });
@@ -82,6 +82,10 @@ test("price freshness cannot change the research type or lend a fund an untyped 
     expect(merged.fundamentals?.revenue).toBe(0);
     expect(merged.annualStatements[0]?.totalRevenue).toBe(200);
   }
+  // A later untyped valuation overlay cannot undo the known instrument policy.
+  const freshValuation = { ...snapshot(), fundamentals: { enterpriseValue: 100 } };
+  expect(mergeRefreshedFinancials(metadataOnly("ETF"), freshValuation).fundamentals).toBeUndefined();
+  expect(mergeRefreshedFinancials(metadataOnly("EQUITY"), freshValuation).fundamentals?.enterpriseValue).toBe(100);
   const company = { ...legacy, quote: quote("EQUITY"), quoteMetadata: metadataOnly("ETF").quoteMetadata };
   expect(sanitizeCachedFinancials(company).annualStatements[0]?.totalRevenue).toBe(200);
   const staleCompany = { ...company, quote: { ...company.quote, stale: true } };

@@ -390,7 +390,7 @@ export function mergeRefreshedFinancials(cached: TickerFinancials, fresh: Ticker
   for (const field of RETRACTABLE_VALUATION_FIELDS) {
     if (!currencyConflict && typeof statistics[field] === "number" && Number.isFinite(statistics[field])) update[field] = statistics[field];
   }
-  return { ...merged, fundamentals: mergeFundamentals(update, merged.fundamentals) };
+  return excludeNonCompanyFinancials({ ...merged, fundamentals: mergeFundamentals(update, merged.fundamentals) });
 }
 
 export function mergeCachedFinancialRecords(
