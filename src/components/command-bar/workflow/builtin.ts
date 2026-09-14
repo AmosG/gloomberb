@@ -3,8 +3,38 @@ import type { TickerRecord } from "../../../types/ticker";
 import {
   buildSetPortfolioPositionWorkflow,
 } from "../../../plugins/builtin/portfolio-list/command-bar";
-import type { CommandBarWorkflowRoute } from "./types";
+import type { CommandBarFieldOption, CommandBarWorkflowField, CommandBarWorkflowRoute } from "./types";
 import { buildCommandBarWorkflowRoute } from "./route-builder";
+import { teamPrefix } from "../../../plugins/builtin/cloud/team/model";
+import { teamStore } from "../../../plugins/builtin/cloud/team/store";
+
+/**
+ * Where a new collection lives: me, or one of my teams. Only asked when there
+ * is a team; the default follows the FOCUS lens.
+ */
+function ownerField(): { field: CommandBarWorkflowField; value: string } | null {
+  const snapshot = teamStore.getSnapshot();
+  if (snapshot.teams.length === 0) return null;
+  const options: CommandBarFieldOption[] = [
+    { label: "Me", value: "user", description: "Only you see it" },
+    ...snapshot.teams.map((team) => ({
+      label: `${teamPrefix(team)} ${team.name}`,
+      value: `team:${team.id}`,
+      description: "Every member sees and edits it",
+    })),
+  ];
+  const defaultTeamId = teamStore.getDefaultTeamId();
+  return {
+    field: { id: "owner", label: "Owner", type: "select", options, required: true },
+    value: defaultTeamId ? `team:${defaultTeamId}` : "user",
+  };
+}
+
+export function parseOwnerValue(value: unknown): { kind: "user" } | { kind: "team"; teamId: string } {
+  return typeof value === "string" && value.startsWith("team:")
+    ? { kind: "team", teamId: value.slice("team:".length) }
+    : { kind: "user" };
+}
 
 type BrokerWorkflowBuilder = (
   selectorKey: "brokerType" | "source",
@@ -35,26 +65,31 @@ export function buildBuiltInWorkflowRoute(options: {
   } = options;
 
   switch (actionId) {
-    case "new-watchlist":
+    case "new-watchlist": {
+      const owner = ownerField();
       return {
         kind: "route",
         route: buildCommandBarWorkflowRoute({
           workflowId: "builtin:new-watchlist",
           title: "New Watchlist",
           subtitle: "Create a new watchlist inside the command bar.",
-          fields: [{
-            id: "name",
-            label: "Watchlist Name",
-            type: "text",
-            placeholder: "My Watchlist",
-            required: true,
-          }],
-          values: { name: "" },
+          fields: [
+            ...(owner ? [owner.field] : []),
+            {
+              id: "name",
+              label: "Watchlist Name",
+              type: "text",
+              placeholder: "My Watchlist",
+              required: true,
+            },
+          ],
+          values: { name: "", ...(owner ? { owner: owner.value } : {}) },
           submitLabel: "Create Watchlist",
           pendingLabel: "Creating watchlist…",
           payload: { kind: "builtin", actionId },
         }),
       };
+    }
 
     case "new-layout":
     case "rename-layout":
@@ -87,9 +122,16 @@ export function buildBuiltInWorkflowRoute(options: {
         "Create Portfolio",
         true,
       );
-      return route
-        ? { kind: "route", route }
-        : { kind: "notice", message: "No connectable brokers are installed." };
+      if (!route) return { kind: "notice", message: "No connectable brokers are installed." };
+      // A paper portfolio can belong to a team; broker portfolios never do.
+      const owner = ownerField();
+      if (owner && route.kind === "workflow") {
+        const nameIndex = route.fields.findIndex((field) => field.id === "name");
+        const field: CommandBarWorkflowField = { ...owner.field, dependsOn: [{ key: "source", value: "manual" }] };
+        route.fields.splice(nameIndex >= 0 ? nameIndex : route.fields.length, 0, field);
+        route.values.owner = owner.value;
+      }
+      return { kind: "route", route };
     }
 
     case "set-portfolio-position": {

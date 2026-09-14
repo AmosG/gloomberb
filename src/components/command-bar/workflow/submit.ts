@@ -12,6 +12,7 @@ import {
   coerceFieldValues,
 } from "../helpers";
 import type { WorkflowStringValues } from "./broker";
+import { parseOwnerValue } from "./builtin";
 import type { PaneSettingField, PaneTemplateCreateOptions } from "../../../types/plugin";
 import type {
   CommandBarCollectionWorkflowActions,
@@ -107,7 +108,10 @@ export async function submitCommandBarWorkflow(options: {
     case "builtin": {
       switch (route.payload.actionId) {
         case "new-watchlist":
-          await collectionWorkflowActions.createWatchlist(coerceFieldString(route.values.name));
+          await collectionWorkflowActions.createWatchlist(
+            coerceFieldString(route.values.name),
+            parseOwnerValue(route.values.owner),
+          );
           break;
         case "new-layout": {
           const name = coerceFieldString(route.values.name).trim();
@@ -126,7 +130,10 @@ export async function submitCommandBarWorkflow(options: {
         case "new-portfolio": {
           const source = coerceFieldString(route.values.source);
           if (source === "manual") {
-            await collectionWorkflowActions.createManualPortfolio(coerceFieldString(route.values.name));
+            await collectionWorkflowActions.createManualPortfolio(
+              coerceFieldString(route.values.name),
+              parseOwnerValue(route.values.owner),
+            );
           } else {
             const values = extractBrokerWorkflowValues(route.values, "source", source);
             await collectionWorkflowActions.connectBrokerProfile(source, values);

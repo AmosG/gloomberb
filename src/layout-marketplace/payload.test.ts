@@ -236,6 +236,49 @@ describe("layout marketplace payloads", () => {
     expect(JSON.stringify(payload)).not.toContain("password");
   });
 
+  test("keeps team-scoped collection references and drops personal ones", () => {
+    const layout = {
+      dockRoot: { kind: "pane" as const, instanceId: "pl:1" },
+      instances: [{
+        instanceId: "pl:1",
+        paneId: "portfolio-list",
+        params: { collectionId: "team:org-1:abc" },
+        settings: { collectionId: "team:org-1:abc", visibleCollectionIds: ["team:org-1:abc", "team:org-1:def"] },
+      }],
+      floating: [],
+      detached: [],
+    };
+    // The real portfolio pane marks the collection fields private by name.
+    const portfolioPanes = new Map<string, PaneDef>([["portfolio-list", {
+      id: "portfolio-list",
+      name: "Portfolio",
+      component,
+      defaultPosition: "left",
+      portableShare: {
+        private: {
+          params: ["collectionId"],
+          settings: ["collectionId", "visibleCollectionIds"],
+          state: ["collectionId", "collectionSorts"],
+        },
+      },
+    }]]);
+    const team = publishableMarketplaceLayout(layout, { "pl:1": { collectionId: "team:org-1:abc" } }, portfolioPanes);
+    expect(team.layout.instances[0]?.params).toEqual({ collectionId: "team:org-1:abc" });
+    expect(team.layout.instances[0]?.settings).toEqual({
+      collectionId: "team:org-1:abc",
+      visibleCollectionIds: ["team:org-1:abc", "team:org-1:def"],
+    });
+    expect(team.paneState.p1).toEqual({ collectionId: "team:org-1:abc" });
+
+    const personal = publishableMarketplaceLayout({
+      ...layout,
+      instances: [{ ...layout.instances[0]!, params: { collectionId: "main" }, settings: { collectionId: "broker:ibkr:x", visibleCollectionIds: ["team:org-1:abc", "main"] } }],
+    }, { "pl:1": { collectionId: "main" } }, portfolioPanes);
+    expect(personal.layout.instances[0]?.params).toBeUndefined();
+    expect(personal.layout.instances[0]?.settings).toBeUndefined();
+    expect(personal.paneState.p1).toBeUndefined();
+  });
+
   test("materializes independent pane ids and rewrites state and follow bindings", () => {
     const entry = validEntry();
     const materialized = materializeMarketplaceLayout(
