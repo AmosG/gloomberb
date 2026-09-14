@@ -508,7 +508,9 @@ function ChartComposerSurface({
   }, { enabled: focused && !dialogOpen });
 
   const comparisonNotice = resolution.priceComparison?.notice;
-  const comparisonUnavailable = resolution.priceComparison?.start === null
+  const comparisonHasNoWindow = resolution.priceComparison?.start === null;
+  // A partial history seed cannot establish that the requested comparison failed.
+  const comparisonUnavailable = comparisonHasNoWindow && !resolution.loading
     ? "Comparison unavailable: need two shared dates and a nonzero baseline."
     : null;
   const statusError = resolution.errors[0];
@@ -525,7 +527,7 @@ function ChartComposerSurface({
   const duplicateErrorNotices = new Set([statusError, errorMessage,
     errorSeriesLabel && errorMessage ? `${errorSeriesLabel}: ${errorMessage}` : undefined]);
   // A failed shared window empties every compared leg; one comparison message explains it.
-  const comparisonEmptyNotices = new Set(comparisonUnavailable
+  const comparisonEmptyNotices = new Set(comparisonHasNoWindow
     ? resolution.legendSeries?.filter((entry) => resolution.priceComparison?.seriesIds.includes(entry.id))
       .map((entry) => `${entry.label}: no observations in the selected date range.`)
     : []);
