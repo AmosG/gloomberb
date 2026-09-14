@@ -1,4 +1,5 @@
 import { formatReportedMoney } from "../../utils/reported-money";
+import { latestFinancialPeriod } from "../../utils/latest-financial-period";
 import { formatPriceEarnings } from "../../utils/price-earnings";
 import { describeFundamentalMarketCap, selectMarketCapitalization } from "../../utils/market-capitalization";
 import {
@@ -359,12 +360,12 @@ export async function buildTickerReport({
   const fallbackCurrency = reportedCurrency && statements.every((row) => !row.currency?.trim() || row.currency.trim() === reportedCurrency)
     ? reportedCurrency : undefined;
   const statementCurrency = (row: FinancialStatement) => row.currency?.trim() || fallbackCurrency;
-  const latestAnnual = financials.annualStatements.at(-1);
+  const latestAnnual = latestFinancialPeriod(financials.annualStatements, row => row.date);
   if (latestAnnual) {
     appendMetricSection(lines, `Latest Annual (${latestAnnual.date})`, buildStatementMetrics(latestAnnual, statementCurrency(latestAnnual)));
   }
 
-  const latestQuarter = financials.quarterlyStatements.at(-1);
+  const latestQuarter = latestFinancialPeriod(financials.quarterlyStatements, row => row.date);
   if (latestQuarter) {
     appendMetricSection(lines, `Latest Quarter (${latestQuarter.date})`, buildStatementMetrics(latestQuarter, statementCurrency(latestQuarter)));
   }
@@ -466,8 +467,8 @@ function buildTickerStructuredData({
     } : undefined,
     profile: financials.profile,
     financialCurrency: financials.financialCurrency ?? null,
-    latestAnnual: financials.annualStatements.at(-1) ?? null,
-    latestQuarter: financials.quarterlyStatements.at(-1) ?? null,
+    latestAnnual: latestFinancialPeriod(financials.annualStatements, row => row.date) ?? null,
+    latestQuarter: latestFinancialPeriod(financials.quarterlyStatements, row => row.date) ?? null,
     annualStatementCount: financials.annualStatements.length,
     quarterlyStatementCount: financials.quarterlyStatements.length,
     notes,

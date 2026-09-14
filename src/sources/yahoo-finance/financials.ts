@@ -1,5 +1,6 @@
 import type { FinancialStatement, PricePoint } from "../../types/financials";
 import { computePriceReturnForHorizon } from "../../market-data/performance";
+import { isFinancialPeriodDate, latestFinancialPeriod } from "../../utils/latest-financial-period";
 
 export const YAHOO_TIMESERIES_TYPES = {
   annual: [
@@ -142,7 +143,7 @@ type YahooTimeseriesPoint = {
   asOfDate: string;
   currency?: string;
   periodType?: string;
-  value: number;
+  value?: number;
 };
 
 export type YahooTimeseriesMetrics = Record<string, YahooTimeseriesPoint[]>;
@@ -159,20 +160,19 @@ export function parseYahooTimeseries(results: Array<Record<string, any>>): Yahoo
         asOfDate: point?.asOfDate,
         currency: typeof point?.currencyCode === "string" ? point.currencyCode : undefined,
         periodType: point?.periodType,
-        value: point?.reportedValue?.raw,
+        // Keep a dated unavailable observation: dropping it would make an older
+        // value appear to be the current reporting period.
+        value: typeof point?.reportedValue?.raw === "number" && Number.isFinite(point.reportedValue.raw)
+          ? point.reportedValue.raw : undefined,
       }))
-      .filter((point: any) =>
-        typeof point.asOfDate === "string" &&
-        typeof point.value === "number" &&
-        Number.isFinite(point.value)
-      );
+      .filter((point: YahooTimeseriesPoint) => isFinancialPeriodDate(point.asOfDate));
   }
   return parsed;
 }
 
 export function latestYahooMetric(metrics: YahooTimeseriesMetrics, type: string): number | undefined {
-  const points = metrics[type];
-  return points?.length ? points[points.length - 1]!.value : undefined;
+  const value = latestFinancialPeriod(metrics[type], point => point.asOfDate)?.value;
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 export function computeYahooReturn(history: PricePoint[], years: 1 | 3): number | undefined {
@@ -188,10 +188,11 @@ export function buildYahooStatements(
   const byDate = new Map<string, FinancialStatement>();
   const assign = (type: string, field: keyof FinancialStatement) => {
     for (const point of metrics[type] || []) {
+      if (!isFinancialPeriodDate(point.asOfDate)) continue;
       const row = byDate.get(point.asOfDate) || { date: point.asOfDate };
       if (row.currency && point.currency && row.currency !== point.currency) continue;
       if (point.currency) row.currency = point.currency;
-      (row as any)[field] = point.value;
+      (row as any)[field] = typeof point.value === "number" && Number.isFinite(point.value) ? point.value : undefined;
       byDate.set(point.asOfDate, row);
     }
   };

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { buildYahooStatements, computeYahooReturn } from "./financials";
+import { buildYahooStatements, computeYahooReturn, latestYahooMetric, parseYahooTimeseries } from "./financials";
 import { loadYahooTickerFinancials } from "./snapshots";
 
 test("Yahoo preserves report currency and calculates operating margin from operating income", async () => {
@@ -55,4 +55,54 @@ test("Yahoo calendar horizons preserve zero and use the covered year boundary ac
   expect(computeYahooReturn(history, 1)).toBe(0);
   expect(computeYahooReturn(history, 3)).toBeUndefined();
   expect(computeYahooReturn([...history].reverse(), 1)).toBe(0);
+});
+
+test("Yahoo latest metrics use the reported calendar period, retaining zero and final equal-period source precedence", async () => {
+  const points = [
+    { asOfDate: "2025-12-31", currencyCode: "USD", reportedValue: { raw: 20 } },
+    { asOfDate: "2023-12-31", currencyCode: "USD", reportedValue: { raw: 100 } },
+    { asOfDate: "2025-12-31", currencyCode: "USD", reportedValue: { raw: 0 } },
+    { asOfDate: "2024-12-31", currencyCode: "USD", reportedValue: { raw: 200 } },
+  ];
+  const raw = [{ meta: { type: ["annualTotalRevenue"] }, annualTotalRevenue: points }];
+  const financials = await loadYahooTickerFinancials("PERIOD", {
+    providerId: "yahoo", fetchAssetProfile: async () => undefined,
+    fetchChart: async () => ({ meta: { currency: "USD", regularMarketPrice: 10 }, history: [{ date: new Date("2026-09-11"), close: 10 }] }),
+    fetchExtendedHoursData: async () => ({}), fetchQuoteSupplement: async () => ({}), fetchTimeseries: async () => raw,
+  });
+  expect(financials.fundamentals?.revenue).toBe(0);
+  expect(financials.annualStatements.at(-1)).toMatchObject({ date: "2025-12-31", totalRevenue: 0 });
+  expect(points.map(point => point.asOfDate)).toEqual(["2025-12-31", "2023-12-31", "2025-12-31", "2024-12-31"]);
+  const invalid = parseYahooTimeseries([{ meta: { type: ["annualTotalRevenue"] }, annualTotalRevenue: [
+    { asOfDate: "TTM", reportedValue: { raw: 200 } }, { asOfDate: "2026-02-29", reportedValue: { raw: 300 } },
+  ] }]);
+  expect(latestYahooMetric(invalid, "annualTotalRevenue")).toBeUndefined();
+  expect(latestYahooMetric(invalid, "annualNetIncome")).toBeUndefined();
+});
+
+
+test("Yahoo dated missing latest metrics preserve the period without borrowing old values or coercing zero", async () => {
+  for (const missing of [null, undefined, NaN, Infinity, "0"]) {
+    const point = (asOfDate: string, raw: unknown) => ({ asOfDate, currencyCode: "USD", reportedValue: { raw } });
+    const raw = [
+      { meta: { type: ["annualTotalRevenue"] }, annualTotalRevenue: [point("2025-12-31", 123), point("2025-12-31", missing), point("2024-12-31", 200)] },
+      { meta: { type: ["annualDilutedEPS"] }, annualDilutedEPS: [point("2024-12-31", 2), point("2025-12-31", missing)] },
+      { meta: { type: ["quarterlyTotalRevenue"] }, quarterlyTotalRevenue: [point("2026-06-30", 0), point("2026-03-31", 50)] },
+      { meta: { type: ["annualNetIncome"] }, annualNetIncome: [point("2026-02-29", 10), point("TTM", 20)] },
+    ];
+    const financials = await loadYahooTickerFinancials("PERIOD", {
+      providerId: "yahoo", fetchAssetProfile: async () => undefined,
+      fetchChart: async () => ({ meta: { currency: "USD", regularMarketPrice: 10 }, history: [{ date: new Date("2026-09-11"), close: 10 }] }),
+      fetchExtendedHoursData: async () => ({}), fetchQuoteSupplement: async () => ({}), fetchTimeseries: async () => raw,
+    });
+    expect(financials.fundamentals?.revenue).toBeUndefined();
+    expect(financials.fundamentals?.eps).toBeUndefined();
+    expect(financials.fundamentals?.netIncome).toBeUndefined();
+    expect(financials.annualStatements.map(row => row.date)).toEqual(["2024-12-31", "2025-12-31"]);
+    expect(financials.annualStatements.at(-1)).toMatchObject({ date: "2025-12-31", currency: "USD" });
+    expect(financials.annualStatements.at(-1)?.totalRevenue).toBeUndefined();
+    expect(financials.annualStatements.at(-1)?.eps).toBeUndefined();
+    expect(financials.quarterlyStatements.at(-1)?.totalRevenue).toBe(0);
+    expect(JSON.parse(JSON.stringify(financials)).annualStatements.at(-1).totalRevenue).toBeUndefined();
+  }
 });
