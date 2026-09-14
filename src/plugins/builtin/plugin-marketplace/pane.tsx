@@ -1,76 +1,93 @@
-import { KeyValueRow } from "../../../components";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { PaneStatusBody } from "../../../components";
 
 import {
+  ConfirmDialog,
   DataTableStackView,
   InputSearchBar,
+  KeyValueRow,
+  PaneStatusBody,
+  SegmentedControl,
   useExternalLinkFooter,
   type DataTableCell,
   type DataTableColumn,
   type DataTableKeyEvent,
-  type PaneFooterSegment
+  type PaneFooterSegment,
+  type PaneHint,
 } from "../../../components";
-import { useShortcut } from "../../../react/input";
 import { colors } from "../../../theme/colors";
 import type { PaneProps } from "../../../types/plugin";
 import { Box, ScrollBox, Text, TextAttributes, type InputRenderable } from "../../../ui";
-import { formatCompact } from "../../../utils/format";
-import { isPlainKey } from "../../../utils/keyboard";
+import { type PromptContext, useDialog } from "../../../ui/dialog";
+import { isPlainKeyboardEvent } from "../../../utils/keyboard";
 import { formatRelativeAge } from "../../../utils/relative-time";
 import { getCurrentPluginTarget, runsExternalPlugins } from "../../current-target";
+import { pluginSetupCommandId } from "../../registry/setup-command";
+import { usePluginAppActions } from "../../runtime";
+import { DEBUG_LOG_TEMPLATE_ID } from "../debug/template";
 import { loadRegistry, registryPluginUrl } from "./feed";
 import {
+  buildRows,
+  collectCategories,
   filterEntries,
+  hasUpdate,
   isInstallable,
+  isManaged,
   mergeCatalog,
+  registryPin,
+  SECTION_LABELS,
   sortEntries,
-  unsupportedLabel,
+  statusOf,
+  versionLabel,
   type MarketplaceEntry,
-  type RegistryPlugin
+  type MarketplaceRow,
+  type MarketplaceStatusKind,
+  type RegistryPlugin,
 } from "./model";
-import { getMarketplaceHost, getPluginInstaller } from "./store";
+import { getMarketplaceHost, getPluginManager, type MarketplaceHost, type PluginManager } from "./store";
 
-export const PLUGIN_MARKETPLACE_PANE_ID = "plugin-marketplace";
+import { PLUGIN_MARKETPLACE_PANE_ID } from "./ids";
 
-type Column = DataTableColumn & { id: "name" | "tagline" | "stars" | "status" };
+export { PLUGIN_MARKETPLACE_PANE_ID } from "./ids";
+
+type Column = DataTableColumn & { id: "name" | "tagline" | "version" | "status" };
 
 function buildColumns(width: number): Column[] {
-  const starsWidth = 6;
+  const versionWidth = 16;
   const statusWidth = 14;
-  const nameWidth = Math.min(26, Math.max(14, Math.floor(width * 0.24)));
-  const taglineWidth = Math.max(16, width - nameWidth - starsWidth - statusWidth - 8);
+  const nameWidth = Math.min(24, Math.max(14, Math.floor(width * 0.22)));
+  const taglineWidth = Math.max(16, width - nameWidth - versionWidth - statusWidth - 8);
   return [
     { id: "name", label: "PLUGIN", width: nameWidth, align: "left" },
     { id: "tagline", label: "DESCRIPTION", width: taglineWidth, align: "left" },
-    { id: "stars", label: "STARS", width: starsWidth, align: "right" },
+    { id: "version", label: "VERSION", width: versionWidth, align: "right" },
     { id: "status", label: "STATUS", width: statusWidth, align: "left" },
   ];
 }
 
-function statusOf(
-  entry: MarketplaceEntry,
-  installedNow: readonly string[],
-): { text: string; color: string } {
-  if (installedNow.includes(entry.id)) return { text: "restart to load", color: colors.warning };
-  if (entry.loadError) return { text: "failed", color: colors.negative };
-  const unsupported = unsupportedLabel(entry);
-  if (unsupported) return { text: unsupported.toLowerCase(), color: colors.warning };
-  if (entry.bundled) return { text: "included", color: colors.textDim };
-  if (entry.installed) {
-    return entry.enabled
-      ? { text: "enabled", color: colors.positive }
-      : { text: "disabled", color: colors.textDim };
-  }
-  return { text: "available", color: colors.textBright };
+const STATUS_COLORS: Record<MarketplaceStatusKind, string> = {
+  failed: colors.negative,
+  "needs-restart": colors.warning,
+  unsupported: colors.warning,
+  "needs-setup": colors.warning,
+  update: colors.textBright,
+  errors: colors.warning,
+  enabled: colors.positive,
+  disabled: colors.textDim,
+  none: colors.textDim,
+};
+
+function rowKey(row: MarketplaceRow): string {
+  return row.type === "header" ? `header:${row.section}` : row.entry.id;
 }
 
 function renderCell(
-  entry: MarketplaceEntry,
+  row: MarketplaceRow,
   column: Column,
   rowState: { selected: boolean },
-  installedNow: readonly string[],
+  busyId: string | null,
 ): DataTableCell {
+  if (row.type === "header") return { text: "" };
+  const { entry } = row;
   const selected = rowState.selected ? colors.selectedText : undefined;
 
   switch (column.id) {
@@ -82,35 +99,48 @@ function renderCell(
       };
     case "tagline":
       return { text: entry.tagline, color: selected ?? colors.textDim };
-    case "stars":
-      return {
-        text: entry.bundled || entry.stars === 0 ? "—" : formatCompact(entry.stars),
-        color: selected ?? colors.textDim,
-      };
+    case "version": {
+      const update = hasUpdate(entry);
+      return { text: versionLabel(entry), color: selected ?? (update ? colors.textBright : colors.textDim) };
+    }
     case "status": {
-      const status = statusOf(entry, installedNow);
-      return { text: status.text, color: rowState.selected ? colors.selectedText : status.color };
+      if (busyId === entry.id) return { text: "working", color: selected ?? colors.textDim };
+      const status = statusOf(entry);
+      return { text: status.text, color: selected ?? STATUS_COLORS[status.kind] };
     }
   }
 }
 
+function describeContributions(entry: MarketplaceEntry, host: MarketplaceHost | null): string[] {
+  const parts: string[] = [];
+  const live = entry.installed && host ? host.contributions(entry.id) : null;
+  const panes = live ? live.panes.length : entry.contributes?.panes.length ?? 0;
+  const capabilities = live ? live.capabilities : entry.contributes?.capabilities.length ?? 0;
+  const commands = live ? live.commands.length : 0;
+  if (panes > 0) parts.push(`${panes} pane${panes === 1 ? "" : "s"}`);
+  if (capabilities > 0) parts.push(`${capabilities} data source${capabilities === 1 ? "" : "s"}`);
+  if (commands > 0) parts.push(`${commands} command${commands === 1 ? "" : "s"}`);
+  if (live ? live.broker : entry.contributes?.broker) parts.push("a broker integration");
+  return parts;
+}
 
-function EntryDetail({ entry, width }: { entry: MarketplaceEntry; width: number }) {
-  const contributes: string[] = [];
-  if (entry.contributes) {
-    const { panes, capabilities, broker } = entry.contributes;
-    if (panes.length > 0) contributes.push(`${panes.length} pane${panes.length === 1 ? "" : "s"}`);
-    if (capabilities.length > 0) contributes.push(`${capabilities.length} data source${capabilities.length === 1 ? "" : "s"}`);
-    if (broker) contributes.push("a broker integration");
-  }
+function EntryDetail({ entry, width, host }: { entry: MarketplaceEntry; width: number; host: MarketplaceHost | null }) {
+  const contributes = describeContributions(entry, host);
+  const live = entry.installed && host ? host.contributions(entry.id) : null;
+  const opensWith = live
+    ? live.templates.map((template) => template.prefix ?? template.label).filter(Boolean)
+    : [];
+  const rowWidth = Math.max(1, width - 2);
+  const status = statusOf(entry);
 
   return (
     <ScrollBox flexDirection="column" width={width} paddingLeft={1} paddingRight={1}>
       <Box flexDirection="row" gap={2} height={1}>
         <Text fg={colors.textDim}>{entry.tier}</Text>
-        <Text fg={colors.textDim}>{entry.categories.join(", ")}</Text>
-        {entry.installedVersion ? <Text fg={colors.textDim}>{`v${entry.installedVersion}`}</Text> : null}
-        {!entry.bundled && entry.stars > 0 ? <Text fg={colors.textDim}>{`${entry.stars} stars`}</Text> : null}
+        {entry.categories.length > 0 ? <Text fg={colors.textDim}>{entry.categories.join(", ")}</Text> : null}
+        {versionLabel(entry) ? <Text fg={hasUpdate(entry) ? colors.textBright : colors.textDim}>{`v${versionLabel(entry)}`}</Text> : null}
+        {!entry.bundled && entry.stars > 0 ? <Text fg={colors.textDim}>{`${entry.stars} star${entry.stars === 1 ? "" : "s"}`}</Text> : null}
+        {status.text ? <Text fg={STATUS_COLORS[status.kind]}>{status.text}</Text> : null}
       </Box>
 
       {entry.description ? (
@@ -120,15 +150,22 @@ function EntryDetail({ entry, width }: { entry: MarketplaceEntry; width: number 
       ) : null}
 
       <Box paddingTop={1} flexDirection="column">
-        {contributes.length > 0 ? <KeyValueRow labelWidth={10} width={Math.max(1, width - 2)} emphasis={false} label="Adds" value={contributes.join(", ")} /> : null}
+        {contributes.length > 0 ? <KeyValueRow labelWidth={10} width={rowWidth} emphasis={false} label="Adds" value={contributes.join(", ")} /> : null}
+        {opensWith.length > 0 ? <KeyValueRow labelWidth={10} width={rowWidth} emphasis={false} label="Opens with" value={opensWith.join(", ")} /> : null}
         {/*
           * Declared by the plugin author and not enforced: plugins are not
           * sandboxed, so this is a hint about intent, not a limit. Labelled
           * "Declares" rather than "Network" so it does not read as a guarantee.
           */}
-        {entry.hosts.length > 0 ? <KeyValueRow labelWidth={10} width={Math.max(1, width - 2)} emphasis={false} label="Declares" value={entry.hosts.join(", ")} /> : null}
-        {entry.repo ? <KeyValueRow labelWidth={10} width={Math.max(1, width - 2)} emphasis={false} label="Source" value={`github.com/${entry.repo}`} /> : null}
-        {entry.loadError ? <KeyValueRow labelWidth={10} width={Math.max(1, width - 2)} emphasis={false} label="Error" value={entry.loadError} /> : null}
+        {entry.hosts.length > 0 ? <KeyValueRow labelWidth={10} width={rowWidth} emphasis={false} label="Declares" value={entry.hosts.join(", ")} /> : null}
+        {entry.repo ? <KeyValueRow labelWidth={10} width={rowWidth} emphasis={false} label="Source" value={`github.com/${entry.repo}`} /> : null}
+        {entry.minGloomberb ? <KeyValueRow labelWidth={10} width={rowWidth} emphasis={false} label="Requires" value={`Gloomberb ${entry.minGloomberb}`} /> : null}
+        {entry.linked ? <KeyValueRow labelWidth={10} width={rowWidth} emphasis={false} label="Linked" value={entry.directory ?? "local checkout"} /> : null}
+        {entry.installedCommit ? <KeyValueRow labelWidth={10} width={rowWidth} emphasis={false} label="Commit" value={entry.installedCommit.slice(0, 7)} /> : null}
+        {!entry.installed && entry.availableCommit ? <KeyValueRow labelWidth={10} width={rowWidth} emphasis={false} label="Pinned" value={`${entry.availableVersion ?? ""} ${entry.availableCommit.slice(0, 7)}`.trim()} /> : null}
+        {entry.needsSetup ? <KeyValueRow labelWidth={10} width={rowWidth} emphasis={false} label="Setup" value="Missing a required setting. Press s." /> : null}
+        {entry.loadError ? <KeyValueRow labelWidth={10} width={rowWidth} emphasis={false} label="Error" value={entry.loadError} /> : null}
+        {entry.lastError && !entry.loadError ? <KeyValueRow labelWidth={10} width={rowWidth} emphasis={false} label="Last error" value={entry.lastError} /> : null}
       </Box>
 
       {!entry.installed && !entry.bundled && entry.repo ? (
@@ -150,13 +187,17 @@ function EntryDetail({ entry, width }: { entry: MarketplaceEntry; width: number 
   );
 }
 
+type Busy = { id: string; verb: "installing" | "updating" | "removing" } | null;
+
 export function PluginMarketplacePane({ focused, width, height }: PaneProps) {
+  const dialog = useDialog();
+  const { createPaneFromTemplate, showPane, openPluginCommandWorkflow, notify } = usePluginAppActions();
   const [query, setQuery] = useState("");
+  const [category, setCategory] = useState<string | null>(null);
+  const [showBuiltin, setShowBuiltin] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [searchFocused, setSearchFocused] = useState(false);
-  // null keeps the curated order: featured first, then tier, then stars.
-  const [sortColumn, setSortColumn] = useState<"name" | "stars" | null>(null);
   const [searchFocusToken, setSearchFocusToken] = useState(0);
   const searchInputRef = useRef<InputRenderable | null>(null);
 
@@ -164,13 +205,10 @@ export function PluginMarketplacePane({ focused, width, height }: PaneProps) {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [stale, setStale] = useState(false);
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
-  // Bumped after a toggle or install so the list is re-read from the host.
+  // Bumped after any local change so the list is re-read from the host.
   const [localRevision, setLocalRevision] = useState(0);
-  const [installing, setInstalling] = useState<string | null>(null);
-  const [installError, setInstallError] = useState<string | null>(null);
-  // Installed during this session. A plugin is only registered at startup, so
-  // saying "enabled" here would be a lie — the pane it adds is not there yet.
-  const [installedNow, setInstalledNow] = useState<readonly string[]>([]);
+  const [busy, setBusy] = useState<Busy>(null);
+  const [lastError, setLastError] = useState<string | null>(null);
 
   const refresh = useCallback((force: boolean) => {
     setStatus((current) => (current === "ready" ? current : "loading"));
@@ -184,24 +222,31 @@ export function PluginMarketplacePane({ focused, width, height }: PaneProps) {
 
   useEffect(() => refresh(false), [refresh]);
 
+  const host = getMarketplaceHost();
+  const manager = getPluginManager();
   const target = getCurrentPluginTarget();
   const entries = useMemo(() => {
     void localRevision;
-    const installed = getMarketplaceHost()?.listInstalled() ?? [];
+    const installed = host?.listInstalled() ?? [];
     return sortEntries(mergeCatalog({ registry, installed, target }));
-  }, [registry, target, localRevision]);
+  }, [host, registry, target, localRevision]);
 
-  const rows = useMemo(() => {
-    const filtered = filterEntries(entries, { query, category: null });
-    if (sortColumn === "name") return [...filtered].sort((a, b) => a.name.localeCompare(b.name));
-    if (sortColumn === "stars") return [...filtered].sort((a, b) => b.stars - a.stars);
-    return filtered;
-  }, [entries, query, sortColumn]);
+  const visible = useMemo(
+    () => filterEntries(entries, { query, category, showBuiltin }),
+    [entries, query, category, showBuiltin],
+  );
+  const categories = useMemo(
+    () => collectCategories(filterEntries(entries, { query: "", category: null, showBuiltin })),
+    [entries, showBuiltin],
+  );
+  const rows = useMemo(() => buildRows(visible), [visible]);
 
   const selected = useMemo(
-    () => rows.find((entry) => entry.id === selectedId) ?? rows[0] ?? null,
-    [rows, selectedId],
+    () => visible.find((entry) => entry.id === selectedId) ?? visible[0] ?? null,
+    [visible, selectedId],
   );
+
+  const bump = useCallback(() => setLocalRevision((value) => value + 1), []);
 
   const focusSearch = useCallback(() => {
     setSearchFocused(true);
@@ -209,115 +254,270 @@ export function PluginMarketplacePane({ focused, width, height }: PaneProps) {
   }, []);
   const blurSearch = useCallback(() => setSearchFocused(false), []);
 
-  const toggleSelected = useCallback(() => {
-    const host = getMarketplaceHost();
-    if (!host || !selected || !selected.installed || !selected.toggleable) return;
-    host.setPluginEnabled(selected.id, !selected.enabled);
-    setLocalRevision((value) => value + 1);
-  }, [selected]);
+  const cycleCategory = useCallback(() => {
+    setCategory((current) => {
+      if (categories.length === 0) return null;
+      const index = current ? categories.indexOf(current) : -1;
+      const next = categories[index + 1];
+      return next ?? null;
+    });
+  }, [categories]);
 
-  const installSelected = useCallback(() => {
-    const install = getPluginInstaller();
-    if (!selected || !isInstallable(selected) || !install || installing) return;
-    if (installedNow.includes(selected.id)) return;
+  const confirm = useCallback((options: {
+    title: string;
+    body: string[];
+    confirmLabel: string;
+    danger?: boolean;
+  }) => dialog.prompt<boolean>({
+    closeOnClickOutside: true,
+    content: (ctx: PromptContext<boolean>) => (
+      <ConfirmDialog
+        {...ctx}
+        title={options.title}
+        body={options.body}
+        confirmLabel={options.confirmLabel}
+        cancelLabel="Cancel"
+        confirmVariant={options.danger ? "danger" : "primary"}
+        width={Math.min(64, Math.max(44, width - 8))}
+        footer={`Enter ${options.confirmLabel.toLowerCase()} · Esc cancel`}
+      />
+    ),
+  }).catch(() => false), [dialog, width]);
+
+  /**
+   * Brings a freshly installed or updated checkout into this session. What
+   * cannot be activated is still recorded, with its error, so the row says
+   * `failed` and the detail says why rather than the plugin simply not
+   * appearing until a restart.
+   */
+  const activate = useCallback(async (
+    directory: string,
+    activeHost: MarketplaceHost,
+    activeManager: PluginManager,
+  ): Promise<{ ok: true; pluginId: string; name: string } | { ok: false; error: string }> => {
+    const loaded = await activeManager.load(directory);
+    if (!loaded) return { ok: false, error: "The plugin has no entry file." };
+    if (loaded.error) {
+      await activeHost.activate(loaded).catch(() => {});
+      return { ok: false, error: loaded.error };
+    }
+    try {
+      await activeHost.activate(loaded);
+      return { ok: true, pluginId: loaded.plugin.id, name: loaded.plugin.name };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }, []);
+
+  const announceAdded = useCallback((pluginId: string, name: string, verb: string, activeHost: MarketplaceHost) => {
+    const added = activeHost.contributions(pluginId);
+    const parts: string[] = [];
+    if (added.panes.length > 0) parts.push(`${added.panes.length} pane${added.panes.length === 1 ? "" : "s"}`);
+    if (added.commands.length > 0) parts.push(`${added.commands.length} command${added.commands.length === 1 ? "" : "s"}`);
+    if (added.capabilities > 0) parts.push(`${added.capabilities} data source${added.capabilities === 1 ? "" : "s"}`);
+    if (added.broker) parts.push("a broker");
+    const firstTemplate = added.templates[0];
+    const firstPane = added.panes[0];
+    notify({
+      body: parts.length > 0 ? `${verb} ${name}: ${parts.join(", ")}.` : `${verb} ${name}.`,
+      type: "success",
+      ...(firstTemplate || firstPane
+        ? {
+          action: {
+            label: "Open",
+            onClick: () => {
+              if (firstTemplate) createPaneFromTemplate(firstTemplate.id);
+              else if (firstPane) showPane(firstPane.id);
+            },
+          },
+        }
+        : {}),
+    });
+  }, [createPaneFromTemplate, notify, showPane]);
+
+  const installSelected = useCallback(async () => {
+    if (!selected || !isInstallable(selected) || !manager || !host || busy) return;
     // Installs address the repository, not the plugin id: there is no central
     // name resolution, so owner/repo is the only unambiguous reference.
     const repo = selected.repo;
     if (!repo) return;
-    const target = selected.id;
-    setInstalling(target);
-    setInstallError(null);
-    void install(repo).then((result) => {
-      setInstalling(null);
-      if (result.ok) {
-        setInstalledNow((current) => [...current, target]);
-        setLocalRevision((value) => value + 1);
-        return;
-      }
-      setInstallError(result.error ?? "Install failed.");
+    const pin = registryPin(selected);
+    const body = [
+      `${selected.name} runs with your full permissions. It is not sandboxed.`,
+      `Source: github.com/${repo}${pin?.ref ? ` at ${pin.ref}` : ""}${pin?.commit ? ` (${pin.commit.slice(0, 7)})` : ""}`,
+      selected.tier === "official" ? "Published by Gloom." : selected.tier === "verified" ? "Reviewed by Gloom." : "Community plugin, not reviewed.",
+      ...(selected.hosts.length > 0 ? [`Declares access to ${selected.hosts.join(", ")}.`] : []),
+    ];
+    const confirmed = await confirm({ title: `Install ${selected.name}?`, body, confirmLabel: "Install" });
+    if (!confirmed) return;
+
+    const entry = selected;
+    setBusy({ id: entry.id, verb: "installing" });
+    setLastError(null);
+    const result = await manager.install(repo, pin);
+    if (!result.ok) {
+      setBusy(null);
+      setLastError(result.error);
+      notify({ body: `Could not install ${entry.name}: ${result.error}`, type: "error" });
+      return;
+    }
+    const activated = await activate(result.directory, host, manager);
+    setBusy(null);
+    bump();
+    if (activated.ok) announceAdded(activated.pluginId, activated.name, "Installed", host);
+    else notify({ body: `${entry.name} installed but did not load: ${activated.error}`, type: "error" });
+  }, [activate, announceAdded, bump, busy, confirm, host, manager, notify, selected]);
+
+  const updateSelected = useCallback(async () => {
+    if (!selected || !isManaged(selected) || !manager || !host || busy || selected.linked) return;
+    const directory = selected.directory!;
+    const entry = selected;
+    const reinstall = !!entry.loadError;
+    setBusy({ id: entry.id, verb: "updating" });
+    setLastError(null);
+    const result = await manager.update(directory, registryPin(entry));
+    if (!result.ok) {
+      setBusy(null);
+      setLastError(result.error);
+      notify({ body: `Could not update ${entry.name}: ${result.error}`, type: "error" });
+      return;
+    }
+    const activated = await activate(directory, host, manager);
+    setBusy(null);
+    bump();
+    if (activated.ok) announceAdded(activated.pluginId, activated.name, reinstall ? "Reloaded" : "Updated", host);
+    else notify({ body: `${entry.name} updated but did not load: ${activated.error}`, type: "error" });
+  }, [activate, announceAdded, bump, busy, host, manager, notify, selected]);
+
+  const removeSelected = useCallback(async () => {
+    if (!selected || !isManaged(selected) || !manager || !host || busy) return;
+    const entry = selected;
+    const confirmed = await confirm({
+      title: `Remove ${entry.name}?`,
+      body: entry.linked
+        ? ["Removes the link. Your local checkout is left alone."]
+        : [`Deletes ~/.gloomberb/plugins/${entry.directory}.`, "Its panes close now. Settings it saved are kept."],
+      confirmLabel: "Remove",
+      danger: true,
     });
-  }, [installedNow, installing, selected]);
+    if (!confirmed) return;
+    setBusy({ id: entry.id, verb: "removing" });
+    setLastError(null);
+    await host.deactivate(entry.id).catch(() => {});
+    const result = await manager.remove(entry.directory!);
+    setBusy(null);
+    bump();
+    if (result.ok) notify({ body: `Removed ${entry.name}.`, type: "success" });
+    else {
+      setLastError(result.error);
+      notify({ body: `Could not remove ${entry.name}: ${result.error}`, type: "error" });
+    }
+  }, [bump, busy, confirm, host, manager, notify, selected]);
+
+  const toggleSelected = useCallback(() => {
+    if (!host || !selected || !selected.installed || !selected.toggleable || selected.loadError) return;
+    host.setPluginEnabled(selected.id, !selected.enabled);
+    bump();
+  }, [bump, host, selected]);
+
+  const setupSelected = useCallback(() => {
+    if (!selected || !selected.installed || !selected.hasSetup || !selected.enabled) return;
+    openPluginCommandWorkflow(pluginSetupCommandId(selected.id));
+  }, [openPluginCommandWorkflow, selected]);
+
+  const openSelected = useCallback(() => {
+    if (!host || !selected || !selected.installed || !selected.enabled || selected.loadError) return;
+    const added = host.contributions(selected.id);
+    const template = added.templates[0];
+    const pane = added.panes[0];
+    if (template) createPaneFromTemplate(template.id);
+    else if (pane) showPane(pane.id);
+  }, [createPaneFromTemplate, host, selected, showPane]);
+
+  const openLog = useCallback(() => {
+    if (!selected || !selected.installed) return;
+    createPaneFromTemplate(DEBUG_LOG_TEMPLATE_ID, { values: { source: selected.id } });
+  }, [createPaneFromTemplate, selected]);
+
+  const canOpen = !!selected && !!host && selected.installed && selected.enabled && !selected.loadError
+    && (host.contributions(selected.id).templates.length > 0 || host.contributions(selected.id).panes.length > 0);
+  const canInstall = !!selected && isInstallable(selected) && !!manager && !busy;
+  const canUpdate = !!selected && isManaged(selected) && !selected.linked && !!manager && !busy
+    && (hasUpdate(selected) || !!selected.loadError);
+  const canRemove = !!selected && isManaged(selected) && !!manager && !busy;
+  const canToggle = !!selected && selected.installed && selected.toggleable && !selected.loadError;
+  const canSetup = !!selected && selected.installed && selected.enabled && selected.hasSetup;
+  const canLog = !!selected && selected.installed && (selected.errorCount > 0 || !!selected.loadError);
+
+  const handleKey = useCallback((key: string): boolean => {
+    switch (key) {
+      case "i": void installSelected(); return true;
+      case "u": void updateSelected(); return true;
+      case "x": void removeSelected(); return true;
+      case "e": toggleSelected(); return true;
+      case "s": setupSelected(); return true;
+      case "p": openSelected(); return true;
+      case "l": openLog(); return true;
+      case "r": refresh(true); return true;
+      case "b": setShowBuiltin((value) => !value); return true;
+      case "c": cycleCategory(); return true;
+      case "/": focusSearch(); return true;
+      default: return false;
+    }
+  }, [cycleCategory, focusSearch, installSelected, openLog, openSelected, refresh, removeSelected, setupSelected, toggleSelected, updateSelected]);
 
   /**
-   * Pane keys go through the table's key handler rather than a global shortcut:
-   * while the DataTable holds key focus it consumes plain letters, so a
-   * `useShortcut` for "i" never fires.
+   * Pane keys go through the table's key handler, which runs while the pane
+   * is focused whether the list is full or empty, and through the detail
+   * view's when that is open. A global `useShortcut` on top would see the
+   * same press a second time and undo every toggle.
    */
   const handleRootKeyDown = useCallback((event: DataTableKeyEvent) => {
-    if (searchFocused) return;
-    const key = (event.name ?? "").toLowerCase();
-    if (key === "i") {
-      installSelected();
-      return true;
-    }
-    if (key === "e") {
-      toggleSelected();
-      return true;
-    }
-    if (key === "r") {
-      refresh(true);
-      return true;
-    }
-    if (key === "/") {
-      focusSearch();
-      return true;
-    }
-    return undefined;
-  }, [focusSearch, installSelected, refresh, searchFocused, toggleSelected]);
-
-  useShortcut((event) => {
-    if (!focused || searchFocused) return;
-    const key = (event.name ?? event.key ?? "").toLowerCase();
-    if (key === "r" && isPlainKey(event)) {
-      event.preventDefault?.();
-      refresh(true);
-      return;
-    }
-    if (key === "e" && isPlainKey(event)) {
-      event.preventDefault?.();
-      toggleSelected();
-      return;
-    }
-    if (key === "/" && isPlainKey(event)) {
-      event.preventDefault?.();
-      focusSearch();
-      return;
-    }
-    if (key === "i" && isPlainKey(event)) {
-      event.preventDefault?.();
-      installSelected();
-    }
-  });
+    if (searchFocused || !isPlainKeyboardEvent(event)) return;
+    return handleKey((event.name ?? "").toLowerCase()) ? true : undefined;
+  }, [handleKey, searchFocused]);
 
   const info: PaneFooterSegment[] = [];
   if (status === "loading") info.push({ id: "loading", parts: [{ text: "loading", tone: "muted" }] });
   if (status === "error") info.push({ id: "error", parts: [{ text: "catalog unavailable", tone: "warning" }] });
   if (stale) info.push({ id: "stale", parts: [{ text: "stale catalog", tone: "warning" }] });
-  if (installing) {
-    info.push({ id: "installing", parts: [{ text: `installing ${installing}`, tone: "muted" }] });
+  if (busy) {
+    const name = entries.find((entry) => entry.id === busy.id)?.name ?? busy.id;
+    info.push({ id: "busy", parts: [{ text: `${busy.verb} ${name}`, tone: "muted" }] });
   }
-  if (installError) info.push({ id: "install-error", parts: [{ text: installError, tone: "warning" }] });
-  if (installedNow.length > 0 && !installing) {
-    info.push({ id: "restart", parts: [{ text: "restart to load new plugins", tone: "warning" }] });
+  if (lastError && !busy) info.push({ id: "op-error", parts: [{ text: lastError, tone: "warning" }] });
+  const restartCount = entries.filter((entry) => entry.needsRestart).length;
+  if (restartCount > 0 && !busy) {
+    info.push({ id: "restart", parts: [{ text: "restart to finish loading", tone: "warning" }] });
   }
-  if (status === "ready" && fetchedAt && !stale) {
+  if (status === "ready" && fetchedAt && !stale && !busy) {
     info.push({ id: "updated", parts: [{ text: formatRelativeAge(fetchedAt), tone: "muted" }] });
   }
+
+  const hints: PaneHint[] = [];
+  if (canInstall) hints.push({ id: "install", key: "i", label: "nstall", onPress: () => { void installSelected(); } });
+  if (canUpdate) hints.push({ id: "update", key: "u", label: selected?.loadError ? "reload" : "pdate", onPress: () => { void updateSelected(); } });
+  if (canToggle) hints.push({ id: "toggle", key: "e", label: selected?.enabled ? "disable" : "nable", onPress: toggleSelected });
+  if (canSetup) hints.push({ id: "setup", key: "s", label: "etup", onPress: setupSelected });
+  if (canOpen) hints.push({ id: "open-pane", key: "p", label: "ane", onPress: openSelected });
+  if (canLog) hints.push({ id: "log", key: "l", label: "og", onPress: openLog });
+  if (canRemove) hints.push({ id: "remove", key: "x", label: " remove", onPress: () => { void removeSelected(); } });
+  hints.push({ id: "builtin", key: "b", label: showBuiltin ? "uilt in ✓" : "uilt in", onPress: () => setShowBuiltin((value) => !value) });
 
   useExternalLinkFooter({
     registrationId: PLUGIN_MARKETPLACE_PANE_ID,
     focused,
-    url: selected ? registryPluginUrl(selected.id) : null,
-    source: selected ? "gloom.sh" : null,
+    url: selected && !selected.bundled && selected.repo ? registryPluginUrl(selected.id) : null,
+    source: selected && !selected.bundled && selected.repo ? "gloom.sh" : null,
     info,
-    hints: selected && isInstallable(selected) && !installedNow.includes(selected.id) && getPluginInstaller()
-      ? [{ id: "install", key: "i", label: "nstall", onPress: installSelected }]
-      : selected?.installed && selected.toggleable
-        ? [{ id: "toggle", key: "e", label: selected.enabled ? "disable" : "nable", onPress: toggleSelected }]
-        : [],
+    hints,
   });
 
   const columns = useMemo(() => buildColumns(width), [width]);
+  const categoryOptions = useMemo(
+    () => [{ label: "all", value: "" }, ...categories.map((entry) => ({ label: entry, value: entry }))],
+    [categories],
+  );
 
   if (status === "loading" && entries.length === 0) {
     return (
@@ -329,54 +529,68 @@ export function PluginMarketplacePane({ focused, width, height }: PaneProps) {
 
   return (
     <Box flexDirection="column" width={width} height={height}>
-      <DataTableStackView<MarketplaceEntry, Column>
+      <DataTableStackView<MarketplaceRow, Column>
         focused={focused && !searchFocused}
         detailOpen={detailOpen && !!selected}
         onBack={() => setDetailOpen(false)}
-        detailContent={selected ? <EntryDetail entry={selected} width={width} /> : null}
+        detailContent={selected ? <EntryDetail entry={selected} width={width} host={host} /> : null}
         detailTitle={selected?.name}
         rootBefore={(
-          <InputSearchBar
-            value={query}
-            focused={focused && !detailOpen}
-            active={searchFocused}
-            width={width}
-            focusToken={searchFocusToken}
-            inputRef={searchInputRef}
-            placeholder="name or category"
-            debounceMs={80}
-            onFocus={focusSearch}
-            onBlur={blurSearch}
-            onNavigateDown={blurSearch}
-            onQueryChange={setQuery}
-          />
+          <Box flexDirection="column" width={width}>
+            <InputSearchBar
+              value={query}
+              focused={focused && !detailOpen}
+              active={searchFocused}
+              width={width}
+              focusToken={searchFocusToken}
+              inputRef={searchInputRef}
+              placeholder="name or category"
+              debounceMs={80}
+              onFocus={focusSearch}
+              onBlur={blurSearch}
+              onNavigateDown={blurSearch}
+              onQueryChange={setQuery}
+            />
+            {categories.length > 1 ? (
+              <Box height={1} width={width} paddingLeft={1}>
+                <SegmentedControl
+                  options={categoryOptions}
+                  value={category ?? ""}
+                  onChange={(value) => setCategory(value || null)}
+                  width={width - 2}
+                />
+              </Box>
+            ) : null}
+          </Box>
         )}
         selection={{
           kind: "id",
           selectedId: selected?.id ?? null,
-          getId: (entry) => entry.id,
-          onChange: (id) => setSelectedId(typeof id === "string" ? id : null),
+          getId: rowKey,
+          onChange: (_id, row) => {
+            if (row.type === "entry") setSelectedId(row.entry.id);
+          },
         }}
+        isNavigable={(row) => row.type === "entry"}
         onRootKeyDown={handleRootKeyDown}
         onDetailKeyDown={handleRootKeyDown}
-        onActivate={() => setDetailOpen(true)}
+        onActivate={(row) => {
+          if (row.type === "entry") setDetailOpen(true);
+        }}
         rootWidth={width}
         rootHeight={height}
         columns={columns}
         items={rows}
-        getItemKey={(entry) => entry.id}
-        sortColumnId={sortColumn}
-        sortDirection={sortColumn === "name" ? "asc" : "desc"}
-        onHeaderClick={(columnId) => {
-          // Only these two columns have a meaningful order; the rest keep the
-          // curated ranking rather than pretending to be sortable.
-          if (columnId === "name" || columnId === "stars") {
-            setSortColumn((current) => (current === columnId ? null : columnId));
-          }
-        }}
-        renderCell={(entry, column, _index, rowState) => renderCell(entry, column, rowState, installedNow)}
-        emptyStateTitle={status === "error" ? "Plugin catalog unavailable." : "No plugins match."}
-        emptyStateHint={status === "error" ? "Press r to retry." : undefined}
+        getItemKey={rowKey}
+        sortColumnId={null}
+        sortDirection="asc"
+        onHeaderClick={() => {}}
+        renderSectionHeader={(row) => row.type === "header"
+          ? { text: `${SECTION_LABELS[row.section]} (${row.count})` }
+          : null}
+        renderCell={(row, column, _index, rowState) => renderCell(row, column, rowState, busy?.id ?? null)}
+        emptyStateTitle={status === "error" ? "Plugin catalog unavailable." : query || category ? "No plugins match." : "Nothing installed yet."}
+        emptyStateHint={status === "error" ? "Press r to retry." : !query && !category ? "Press b to see built-in modules." : undefined}
       />
     </Box>
   );

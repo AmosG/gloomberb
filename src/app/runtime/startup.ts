@@ -5,6 +5,8 @@ import type { AppTickerRepositoryPort } from "../../core/app-service-ports";
 import type { MarketDataCoordinator } from "../../market-data/coordinator";
 import { instrumentFromTicker } from "../../market-data/request-types";
 import { chatController } from "../../plugins/builtin/chat/controller";
+import { PLUGIN_MARKETPLACE_PANE_ID } from "../../plugins/builtin/plugin-marketplace/ids";
+import type { LoadedExternalPlugin } from "../../plugins/loader";
 import type { PluginRegistry } from "../../plugins/registry";
 import type {
   AppAction,
@@ -26,7 +28,9 @@ interface UseAppStartupRuntimeOptions {
   autoImportBrokerPositions: InitializeAppStateArgs["autoImportBrokerPositions"];
   dataProvider: DataProvider;
   dispatch: Dispatch<AppAction>;
+  externalPlugins: readonly LoadedExternalPlugin[];
   focusedTickerSymbol: string | null;
+  isDetachedWindow?: boolean;
   marketData: MarketDataCoordinator;
   pluginRegistry: PluginRegistry;
   primeCachedFinancials: InitializeAppStateArgs["primeCachedFinancials"];
@@ -44,7 +48,9 @@ export function useAppStartupRuntime({
   autoImportBrokerPositions,
   dataProvider,
   dispatch,
+  externalPlugins,
   focusedTickerSymbol,
+  isDetachedWindow = false,
   marketData,
   pluginRegistry,
   primeCachedFinancials,
@@ -119,6 +125,32 @@ export function useAppStartupRuntime({
     state.initialized,
     tickerRepository,
   ]);
+
+  // A plugin that failed to import is otherwise silent: its panes are simply
+  // absent, and the reason sits in a pane the user has no cause to open. Say
+  // so once, with a way in. Unsupported-renderer entries are not failures.
+  useEffect(() => {
+    // Popped-out desktop panes load the same list; the main window owns the notice.
+    if (!state.initialized || isDetachedWindow) return;
+    const failed = externalPlugins.filter((entry) => entry.error && !entry.unsupportedTarget);
+    if (failed.length === 0) return;
+    const names = failed.map((entry) => entry.plugin.name);
+    const body = failed.length === 1
+      ? `${names[0]} failed to load.`
+      : `${failed.length} plugins failed to load: ${names.join(", ")}.`;
+    appLog.warn("external plugins failed to load", { plugins: failed.map((entry) => ({ id: entry.plugin.id, error: entry.error })) });
+    pluginRegistry.notify({
+      body,
+      type: "error",
+      persistent: true,
+      action: {
+        label: "Open Plugins",
+        onClick: () => pluginRegistry.showPane(PLUGIN_MARKETPLACE_PANE_ID),
+      },
+    });
+    // Once per process: `externalPlugins` is the startup list and never changes
+    // identity, so this runs when initialization flips and not again.
+  }, [externalPlugins, isDetachedWindow, pluginRegistry, state.initialized]);
 
   useEffect(() => {
     if (!focusedTickerSymbol) return;

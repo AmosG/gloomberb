@@ -4,7 +4,9 @@ import { useShortcut } from "../../../react/input";
 import { TextAttributes } from "../../../ui";
 import type { GloomPlugin, PaneProps } from "../../../types/plugin";
 import { ListView, usePaneFooter } from "../../../components";
+import { usePaneSettingValue } from "../../../state/app/context";
 import { usePluginAppActions } from "../../runtime";
+import { DEBUG_LOG_TEMPLATE_ID, DEBUG_PANE_ID, DEBUG_SOURCE_SETTING } from "./template";
 import { colors } from "../../../theme/colors";
 import { debugLog, type LogEntry, type LogLevel } from "../../../utils/debug-log";
 import { isPlainKey } from "../../../utils/keyboard";
@@ -61,14 +63,15 @@ function DebugPane({ focused, width, height }: PaneProps) {
   const { notify } = usePluginAppActions();
   const [entries, setEntries] = useState<LogEntry[]>(() => debugLog.getEntries());
   const [filterLevel, setFilterLevel] = useState<LogLevel | null>(null);
-  const [filterSource, setFilterSource] = useState<string | null>(null);
+  // Persisted with the pane so a log opened for one plugin stays on that plugin.
+  const [filterSource, setFilterSource] = usePaneSettingValue<string | null>(DEBUG_SOURCE_SETTING, null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [selectedIdx, setSelectedIdx] = useState(-1);
   const [showDetail, setShowDetail] = useState(false);
   const sourcesRef = useRef<string[]>(debugLog.getSources());
 
   useEffect(() => {
-    const unsub = debugLog.subscribe(() => {
+    const read = () => {
       const filtered = debugLog.getEntries(
         filterLevel || filterSource
           ? { level: filterLevel ?? undefined, source: filterSource ?? undefined }
@@ -76,8 +79,9 @@ function DebugPane({ focused, width, height }: PaneProps) {
       );
       setEntries(filtered);
       sourcesRef.current = debugLog.getSources();
-    });
-    return unsub;
+    };
+    read();
+    return debugLog.subscribe(read);
   }, [filterLevel, filterSource, autoScroll]);
 
   const exportLogs = useCallback(() => {
@@ -326,13 +330,31 @@ export const debugPlugin: GloomPlugin = {
 
   setup(ctx) {
     ctx.registerPane({
-      id: "debug",
+      id: DEBUG_PANE_ID,
       name: "Debug Log",
       icon: "D",
       component: DebugPane,
       defaultPosition: "right",
       defaultMode: "floating",
       defaultFloatingSize: { width: 120, height: 30 },
+      settings: {
+        title: "Debug Log",
+        fields: [
+          { key: DEBUG_SOURCE_SETTING, label: "Source", type: "text", placeholder: "plugin id" },
+        ],
+      },
+    });
+
+    ctx.registerPaneTemplate({
+      id: DEBUG_LOG_TEMPLATE_ID,
+      paneId: DEBUG_PANE_ID,
+      label: "Debug Log",
+      description: "Open the debug log, optionally filtered to one source",
+      keywords: ["debug", "log", "errors"],
+      createInstance: (_context, options) => ({
+        placement: "floating",
+        ...(options?.values?.source ? { title: `Log: ${options.values.source}`, settings: { [DEBUG_SOURCE_SETTING]: options.values.source } } : {}),
+      }),
     });
 
     ctx.registerCommand({

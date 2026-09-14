@@ -199,10 +199,56 @@ export function createSystemCliCommands(allCommands: () => CliCommandDef[]): Cli
 
   const pluginCommand: CliCommandDef = {
     name: "plugin",
-    description: "Inspect, enable, disable, or doctor plugins",
-    help: { usage: ["plugin list", "plugin info <id>", "plugin enable <id>", "plugin disable <id>", "plugin doctor"] },
+    description: "Inspect, enable, disable, link, or doctor plugins",
+    help: {
+      usage: [
+        "plugin list",
+        "plugin info <id>",
+        "plugin enable <id>",
+        "plugin disable <id>",
+        "plugin doctor [name-or-path]",
+        "plugin link <path>",
+      ],
+      sections: [{
+        title: "Developing a plugin",
+        lines: [
+          "link puts a symlink to a local checkout in the plugins folder, so edits are live on the next start.",
+          "doctor checks an installed or linked plugin the way the app and the desktop build will: entry, export,",
+          "id, targets, declared hosts, and the browser bundle. Run it before publishing.",
+        ],
+      }],
+    },
     execute: async (args, ctx) => {
       const action = args[0] ?? "list";
+      // These work on the folder, not the running registry, so a plugin that
+      // fails to load can still be inspected and repaired.
+      if (action === "doctor") {
+        const { doctorPlugins } = await import("./plugins");
+        const reports = await doctorPlugins(args[1]);
+        ctx.printResult({ data: reports }, {
+          rows: (data) => data.flatMap((report) => report.checks.map((check) => ({
+            plugin: report.name ?? report.directory,
+            check: check.id,
+            status: check.status,
+            detail: check.message,
+          }))),
+          columns: [
+            { key: "plugin", header: "Plugin" },
+            { key: "check", header: "Check" },
+            { key: "status", header: "Status" },
+            { key: "detail", header: "Detail" },
+          ],
+        });
+        if (reports.some((report) => report.status === "fail")) process.exitCode = 1;
+        return;
+      }
+      if (action === "link") {
+        const path = requireArg(args[1], "Usage: gloomberb plugin link <path>", ctx);
+        const { linkPlugin } = await import("./plugins");
+        const info = await linkPlugin(path, { quiet: ctx.cliOptions.format !== "text" });
+        if (ctx.cliOptions.format !== "text") ctx.printResult({ data: info });
+        return;
+      }
       await withCliServices(ctx, async (services) => {
         const pluginRows = () => [...services.services.pluginRegistry.allPlugins.values()].map((plugin) => ({
           id: plugin.id,
@@ -216,7 +262,7 @@ export function createSystemCliCommands(allCommands: () => CliCommandDef[]): Cli
           )).length,
         }));
 
-        if (action === "list" || action === "doctor") {
+        if (action === "list") {
           ctx.printResult({ data: pluginRows() });
           return;
         }
@@ -241,7 +287,7 @@ export function createSystemCliCommands(allCommands: () => CliCommandDef[]): Cli
           ctx.printResult({ data: { changed: before !== disabled.has(id) && !ctx.cliOptions.dryRun, dryRun: ctx.cliOptions.dryRun, id, enabled: !disabled.has(id) } });
           return;
         }
-        ctx.fail("Usage: gloomberb plugin list|info|enable|disable|doctor");
+        ctx.fail("Usage: gloomberb plugin list|info|enable|disable|doctor|link");
       });
     },
   };

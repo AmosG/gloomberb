@@ -4,7 +4,10 @@ Gloomberb is built on a plugin architecture — top-level product areas such as 
 
 ## Installing plugins
 
-Install plugins from GitHub:
+The Plugins pane (`PL` in the command bar) installs, updates, removes, enables,
+and sets up plugins without leaving the app, and a plugin installed or updated
+there is registered in the running session: its panes and commands exist as
+soon as the install finishes. The same operations exist as CLI commands:
 
 ```bash
 gloomberb install user/repo        # from GitHub shorthand
@@ -18,9 +21,73 @@ gloomberb plugins                  # list installed plugins
 gloomberb update                   # update all plugins
 gloomberb update my-plugin         # update a specific plugin
 gloomberb remove my-plugin         # remove a plugin
+gloomberb plugin enable my-plugin  # turn one on or off without removing it
+gloomberb plugin disable my-plugin
 ```
 
 Plugins are installed to `~/.gloomberb/plugins/`.
+
+A plugin listed at [gloom.sh/plugins](https://gloom.sh/plugins) is installed at
+the tag and commit the registry reviewed, not at whatever the default branch
+holds that day, and `update` moves it to the next reviewed one. A plugin
+installed from a repository the registry does not list follows the remote's
+default branch instead.
+
+## Developing a plugin
+
+Work on a plugin from its own checkout rather than editing under
+`~/.gloomberb/plugins`:
+
+```bash
+gloomberb plugin link ./my-plugin  # symlink the checkout into the plugins folder
+gloomberb plugin doctor my-plugin  # check it the way the app and the desktop build will
+```
+
+A linked plugin loads like an installed one, shows as `linked` in the Plugins
+pane, is never reported as behind the registry, and is skipped by `update`.
+Removing it removes the link and leaves the checkout alone.
+
+`doctor` runs the checks that otherwise surface as a `failed` row in the pane
+or as a broken pane on the desktop: the entry file resolves, the module
+evaluates, the export is a `GloomPlugin`, the id is not reserved, the targets
+are real, the hosts the source reaches are declared, and the browser build the
+desktop view and the web app need actually compiles. Run it before publishing;
+it exits non-zero on a failure so it can sit in CI.
+
+## Settings a plugin needs
+
+A plugin that cannot work without something from the user, such as an API key,
+declares it instead of failing inside its pane:
+
+```typescript
+export default {
+  id: "weather",
+  name: "Weather",
+  version: "1.0.0",
+  configSchema: [
+    { key: "apiKey", label: "API key", type: "password", description: "From weather.example/account" },
+    { key: "units", label: "Units", type: "select", required: false, defaultValue: "c",
+      options: [{ label: "Celsius", value: "c" }, { label: "Fahrenheit", value: "f" }] },
+  ],
+  setup(ctx) {
+    const apiKey = ctx.configState.get<string>("apiKey");
+    // ...
+  },
+} satisfies GloomPlugin;
+```
+
+The host turns that into a `Set up Weather` command in the command bar, the
+`s` key in the Plugins pane, and a `needs setup` status until every required
+field has a value. Values land in `ctx.configState` under their keys, so the
+plugin reads them the same way as any other config state. A plugin whose
+readiness is not a plain form, such as one that needs a file to exist, can
+override the rule with `isConfigured(values)`.
+
+Errors a plugin logs through `ctx.log.error` are counted per plugin and shown
+in the pane as `errors (n)`, with the last message in the detail view and the
+`l` key opening the debug log filtered to that plugin. Log real failures there
+rather than swallowing them; it is how a user finds out that a plugin which
+loaded fine is failing at runtime.
 
 ## Plugin structure
 

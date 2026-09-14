@@ -29,7 +29,9 @@ import {
 import {
   installPlugin,
   listPlugins,
+  parseGitHubRef,
   removePlugin,
+  resolveRegistryPin,
   updatePlugins,
 } from "./commands/plugins";
 import { runPaneCatalog, runPaneFunction, runPaneScreenshot } from "./pane-functions";
@@ -149,7 +151,10 @@ function createCoreCliCommands(
         if (!ref) {
           fail("Usage: gloomberb install <github-user/repo>");
         }
-        await installPlugin(ref);
+        // A listed plugin lands on the commit the registry reviewed, the same
+        // as an install from the marketplace pane. Unlisted ones follow HEAD.
+        const pin = await resolveRegistryPin(parseGitHubRef(ref).repo);
+        await installPlugin(ref, pin ? { pin } : {});
       },
     },
     {

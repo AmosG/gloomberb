@@ -1,4 +1,5 @@
 import type { PluginTarget } from "../../../types/plugin";
+import { compareSemver, formatVersion } from "../../../utils/semver";
 import { runsExternalPlugins } from "../../current-target";
 
 export type PluginTier = "official" | "verified" | "community";
@@ -41,10 +42,26 @@ export interface InstalledPlugin {
   toggleable: boolean;
   enabled: boolean;
   source: "builtin" | "external";
+  /** Folder under the plugins directory; absent for built-ins. */
+  directory?: string;
+  /** Checked-out commit, when the install is a git checkout. */
+  commit?: string;
+  /** A dev link (`gloomberb plugin link`) rather than a clone. */
+  linked?: boolean;
   /** Set when the plugin is installed but cannot run on this renderer. */
   unsupportedTarget?: PluginTarget;
   loadError?: string;
+  /** Declares a `configSchema` and is missing a required value. */
+  needsSetup?: boolean;
+  hasSetup?: boolean;
+  /** Errors logged through the plugin's scoped logger this session. */
+  errorCount?: number;
+  lastError?: string;
+  /** Registered after startup, or its files changed under a running registration. */
+  needsRestart?: boolean;
 }
+
+export type MarketplaceSection = "installed" | "available" | "builtin";
 
 export interface MarketplaceEntry {
   id: string;
@@ -63,20 +80,36 @@ export interface MarketplaceEntry {
   installed: boolean;
   enabled: boolean;
   toggleable: boolean;
+  directory?: string;
+  linked: boolean;
   installedVersion?: string;
+  installedCommit?: string;
   /** The registry's tag, when the plugin is installable. */
   availableVersion?: string;
+  availableCommit?: string;
+  minGloomberb?: string;
   contributes?: RegistryPlugin["contributes"];
   loadError?: string;
+  needsSetup: boolean;
+  hasSetup: boolean;
+  errorCount: number;
+  lastError?: string;
+  needsRestart: boolean;
   /**
    * The plugin cannot run on the current renderer — IBKR Gateway in a browser,
    * for example. Distinct from "not installed": the user may have it installed
    * and working elsewhere.
    */
   unsupportedHere: boolean;
+  section: MarketplaceSection;
 }
 
 const TIER_RANK: Record<PluginTier, number> = { official: 0, verified: 1, community: 2 };
+
+function sectionOf(entry: { installed: boolean; bundled: boolean }): MarketplaceSection {
+  if (entry.bundled) return "builtin";
+  return entry.installed ? "installed" : "available";
+}
 
 /**
  * Merges the remote catalog with what is actually loaded.
@@ -100,6 +133,12 @@ export function mergeCatalog(options: {
     const local = installedById.get(plugin.id);
     installedById.delete(plugin.id);
 
+    const base = {
+      // A bundled plugin is present whether or not the local catalog reports it,
+      // which matters when the feed is newer than the running build.
+      installed: plugin.bundled || !!local,
+      bundled: plugin.bundled,
+    };
     entries.push({
       id: plugin.id,
       name: plugin.name,
@@ -112,16 +151,23 @@ export function mergeCatalog(options: {
       repo: plugin.repo,
       stars: plugin.stars,
       featured: plugin.featured === true,
-      bundled: plugin.bundled,
-      // A bundled plugin is present whether or not the local catalog reports it,
-      // which matters when the feed is newer than the running build.
-      installed: plugin.bundled || !!local,
+      ...base,
       enabled: local ? local.enabled : plugin.bundled,
       toggleable: local ? local.toggleable : true,
+      directory: local?.directory,
+      linked: local?.linked === true,
       installedVersion: local?.version,
+      installedCommit: local?.commit,
       availableVersion: plugin.ref,
+      availableCommit: plugin.commit,
+      minGloomberb: plugin.minGloomberb,
       contributes: plugin.contributes,
       loadError: local?.loadError,
+      needsSetup: local?.needsSetup === true,
+      hasSetup: local?.hasSetup === true,
+      errorCount: local?.errorCount ?? 0,
+      lastError: local?.lastError,
+      needsRestart: local?.needsRestart === true,
       // Part of the build, or loaded here: either way it runs wherever the
       // build does, and only its own targets can say otherwise. The web app
       // compiles the web-capable plugins into itself, so a local entry is the
@@ -131,30 +177,40 @@ export function mergeCatalog(options: {
       unsupportedHere: plugin.bundled || (!!local && !local.unsupportedTarget)
         ? !plugin.targets.includes(target)
         : !runsExternalPlugins(target) || !plugin.targets.includes(target),
+      section: sectionOf(base),
     });
   }
 
   // Installed but unlisted: side-loaded from a git URL, or listed under a
   // different id. Still needs to be manageable.
   for (const local of installedById.values()) {
+    const base = { installed: true, bundled: local.source === "builtin" };
     entries.push({
       id: local.id,
       name: local.name,
-      tagline: local.description ?? "Installed outside the registry",
+      tagline: local.description ?? (local.linked ? "Linked from a local checkout" : "Installed outside the registry"),
       description: local.description,
-      categories: ["unlisted"],
+      categories: local.source === "builtin" ? [] : ["unlisted"],
       tier: "community",
       targets: local.unsupportedTarget ? [] : [target],
       hosts: [],
       stars: 0,
       featured: false,
-      bundled: local.source === "builtin",
-      installed: true,
+      ...base,
       enabled: local.enabled,
       toggleable: local.toggleable,
+      directory: local.directory,
+      linked: local.linked === true,
       installedVersion: local.version,
+      installedCommit: local.commit,
       loadError: local.loadError,
+      needsSetup: local.needsSetup === true,
+      hasSetup: local.hasSetup === true,
+      errorCount: local.errorCount ?? 0,
+      lastError: local.lastError,
+      needsRestart: local.needsRestart === true,
       unsupportedHere: !!local.unsupportedTarget,
+      section: sectionOf(base),
     });
   }
 
@@ -162,15 +218,75 @@ export function mergeCatalog(options: {
 }
 
 /**
- * One ordered list rather than an installed/available split.
+ * Whether the registry has something newer than what is installed.
  *
- * What you already have is what you act on most, so it sorts to the top; the
- * rest of the catalog continues below without a mode switch to find it. Within
- * each half the order is the curated one: featured, then tier, then stars.
+ * Versions decide when both sides have one; otherwise the reviewed commit is
+ * compared with the checked-out one. A linked dev checkout is never "behind":
+ * the developer's working copy is the source of truth there.
+ */
+export function hasUpdate(entry: MarketplaceEntry): boolean {
+  if (!entry.installed || entry.bundled || entry.linked) return false;
+  const byVersion = compareSemver(entry.installedVersion, entry.availableVersion);
+  if (byVersion !== null) return byVersion < 0;
+  if (entry.availableCommit && entry.installedCommit) {
+    return !entry.installedCommit.toLowerCase().startsWith(entry.availableCommit.toLowerCase());
+  }
+  return false;
+}
+
+/** `1.2.0`, or `1.2.0 → 1.3.0` when an update is waiting. */
+export function versionLabel(entry: MarketplaceEntry): string {
+  const installed = entry.installed ? formatVersion(entry.installedVersion) : null;
+  const available = formatVersion(entry.availableVersion);
+  if (!entry.installed) return available ?? "";
+  if (hasUpdate(entry)) {
+    const next = available ?? entry.availableCommit?.slice(0, 7) ?? "";
+    return `${installed ?? entry.installedCommit?.slice(0, 7) ?? "?"} → ${next}`;
+  }
+  return installed ?? entry.installedCommit?.slice(0, 7) ?? "";
+}
+
+export type MarketplaceStatusKind =
+  | "failed"
+  | "needs-restart"
+  | "unsupported"
+  | "needs-setup"
+  | "update"
+  | "errors"
+  | "enabled"
+  | "disabled"
+  | "none";
+
+export interface MarketplaceStatus {
+  kind: MarketplaceStatusKind;
+  text: string;
+}
+
+/**
+ * One word for "what should I do about this row". Health outranks state:
+ * a plugin that is enabled but failed to load is `failed`, not `enabled`.
+ */
+export function statusOf(entry: MarketplaceEntry): MarketplaceStatus {
+  if (entry.loadError) return { kind: "failed", text: "failed" };
+  if (entry.needsRestart) return { kind: "needs-restart", text: "needs restart" };
+  const unsupported = unsupportedLabel(entry);
+  if (unsupported) return { kind: "unsupported", text: unsupported.toLowerCase() };
+  if (!entry.installed) return { kind: "none", text: "" };
+  if (!entry.enabled) return { kind: "disabled", text: "disabled" };
+  if (entry.needsSetup) return { kind: "needs-setup", text: "needs setup" };
+  if (hasUpdate(entry)) return { kind: "update", text: "update" };
+  if (entry.errorCount > 0) return { kind: "errors", text: `errors (${entry.errorCount})` };
+  return { kind: "enabled", text: "enabled" };
+}
+
+/**
+ * Sorted for a sectioned list: installed, then available, then built in;
+ * within a section the curated order: featured, then tier, then stars.
  */
 export function sortEntries(entries: readonly MarketplaceEntry[]): MarketplaceEntry[] {
+  const SECTION_RANK: Record<MarketplaceSection, number> = { installed: 0, available: 1, builtin: 2 };
   return [...entries].sort((a, b) => {
-    if (a.installed !== b.installed) return a.installed ? -1 : 1;
+    if (a.section !== b.section) return SECTION_RANK[a.section] - SECTION_RANK[b.section];
     if (a.featured !== b.featured) return a.featured ? -1 : 1;
     if (a.tier !== b.tier) return TIER_RANK[a.tier] - TIER_RANK[b.tier];
     if (a.stars !== b.stars) return b.stars - a.stars;
@@ -180,11 +296,14 @@ export function sortEntries(entries: readonly MarketplaceEntry[]): MarketplaceEn
 
 export function filterEntries(
   entries: readonly MarketplaceEntry[],
-  options: { query: string; category: string | null },
+  options: { query: string; category: string | null; showBuiltin: boolean },
 ): MarketplaceEntry[] {
   const query = options.query.trim().toLowerCase();
 
   return entries.filter((entry) => {
+    // Core modules with no switch are not something the user manages; a
+    // toggleable built-in is, but only on request.
+    if (entry.section === "builtin" && (!entry.toggleable || !options.showBuiltin)) return false;
     if (options.category && !entry.categories.includes(options.category)) return false;
     if (!query) return true;
     return [entry.name, entry.id, entry.tagline, entry.description, ...entry.categories]
@@ -200,9 +319,38 @@ export function collectCategories(entries: readonly MarketplaceEntry[]): string[
   return [...seen].sort();
 }
 
+export type MarketplaceRow =
+  | { type: "header"; section: MarketplaceSection; count: number }
+  | { type: "entry"; entry: MarketplaceEntry };
+
+export const SECTION_LABELS: Record<MarketplaceSection, string> = {
+  installed: "Installed",
+  available: "Available",
+  builtin: "Built in",
+};
+
+/** Interleaves section headers into an already sorted list. */
+export function buildRows(entries: readonly MarketplaceEntry[]): MarketplaceRow[] {
+  const rows: MarketplaceRow[] = [];
+  let current: MarketplaceSection | null = null;
+  for (const entry of entries) {
+    if (entry.section !== current) {
+      current = entry.section;
+      rows.push({ type: "header", section: current, count: entries.filter((other) => other.section === current).length });
+    }
+    rows.push({ type: "entry", entry });
+  }
+  return rows;
+}
+
 /** Whether this entry can be installed from inside the app right now. */
 export function isInstallable(entry: MarketplaceEntry): boolean {
   return !entry.installed && !entry.bundled && !!entry.repo;
+}
+
+/** Whether `update` and `remove` can address this entry: it is a folder the host manages. */
+export function isManaged(entry: MarketplaceEntry): boolean {
+  return entry.installed && !entry.bundled && !!entry.directory;
 }
 
 /** Short label for a plugin that cannot run on the current renderer. */
@@ -211,6 +359,15 @@ export function unsupportedLabel(entry: MarketplaceEntry): string | null {
   if (entry.targets.length === 0) return "Unavailable here";
   const desktop = entry.targets.includes("desktop");
   const terminal = entry.targets.includes("cli") || entry.targets.includes("tui");
-  if (desktop && terminal) return "Desktop and terminal";
+  if (desktop && terminal) return "Not on web";
   return desktop ? "Desktop only" : "Terminal only";
+}
+
+/** The pin the registry asks for, or undefined when it does not pin this plugin. */
+export function registryPin(entry: MarketplaceEntry): { ref?: string; commit?: string } | undefined {
+  if (!entry.availableVersion && !entry.availableCommit) return undefined;
+  return {
+    ...(entry.availableVersion ? { ref: entry.availableVersion } : {}),
+    ...(entry.availableCommit ? { commit: entry.availableCommit } : {}),
+  };
 }

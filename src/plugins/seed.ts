@@ -60,7 +60,7 @@ function isInstalled(directory: string, pluginsDir: string): boolean {
  */
 export async function seedExtractedPlugins(
   config: AppConfig,
-  installPlugin: (ref: string) => Promise<void>,
+  installPlugin: (ref: string) => Promise<unknown>,
   pluginsDir: string = getPluginsDir(),
 ): Promise<SeedResult> {
   const alreadySeeded = new Set(config.seededPlugins ?? []);

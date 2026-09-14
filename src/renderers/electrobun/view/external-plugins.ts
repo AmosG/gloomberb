@@ -17,47 +17,51 @@ const log = debugLog.createLogger("desktop-plugins");
  * from and no filesystem, and writing them to a served directory would mean
  * managing a cache the renderer cannot clean up reliably.
  */
+export async function loadDesktopExternalPlugin(bundle: DesktopExternalPluginBundle): Promise<LoadedExternalPlugin> {
+  await installPluginHostModules();
+
+  const base = {
+    path: bundle.path,
+    directory: bundle.directory,
+    ...(bundle.commit ? { commit: bundle.commit } : {}),
+    ...(bundle.linked ? { linked: true } : {}),
+  };
+  const fallback = {
+    ...base,
+    plugin: { id: bundle.id, name: bundle.name, version: bundle.version } as GloomPlugin,
+  };
+
+  if (bundle.error || !bundle.code) {
+    return { ...fallback, error: bundle.error ?? "Plugin produced no bundle." };
+  }
+
+  let objectUrl: string | null = null;
+  try {
+    objectUrl = URL.createObjectURL(new Blob([bundle.code], { type: "text/javascript" }));
+    const mod = await import(/* @vite-ignore */ objectUrl);
+    const plugin: GloomPlugin = mod.default ?? mod.plugin;
+    if (!plugin?.id || !plugin?.name) {
+      return { ...fallback, error: "Bundle did not export a valid GloomPlugin." };
+    }
+    log.info(`Loaded external plugin: ${plugin.id} v${plugin.version ?? "0.0.0"}`);
+    return { ...base, plugin };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    log.error(`Evaluating ${bundle.id} failed: ${message}`);
+    return { ...fallback, error: message };
+  } finally {
+    // The module graph keeps its own reference once imported, so the URL can
+    // be released immediately; leaving it would leak for the session.
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+  }
+}
+
 export async function loadDesktopExternalPlugins(
   bundles: readonly DesktopExternalPluginBundle[],
 ): Promise<LoadedExternalPlugin[]> {
   if (bundles.length === 0) return [];
 
-  await installPluginHostModules();
-
   const loaded: LoadedExternalPlugin[] = [];
-
-  for (const bundle of bundles) {
-    const fallback = {
-      plugin: { id: bundle.id, name: bundle.name, version: bundle.version } as GloomPlugin,
-      path: bundle.path,
-    };
-
-    if (bundle.error || !bundle.code) {
-      loaded.push({ ...fallback, error: bundle.error ?? "Plugin produced no bundle." });
-      continue;
-    }
-
-    let objectUrl: string | null = null;
-    try {
-      objectUrl = URL.createObjectURL(new Blob([bundle.code], { type: "text/javascript" }));
-      const mod = await import(/* @vite-ignore */ objectUrl);
-      const plugin: GloomPlugin = mod.default ?? mod.plugin;
-      if (!plugin?.id || !plugin?.name) {
-        loaded.push({ ...fallback, error: "Bundle did not export a valid GloomPlugin." });
-        continue;
-      }
-      log.info(`Loaded external plugin: ${plugin.id} v${plugin.version ?? "0.0.0"}`);
-      loaded.push({ plugin, path: bundle.path });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      log.error(`Evaluating ${bundle.id} failed: ${message}`);
-      loaded.push({ ...fallback, error: message });
-    } finally {
-      // The module graph keeps its own reference once imported, so the URL can
-      // be released immediately; leaving it would leak for the session.
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    }
-  }
-
+  for (const bundle of bundles) loaded.push(await loadDesktopExternalPlugin(bundle));
   return loaded;
 }

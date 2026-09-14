@@ -691,6 +691,23 @@ export type PluginTarget = "cli" | "tui" | "desktop" | "web";
 
 export const ALL_PLUGIN_TARGETS: readonly PluginTarget[] = ["cli", "tui", "desktop", "web"];
 
+/**
+ * One setting a plugin needs from the user before it is useful, such as an API
+ * key. Values are stored in the plugin's `configState` under `key`.
+ */
+export interface PluginConfigField {
+  key: string;
+  label: string;
+  type?: "text" | "password" | "number" | "select";
+  /** Shown under the field. Say where to get the value, not what the plugin does. */
+  description?: string;
+  placeholder?: string;
+  defaultValue?: string;
+  /** The plugin counts as "needs setup" while a required field is empty. Default true. */
+  required?: boolean;
+  options?: Array<{ label: string; value: string }>;
+}
+
 export interface GloomPlugin {
   id: string;
   name: string;
@@ -719,6 +736,19 @@ export interface GloomPlugin {
   hosts?: readonly string[];
   /** Shown in the marketplace pane and on the website. */
   homepage?: string;
+  /**
+   * Settings the plugin cannot work without. Declaring them gives the plugin a
+   * "Set up <name>" command, a form the marketplace opens from its `s` key, and
+   * a `needs setup` status until every required field has a value. Read the
+   * values back with `ctx.configState.get(key)`.
+   */
+  configSchema?: PluginConfigField[];
+  /**
+   * Overrides the default readiness rule (every required `configSchema` field
+   * has a value) for plugins whose setup is not a plain form, such as a broker
+   * login or a file that must exist.
+   */
+  isConfigured?(values: Record<string, unknown>): boolean;
 
   setup?(ctx: GloomPluginContext): void | Promise<void>;
   dispose?(): void;

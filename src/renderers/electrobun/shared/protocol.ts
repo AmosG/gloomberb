@@ -95,11 +95,24 @@ export interface DesktopExternalPluginBundle {
   name: string;
   version: string;
   path: string;
+  /** Folder name under the plugins directory. */
+  directory: string;
+  commit?: string;
+  linked?: boolean;
   /** ES module source, absent when `error` is set. */
   code?: string;
   targets?: readonly ("cli" | "tui" | "desktop" | "web")[];
   error?: string;
 }
+
+export interface DesktopPluginPin {
+  ref?: string;
+  commit?: string;
+}
+
+export type DesktopPluginOperationResult =
+  | { ok: true; directory: string }
+  | { ok: false; error: string };
 
 export interface DesktopBackendRequestMap {
   init: {
@@ -129,7 +142,11 @@ export interface DesktopBackendRequestMap {
   "pluginState.setMany": { request: { entries: DesktopPluginStateSetEntry[] }; response: null };
   "pluginState.delete": { request: { pluginId: string; key: string }; response: null };
   "plugins.listExternal": { request: null; response: DesktopExternalPluginBundle[] };
-  "plugins.install": { request: { ref: string }; response: { ok: boolean; error?: string } };
+  "plugins.install": { request: { ref: string; pin?: DesktopPluginPin }; response: DesktopPluginOperationResult };
+  "plugins.update": { request: { directory: string; pin?: DesktopPluginPin }; response: DesktopPluginOperationResult };
+  "plugins.remove": { request: { directory: string }; response: DesktopPluginOperationResult };
+  /** Compiles one plugin directory, fresh, for activation in the view. */
+  "plugins.bundle": { request: { directory: string }; response: DesktopExternalPluginBundle | null };
   "host.restart": { request: DesktopRestartMessage; response: null };
   "host.exit": { request: null; response: null };
   "host.windowControl": { request: { action: DesktopWindowControlAction }; response: null };
