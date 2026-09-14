@@ -128,7 +128,7 @@ function isActiveProviderQuoteTooOld(quote: Quote, now = Date.now()): boolean {
   return now - quote.lastUpdated > maxAge;
 }
 
-export function isProviderQuoteUsableForCurrentSession(quote: Quote | null | undefined, exchange?: string, symbol?: string): quote is Quote {
+export function providerQuoteMatchesTarget(quote: Quote | null | undefined, symbol?: string, exchange?: string): quote is Quote {
   if (!quote) return false;
   // Malformed source identity must reject this row, not throw out an entire
   // batch or prevent a cached record from falling through to a valid source.
@@ -142,6 +142,11 @@ export function isProviderQuoteUsableForCurrentSession(quote: Quote | null | und
     const hasListing = !!(metadata.listingExchangeName || parsePublicTickerKey(quote.symbol).exchange);
     if (!quoteMetadataMatchesTarget(metadata, hasListing ? symbol : parsePublicTickerKey(symbol).symbol, hasListing ? exchange : undefined)) return false;
   }
+  return true;
+}
+
+export function isProviderQuoteUsableForCurrentSession(quote: Quote | null | undefined, exchange?: string, symbol?: string): quote is Quote {
+  if (!providerQuoteMatchesTarget(quote, symbol, exchange)) return false;
   const normalized = quoteWithFreshnessExchange(quote, exchange);
   if (isQuoteStaleForCurrentSession(normalized)) return false;
   if (isActiveProviderQuoteTooOld(normalized)) return false;
@@ -158,6 +163,17 @@ export function isProviderQuoteUsableForCurrentSession(quote: Quote | null | und
   ].some((value) => futures
     ? typeof value === "number" && Number.isFinite(value)
     : finitePositiveNumber(value));
+}
+
+export function providerFinancialsMatchTarget(value: TickerFinancials, symbol: string, exchange?: string): boolean {
+  if (value.quote && !providerQuoteMatchesTarget(value.quote, symbol, exchange)) return false;
+  if (Object.values(value.quoteContributions ?? {}).some((quote) => !providerQuoteMatchesTarget(quote, symbol, exchange))) return false;
+  const metadata = value.quoteMetadata;
+  if (!metadata) return true;
+  if (typeof metadata.symbol !== "string" || !metadata.symbol.trim()
+    || [metadata.listingExchangeName, metadata.instrumentType].some((field) => field != null && typeof field !== "string")) return false;
+  const hasListing = !!(metadata.listingExchangeName || parsePublicTickerKey(metadata.symbol).exchange);
+  return quoteMetadataMatchesTarget(metadata, hasListing ? symbol : parsePublicTickerKey(symbol).symbol, hasListing ? exchange : undefined);
 }
 
 export function dropUnusableProviderQuote(value: TickerFinancials, exchange?: string): TickerFinancials {

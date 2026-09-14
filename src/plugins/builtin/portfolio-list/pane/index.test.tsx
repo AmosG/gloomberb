@@ -342,6 +342,9 @@ function makeSortWarmupBrokerTicker(portfolioId: string, symbol: string, index: 
 }
 
 async function renderHiddenChangePctSortWarmup(options: { staleCachedSiveSnapshot?: boolean } = {}) {
+  // Sorting fixtures have regular-session prices; keep them usable regardless
+  // of the wall-clock session so only the hidden row needs a refresh.
+  quoteClock = spyOn(Date, "now").mockReturnValue(Date.parse("2026-09-14T18:00:00Z"));
   const portfolioId = "broker:ibkr-live:DU12345";
   const config = createPortfolioConfigWithColumns(
     portfolioId,
@@ -1248,6 +1251,7 @@ describe("PortfolioListPane cash and margin UI", () => {
   });
 
   test("shows cached market cap on reopen for broker-linked rows", async () => {
+    quoteClock = spyOn(Date, "now").mockReturnValue(Date.parse("2026-09-14T18:00:00Z"));
     const dbPath = createTempDbPath("cached-reopen-market-cap");
     const persistence = new AppPersistence(dbPath);
     const instrument = {

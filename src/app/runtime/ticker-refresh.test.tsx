@@ -1,3 +1,4 @@
+import { useRegularMarketSession } from "../../test-support/market-session";
 import { expect, test } from "bun:test";
 import { act, useState } from "react";
 import type { PluginRegistry } from "../../plugins/registry";
@@ -8,6 +9,8 @@ import { createTestTicker } from "../../test-support/pane";
 import { testRender } from "../../renderers/opentui/test-utils";
 import type { TickerFinancials } from "../../types/financials";
 import { useTickerRefreshRuntime, type AppTickerRefreshRuntime } from "./ticker-refresh";
+
+useRegularMarketSession();
 
 const contracts = [101, 202].map((conId) => ({ brokerId: "ibkr", brokerInstanceId: "same", conId, symbol: "DUAL" }));
 const targets: InstrumentRef[] = contracts.map((instrument) => ({ symbol: "DUAL", exchange: "NASDAQ", brokerId: "ibkr", brokerInstanceId: "same", instrument }));

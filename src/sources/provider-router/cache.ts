@@ -2,7 +2,7 @@ import { yahooSuffixExchange } from "../yahoo-finance/symbols";
 import type { CachedResourceRecord, ResourceStore } from "../../data/resource-store";
 import type { TimeRange } from "../../time-series/range";
 import type { BrokerContractRef } from "../../types/instrument";
-import type { PricePoint, TickerFinancials } from "../../types/financials";
+import type { PricePoint, Quote, TickerFinancials } from "../../types/financials";
 import type { CachePolicy, CachePolicyMap } from "../../types/persistence";
 import { canonicalExchange, parsePublicTickerKey, resolveExchangeTimeZone } from "../../utils/exchanges";
 import { redactUnavailableFundamentals, RETRACTABLE_VALUATION_FIELDS } from "../../utils/fundamentals";
@@ -10,7 +10,8 @@ import { isPriceHistoryStaleForCurrentWindow } from "../../utils/price-history";
 import { brokerContractIdentityKey } from "../../utils/instrument-identity";
 
 const MARKET_NAMESPACE = "market";
-const FINANCIALS_SCHEMA_VERSION = 7;
+const FINANCIALS_SCHEMA_VERSION = 8;
+const QUOTE_SCHEMA_VERSION = 2;
 
 const DEFAULT_CACHE_POLICIES = {
   brokerQuote: { staleMs: 15_000, expireMs: 15 * 60_000 },
@@ -110,6 +111,7 @@ export function cacheRouterResource<T>(
     {
       cachePolicy,
       ...(kind === "financials" ? { schemaVersion: FINANCIALS_SCHEMA_VERSION } : {}),
+      ...(kind === "quote" ? { schemaVersion: QUOTE_SCHEMA_VERSION } : {}),
     },
   );
 }
@@ -168,6 +170,24 @@ export function listCachedResources<T>(
     sourceKeys,
     allowExpired,
   }).filter((record) => {
+    if (record.sourceKey.startsWith("provider:") && !entityKey.startsWith("contract:")
+      && (kind === "financials" || kind === "quote")) {
+      const requestedExchange = parsePublicTickerKey(entityKey).exchange
+        || canonicalExchange(variantKeys.find((key) => /(?:^|;)exchange=/.test(key))?.match(/(?:^|;)exchange=([^;]+)/)?.[1]);
+      const quote = kind === "quote" ? record.value as Quote : (record.value as TickerFinancials).quote;
+      const metadata = kind === "financials" ? (record.value as TickerFinancials).quoteMetadata : undefined;
+      const declaredExchange = canonicalExchange(quote?.listingExchangeName || quote?.exchangeName
+        || metadata?.listingExchangeName || parsePublicTickerKey(quote?.symbol ?? metadata?.symbol ?? "").exchange);
+      // Generic legacy entries can retain a venue normalized under old alias
+      // rules (PCX used to mean AMEX). Refetch a conflicting public listing;
+      // never relabel it or let it outrank a fresh exact-listing response.
+      if (requestedExchange && declaredExchange && requestedExchange !== declaredExchange) return false;
+      // An unqualified lookup cannot tell real AMEX metadata from old PCX
+      // normalization. Refresh only those legacy records; newly verified
+      // AMEX data and explicitly requested AMEX listings remain reusable.
+      if (!requestedExchange && declaredExchange === "AMEX"
+        && record.schemaVersion < (kind === "financials" ? 8 : 2)) return false;
+    }
     // Older SEC projections can mix pre/post-split EPS in one long history.
     // Refresh the source evidence instead of relabeling old numbers locally.
     if (kind === "financials" && record.schemaVersion < 7) {

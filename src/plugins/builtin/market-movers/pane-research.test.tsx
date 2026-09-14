@@ -16,6 +16,9 @@ import { createPaneInstance, TICKER_RESEARCH_PANE_ID } from "../../../types/conf
 import { AssetDataRouter } from "../../../sources/provider-router";
 import { MarketDataCoordinator, setSharedMarketDataCoordinator } from "../../../market-data/coordinator";
 import { Box } from "../../../ui";
+import { useRegularMarketSession } from "../../../test-support/market-session";
+
+useRegularMarketSession();
 
 const payload = (quotes: unknown[]) => ({ finance: { result: [{ quotes }], error: null } });
 const raw = (symbol: string, fields = {}) => ({ symbol, shortName: `${symbol} Research`, regularMarketPrice: 10, regularMarketChangePercent: 10, regularMarketVolume: 200, averageDailyVolume3Month: 100, currency: "USD", fullExchangeName: "NASDAQ", ...fields });

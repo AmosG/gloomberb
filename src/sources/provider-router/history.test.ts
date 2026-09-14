@@ -1,3 +1,4 @@
+import { useRegularMarketSession } from "../../test-support/market-session";
 import { afterEach, describe, expect, test } from "bun:test";
 import { AppPersistence } from "../../data/app-persistence";
 import type { DataProvider } from "../../types/data-provider";
@@ -11,6 +12,8 @@ import {
 } from "./test-support";
 
 const originalConsoleError = console.error;
+
+useRegularMarketSession();
 
 afterEach(() => {
   console.error = originalConsoleError;

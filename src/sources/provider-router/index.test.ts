@@ -1,3 +1,4 @@
+import { useRegularMarketSession } from "../../test-support/market-session";
 import { afterEach, describe, expect, test } from "bun:test";
 import { CloudApiRequestTransport } from "../../api-client/request";
 import { AppPersistence } from "../../data/app-persistence";
@@ -19,6 +20,8 @@ import {
   makeQuote,
   setBrokerInstances,
 } from "./test-support";
+
+useRegularMarketSession();
 
 const originalConsoleError = console.error;
 
@@ -1226,6 +1229,7 @@ describe("AssetDataRouter", () => {
           priceHistory: [{ date: new Date("2026-03-28T00:00:00Z"), close: 0.245 }],
           quote: makeQuote({
             symbol: "IQE.L",
+            listingExchangeName: "LSE",
             providerId: "yahoo",
             price: 0.245,
             currency: "GBP",
@@ -1819,6 +1823,7 @@ describe("AssetDataRouter", () => {
         return makeFinancials({
           quote: makeQuote({
             symbol: "IQE.L",
+            listingExchangeName: "LSE",
             providerId: "yahoo",
             price: 0.245,
             currency: "GBP",
