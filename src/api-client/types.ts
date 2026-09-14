@@ -1439,3 +1439,35 @@ export interface TeamNotification {
   createdAt: string;
   data: TeamNotificationData;
 }
+
+// Cloud notes
+
+export type NoteOwnerKind = "user" | "team";
+export type NoteKind = "ticker" | "quick";
+
+export interface CloudNoteOwner {
+  kind: NoteOwnerKind;
+  id: string;
+}
+
+export interface CloudNoteSummary {
+  id: string;
+  owner: CloudNoteOwner;
+  kind: NoteKind;
+  key: string;
+  title: string | null;
+  revision: number;
+  updatedBy: { id: string; username: string | null; displayName: string };
+  createdAt: string;
+  updatedAt: string;
+  size: number;
+}
+
+export interface CloudNote extends Omit<CloudNoteSummary, "size"> {
+  content: string;
+}
+
+export interface CloudNoteScope {
+  scope: NoteOwnerKind;
+  teamId?: string;
+}

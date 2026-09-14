@@ -1,3 +1,5 @@
+import type { NoteOwner, NotesStore } from "./store";
+
 export interface QuickNoteEntry {
   id: string;
   title: string;
@@ -81,7 +83,10 @@ async function deleteTextFile(path: string): Promise<void> {
   writeLocalTimestamp(path, null);
 }
 
-export class NotesFiles {
+export class NotesFiles implements NotesStore {
+  readonly readOnly = false;
+  readonly owner: NoteOwner = { kind: "user" };
+
   constructor(private readonly dataDir: string) {}
 
   private pathFor(symbol: string): string {

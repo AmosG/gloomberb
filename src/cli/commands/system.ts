@@ -2,7 +2,12 @@ import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { VERSION } from "../../version";
 import { saveConfig } from "../../data/config/store";
+import { apiClient } from "../../api-client";
+import { readChatSessionState } from "../../plugins/builtin/chat/controller/persistence";
+import { exportNotesToDirectory, type NotesExportSource } from "../../plugins/builtin/notes/export";
 import { NotesFiles } from "../../plugins/builtin/notes/files";
+import { CloudNotesStore } from "../../plugins/builtin/notes/store";
+import { createPluginPersistence } from "../../plugins/plugin-persistence";
 import { createAlert, deserializeAlerts, serializeAlerts } from "../../plugins/builtin/alerts/alert-engine";
 import type { AlertCondition } from "../../plugins/builtin/alerts/types";
 import type { CliCommandDef } from "../../types/plugin";
@@ -345,11 +350,38 @@ export function createSystemCliCommands(allCommands: () => CliCommandDef[]): Cli
   const notesCommand: CliCommandDef = {
     name: "notes",
     description: "Read and mutate ticker or quick notes",
-    help: { usage: ["notes show <symbol>", "notes set <symbol> TEXT", "notes delete <symbol>", "notes quick list"] },
+    help: { usage: ["notes show <symbol>", "notes set <symbol> TEXT", "notes delete <symbol>", "notes quick list", "notes export [dir]"] },
     execute: async (args, ctx) => {
       await withConfigData(ctx, async (config) => {
         const notes = new NotesFiles(config.dataDir);
         const action = args[0] ?? "list";
+        if (action === "export") {
+          // Local files plus, when a saved session exists, the cloud copies
+          // (personal and every team), one folder each.
+          const dir = args[1] ?? join(config.dataDir, `notes-export-${new Date().toISOString().slice(0, 10)}`);
+          const sources: NotesExportSource[] = [{ label: "local", store: notes }];
+          await withCliServices(ctx, async (services) => {
+            const cloudPersistence = createPluginPersistence(services.persistence.pluginState, services.persistence.resources, "plugin:gloomberb-cloud", "gloomberb-cloud");
+            const session = readChatSessionState(cloudPersistence, null);
+            if (!session?.sessionToken) return;
+            apiClient.setSessionToken(session.sessionToken);
+            const user = await apiClient.ensureVerifiedSession().catch(() => null);
+            if (!user) return;
+            const notesPersistence = createPluginPersistence(services.persistence.pluginState, services.persistence.resources, "plugin:notes", "notes");
+            sources.push({ label: "mine", store: new CloudNotesStore({ kind: "user" }, notesPersistence) });
+            const teams = await apiClient.listTeams().catch(() => []);
+            for (const team of teams) {
+              sources.push({ label: team.name, store: new CloudNotesStore({ kind: "team", teamId: team.id }, notesPersistence) });
+            }
+          });
+          if (ctx.cliOptions.dryRun) {
+            ctx.printResult({ data: { dryRun: true, dir, sources: sources.map((source) => source.label) } });
+            return;
+          }
+          const result = await exportNotesToDirectory(dir, sources);
+          ctx.printResult({ data: { dir: result.dir, files: result.files, sources: sources.map((source) => source.label) } });
+          return;
+        }
         if (action === "quick") {
           const subaction = args[1] ?? "list";
           if (subaction !== "list") ctx.fail("Usage: gloomberb notes quick list");

@@ -8,6 +8,12 @@ import { Box, Text } from "../../../ui";
 import type { PluginRuntimeAccess } from "../../runtime";
 import { createNotesTab } from "./ticker-notes-tab";
 import type { NotesFiles } from "./files";
+import { NotesStoreRegistry } from "./store";
+
+/** The tabs take a registry; while signed out it hands back the disk store. */
+function registryFor(files: NotesFiles): NotesStoreRegistry {
+  return new NotesStoreRegistry({ persistence: null, files, isSignedIn: () => false });
+}
 import { TestPaneProvider, createTestTicker as makeTicker, createTestPaneConfig } from "../../../test-support/pane";
 
 const TEST_PANE_ID = "ticker-detail:notes-test";
@@ -24,6 +30,8 @@ function createMockNotesFiles(options?: {
   const loadDelayMs = options?.loadDelayMs ?? 0;
   return {
     saves,
+    readOnly: false,
+    owner: { kind: "user" },
     async load(symbol: string) {
       if (loadDelayMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, loadDelayMs));
@@ -124,7 +132,7 @@ describe("createNotesTab", () => {
   test("surfaces a save failure when the tab loses focus", async () => {
     const notifications: string[] = [];
     const notesFiles = createMockNotesFiles({ saveError: new Error("disk full") });
-    const NotesTab = createNotesTab(notesFiles);
+    const NotesTab = createNotesTab(registryFor(notesFiles));
     const runtime = createTestPluginRuntime({
       notify: ({ body }) => { notifications.push(body); },
     });
@@ -171,7 +179,7 @@ describe("createNotesTab", () => {
     }
 
     expect(notesFiles.saves).toEqual([{ symbol: "AAPL", text: "ab" }]);
-    expect(notifications).toEqual(["Failed to save note. Check disk space and permissions."]);
+    expect(notifications).toEqual(["disk full"]);
   });
 
   test("does not save stale buffer text to a new ticker before its notes load", async () => {
@@ -179,7 +187,7 @@ describe("createNotesTab", () => {
       loadDelayMs: 50,
       notes: { MSFT: "msft-note" },
     });
-    const NotesTab = createNotesTab(notesFiles);
+    const NotesTab = createNotesTab(registryFor(notesFiles));
 
     testSetup = await testRender(
       <NotesTabHarness NotesTab={NotesTab} initialSymbol="AAPL" />,
@@ -229,7 +237,7 @@ describe("createNotesTab", () => {
       loadDelayMs: 100,
       notes: { AAPL: "existing-aapl-note", MSFT: "" },
     });
-    const NotesTab = createNotesTab(notesFiles);
+    const NotesTab = createNotesTab(registryFor(notesFiles));
 
     testSetup = await testRender(
       <NotesTabHarness NotesTab={NotesTab} initialSymbol="AAPL" />,
@@ -259,7 +267,7 @@ describe("createNotesTab", () => {
       loadDelayMs: 100,
       notes: { MSFT: "msft-note" },
     });
-    const NotesTab = createNotesTab(notesFiles);
+    const NotesTab = createNotesTab(registryFor(notesFiles));
 
     testSetup = await testRender(
       <NotesTabHarness NotesTab={NotesTab} initialSymbol="AAPL" />,
@@ -314,7 +322,7 @@ describe("createNotesTab", () => {
       loadDelayMs: 100,
       notes: { AAPL: "existing-note" },
     });
-    const NotesTab = createNotesTab(notesFiles);
+    const NotesTab = createNotesTab(registryFor(notesFiles));
 
     testSetup = await testRender(
       <NotesTabHarness NotesTab={NotesTab} initialSymbol="AAPL" />,

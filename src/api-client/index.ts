@@ -24,6 +24,7 @@ import { CloudDataApi } from "./data";
 import { ApiRequestError } from "./errors";
 import { CloudApiRequestTransport } from "./request";
 import { CloudApiSocket } from "./socket";
+import { CloudNotesApi } from "./notes";
 import { CloudTeamsApi } from "./teams";
 import type {
   AssistCommandDescriptor,
@@ -38,6 +39,7 @@ import type {
 export { ASKGTransportError } from "./askg";
 export type { ASKGToolResultOutcome, ASKGTransport } from "./askg";
 export { setCloudApiFetchTransport } from "./request";
+export { NoteConflictError } from "./notes";
 export { TEAM_ACCENT_COLORS } from "./types";
 export type * from "./types";
 
@@ -101,6 +103,7 @@ class GloomApiClient {
     socket: this.socket,
   });
   private readonly data: CloudDataApi = new CloudDataApi((path, options) => this.request(path, options));
+  private readonly notes: CloudNotesApi = new CloudNotesApi((path, options) => this.request(path, options));
   readonly askg: CloudASKGApi = new CloudASKGApi({
     request: (path, options) => this.request(path, options),
     openStream: (path, options) => this.transport.openStream(path, options),
@@ -612,6 +615,10 @@ class GloomApiClient {
   deleteTeam = this.teams.deleteTeam.bind(this.teams);
   subscribeTeamNotifications = this.teams.subscribeTeamNotifications.bind(this.teams);
   subscribeCloudEvent = this.teams.subscribeCloudEvent.bind(this.teams);
+  listCloudNotes = this.notes.listNotes.bind(this.notes);
+  getCloudNote = this.notes.getNote.bind(this.notes);
+  putCloudNote = this.notes.putNote.bind(this.notes);
+  deleteCloudNote = this.notes.deleteNote.bind(this.notes);
 
   /** Subscribes to a shared scanner feed; all panes of one kind share one upstream subscription. */
   subscribeScanner = this.socket.subscribeScanner.bind(this.socket);
