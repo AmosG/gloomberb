@@ -39,6 +39,7 @@ describe("financial statement table model", () => {
 
   test("applies financial row semantics to growth color values", () => {
     const table = buildFinancialTableModel({
+      financialCurrency: "USD",
       annualStatements: [
         {
           date: "2024-12-31",

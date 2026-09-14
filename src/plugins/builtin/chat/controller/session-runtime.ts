@@ -87,6 +87,7 @@ export function applySignedOutChatControllerSession({
 }
 
 interface RefreshChatControllerSessionOptions {
+  isCurrent: () => boolean;
   applySignedOut: () => void;
   channelStates: Map<string, ChannelRuntimeState>;
   emit: () => void;
@@ -104,6 +105,7 @@ interface RefreshChatControllerSessionOptions {
 }
 
 export async function refreshChatControllerSession({
+  isCurrent,
   applySignedOut,
   channelStates,
   emit,
@@ -120,7 +122,8 @@ export async function refreshChatControllerSession({
   syncVerificationPolling,
 }: RefreshChatControllerSessionOptions): Promise<void> {
   session.sessionToken = apiClient.getSessionToken();
-  const apiSession = await apiClient.getSession();
+  const apiSession = await apiClient.getSession(isCurrent);
+  if (!isCurrent()) return;
   if (!apiSession) {
     const persistedToken = apiClient.getSessionToken();
     // A 200 with no user used to mean the desktop backend had not received the
@@ -139,8 +142,9 @@ export async function refreshChatControllerSession({
       persistSession(session.sessionToken, session.user);
       emit();
 
+      if (!isCurrent()) return;
       const credentialIsCurrent = () =>
-        apiClient.getSessionToken() === persistedToken && session.sessionToken === persistedToken;
+        isCurrent() && apiClient.getSessionToken() === persistedToken && session.sessionToken === persistedToken;
       const handleValidationError = (error: unknown) => {
         if (!credentialIsCurrent()) return;
         if (error instanceof ApiRequestError && error.status === 401) {
@@ -164,7 +168,7 @@ export async function refreshChatControllerSession({
 
       if (!session.user?.emailVerified) {
         try {
-          const profile = await apiClient.getAccountProfile();
+          const profile = await apiClient.getAccountProfile(credentialIsCurrent);
           if (!credentialIsCurrent()) return;
           const persistedProfile = {
             ...profile,
@@ -179,6 +183,7 @@ export async function refreshChatControllerSession({
           return;
         }
 
+        if (!credentialIsCurrent()) return;
         if (!session.user?.emailVerified) {
           syncVerificationPolling();
           stopSafetyRefresh();
@@ -217,10 +222,17 @@ export async function refreshChatControllerSession({
   persistSession(session.sessionToken, session.user);
   emit();
 
+  if (!isCurrent()) return;
+  const currentToken = session.sessionToken;
+  const credentialIsCurrent = () =>
+    isCurrent() && apiClient.getSessionToken() === currentToken && session.sessionToken === currentToken;
   if (nextUser?.emailVerified) {
     stopVerificationPolling();
     ensureRealtimeSubscriptions();
-    await refreshChatState().catch(() => scheduleSessionRetry());
+    await refreshChatState(credentialIsCurrent).catch(() => {
+      if (credentialIsCurrent()) scheduleSessionRetry();
+    });
+    if (!credentialIsCurrent()) return;
     ensureOpenChannelConnections();
     return;
   }

@@ -1,40 +1,16 @@
 import { canonicalTimeSeriesFieldId, isMarketFieldId } from "./field-catalog";
 import type { DataProvider, QuoteSubscriptionTarget } from "../types/data-provider";
 import type { Quote } from "../types/financials";
-import type { BrokerContractRef } from "../types/instrument";
 import type { ChartSeriesSpec, ChartSpec, SecuritySeriesSource } from "./types";
 import { activeStudyInputSeriesIds } from "./studies";
 import { valuationSeriesUsesLiveQuote } from "./fundamentals";
 import { hasValidQuoteObservationTime } from "../market-data/quotes/freshness";
+import { instrumentIdentityKey } from "../utils/instrument-identity";
 
 export const LIVE_CHART_REFRESH_INTERVAL_MS = 1_000;
 
-function normalized(value: string | undefined): string {
-  return value?.trim().toUpperCase() ?? "";
-}
-
-function quoteIdentityKey(identity: {
-  symbol: string;
-  exchange?: string;
-  brokerId?: string;
-  brokerInstanceId?: string;
-  instrument?: BrokerContractRef | null;
-}): string {
-  const contractKey = identity.instrument?.conId
-    ?? identity.instrument?.localSymbol
-    ?? identity.instrument?.symbol
-    ?? "";
-  return [
-    normalized(identity.symbol),
-    normalized(identity.exchange),
-    identity.brokerId ?? "",
-    identity.brokerInstanceId ?? "",
-    contractKey,
-  ].join("|");
-}
-
 export function chartQuoteOverrideKeyForSource(source: SecuritySeriesSource): string {
-  return quoteIdentityKey({
+  return instrumentIdentityKey({
     symbol: source.instrument.symbol,
     exchange: source.instrument.exchange,
     brokerId: source.instrument.brokerId,
@@ -44,7 +20,7 @@ export function chartQuoteOverrideKeyForSource(source: SecuritySeriesSource): st
 }
 
 export function chartQuoteOverrideKeyForTarget(target: QuoteSubscriptionTarget): string {
-  return quoteIdentityKey({
+  return instrumentIdentityKey({
     symbol: target.symbol,
     exchange: target.exchange,
     brokerId: target.context?.brokerId,

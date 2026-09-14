@@ -9,6 +9,7 @@ import {
   spreadBasisPoints,
   type YieldCurveLoader,
   type YieldPoint,
+  yieldCurveErrors,
 } from "./treasury-data";
 import { completeYieldCurve, loadHistoricalYieldCurve, yieldCurveDate } from "./history";
 
@@ -56,9 +57,11 @@ export function createYieldCurveHeadless(
       ));
       const rows = [...points].sort((a, b) => a.maturityYears - b.maturityYears);
       const missingTenors = points.filter((point) => point.yield == null).map((point) => point.maturity);
+      const sourceErrors = yieldCurveErrors(points);
       return {
         rows: rows.map((point) => ({ ...point })),
         errors: [
+          ...sourceErrors,
           ...(missingTenors.length ? [`Treasury tenors unavailable: ${missingTenors.join(", ")}`] : []),
           ...(!curveAsOf(points) ? ["Curve has mixed or unknown observation dates."] : []),
           ...(points.some((point) => point.stale) ? ["Some Treasury sources are stale cached data."] : []),

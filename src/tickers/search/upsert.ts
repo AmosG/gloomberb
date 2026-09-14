@@ -9,6 +9,7 @@ import {
   shouldReplaceTickerName,
 } from "./result";
 import { canonicalExchange, parsePublicTickerKey, publicTickerKey } from "../../utils/exchanges";
+import { scopedBrokerContractIdentityKey } from "../../utils/instrument-identity";
 
 export async function upsertTickerFromSearchResult(
   tickerRepository: AppTickerRepositoryPort,
@@ -49,10 +50,7 @@ export async function upsertTickerFromSearchResult(
     if (result.brokerContract) {
       const nextContracts = [...existingContracts];
       const hasContract = nextContracts.some((contract) =>
-        contract.brokerId === result.brokerContract!.brokerId
-        && contract.brokerInstanceId === result.brokerContract!.brokerInstanceId
-        && contract.conId === result.brokerContract!.conId
-        && contract.localSymbol === result.brokerContract!.localSymbol
+        scopedBrokerContractIdentityKey(contract) === scopedBrokerContractIdentityKey(result.brokerContract!)
       );
       if (!hasContract) {
         nextContracts.push(result.brokerContract);

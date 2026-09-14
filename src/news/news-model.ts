@@ -138,7 +138,29 @@ function selectDetailArticle(
   return null;
 }
 
+function newsArticleSummaryRevision(article: NewsArticle): string {
+  return JSON.stringify([article.id, article.publishedAt.getTime(), article.title, article.summary, article.url, article.source]);
+}
+
+export function newsArticleRevision(article: NewsArticle): string {
+  return JSON.stringify([newsArticleSummaryRevision(article), article.items ?? []]);
+}
+
 function mergeDuplicateArticle(existing: NewsArticle, item: NewsArticle): NewsArticle {
+  if (existing.id === item.id) {
+    // A story's newer publication supersedes its earlier importance score.
+    // For equal timestamps, the first (freshly fetched) correction wins;
+    // identical content can still carry a higher cross-source ranking.
+    const sameSummary = newsArticleSummaryRevision(existing) === newsArticleSummaryRevision(item);
+    const compatibleTimeline = !hasStoryItems(existing) || !hasStoryItems(item)
+      || newsArticleRevision(existing) === newsArticleRevision(item);
+    const winner = item.publishedAt > existing.publishedAt
+      || (sameSummary && compatibleTimeline && item.importance > existing.importance) ? item : existing;
+    const other = winner === item ? existing : item;
+    return !hasStoryItems(winner) && sameSummary && hasStoryItems(other)
+      ? { ...winner, items: other.items }
+      : winner;
+  }
   const winner = shouldReplaceDuplicate(existing, item)
     ? { ...existing, ...item }
     : existing;
@@ -152,8 +174,15 @@ function mergeDuplicateArticle(existing: NewsArticle, item: NewsArticle): NewsAr
 }
 
 export function dedupeNewsArticles(items: NewsArticle[]): NewsArticle[] {
-  const byKey = new Map<string, NewsArticle>();
+  // A publisher can correct a story's URL. Collapse stable IDs first so the
+  // same story cannot survive twice under its old and new URLs.
+  const byId = new Map<string, NewsArticle>();
   for (const item of items) {
+    const existing = byId.get(item.id);
+    byId.set(item.id, existing ? mergeDuplicateArticle(existing, item) : item);
+  }
+  const byKey = new Map<string, NewsArticle>();
+  for (const item of byId.values()) {
     const key = articleKey(item);
     const existing = byKey.get(key);
     if (!existing) {
@@ -168,10 +197,12 @@ export function dedupeNewsArticles(items: NewsArticle[]): NewsArticle[] {
 export function mergeNewsArticle(base: NewsArticle, detail: NewsArticle): NewsArticle {
   const detailItems = detail.items ?? [];
   const baseItems = base.items ?? [];
+  const olderDetail = detail.publishedAt < base.publishedAt;
   return {
     ...base,
     ...detail,
-    items: detailItems.length > 0 ? detailItems : baseItems,
+    ...(olderDetail ? base : {}),
+    items: olderDetail && baseItems.length > 0 ? baseItems : detailItems.length > 0 ? detailItems : baseItems,
   };
 }
 

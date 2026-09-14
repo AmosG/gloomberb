@@ -27,6 +27,8 @@ export interface QueryEntry<T> {
   lastGoodData: T | null;
   source: string | null;
   fetchedAt: number | null;
+  /** Accepted source response order in this runtime, preserved through cache projections. */
+  responseSequence?: number;
   asOf?: number;
   staleAt: number | null;
   error: { reasonCode: string; message: string } | null;

@@ -16,7 +16,7 @@ const spec = (transform: SeriesTransform = "raw"): ChartSpec => ({
     style: field === "ohlcv" ? "candles" : "line", transform, axis: "left", panelId: "main", interpolation: "none",
   })),
 });
-const resolve = (instrumentType?: string, transform: SeriesTransform = "raw") => resolveChartSpecData(spec(transform), {
+const resolve = (instrumentType?: string, transform: SeriesTransform = "raw", chart = spec(transform)) => resolveChartSpecData(chart, {
   now: new Date("2026-09-11"),
   dataProvider: createTestDataProvider({
     getQuote: async () => ({ symbol: "SHIB-USD", listingExchangeName: "CCC", currency: "USD", instrumentType, price: 999, change: 0, changePercent: 0, lastUpdated: Date.parse("2026-09-11") }),
@@ -55,4 +55,21 @@ test("normalized crypto prices keep the original unit in raw-value provenance", 
   expect(close.unit).toBe("index");
   expect(close.points.map((point) => point.value)).toEqual([100, 120]);
   expect(close.points.map((point) => point.rawValue)).toEqual([0.000005, 0.000006]);
+});
+
+test("futures and unknown price bases stay available as raw prices but cannot establish a spread", async () => {
+  for (const instrumentType of ["FUTURE", undefined]) {
+    const chart = spec();
+    chart.series = chart.series.slice(0, 2);
+    chart.studies = ["ratio", "spread"].map((kind) => ({
+      id: kind, kind: kind as "ratio" | "spread", inputSeriesIds: chart.series.map(({ id }) => id), color: "#fff",
+      parameters: {}, panelId: "main", axis: "auto",
+    }));
+    const before = await resolve(instrumentType, "raw", { ...chart, studies: [chart.studies[0]!] });
+    const result = await resolve(instrumentType, "raw", chart);
+    expect(result.series.filter(({ id }) => id !== "spread")).toEqual(before.series);
+    expect(result.series.some(({ id }) => id === "spread")).toBe(false);
+    expect(result.series.find(({ id }) => id === "ratio")?.unit).toBe("unknown");
+    expect(result.errors).toEqual([expect.stringContaining("spread cannot subtract")]);
+  }
 });

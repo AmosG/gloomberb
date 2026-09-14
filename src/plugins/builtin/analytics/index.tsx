@@ -14,6 +14,7 @@ import {
   usePaneStateValue,
 } from "../../../state/app/context";
 import { useChartQueries, useFxRatesMap, useTickerFinancialsMap } from "../../../market-data/hooks";
+import { buildPortfolioFinancialsMap } from "../../../market-data/portfolio-financials";
 import { selectEffectiveExchangeRates } from "../../../utils/exchange-rate-map";
 import { usePortfolioAccountState } from "../portfolio-list/header";
 import { calculatePortfolioSummaryTotals, type ColumnContext } from "../portfolio-list/metrics";
@@ -23,7 +24,6 @@ import {
   useBrokerPortfolioPerformance,
 } from "./broker-performance";
 import {
-  computeDatedBeta,
   computeSharpeRatio,
   hasPortfolioPosition,
 } from "./metrics";
@@ -34,6 +34,8 @@ import {
   buildHistoryAxisLabel,
   buildPortfolioChartTargets,
   buildPortfolioReturnSeries,
+  buildPortfolioBetaResult,
+  PORTFOLIO_BENCHMARK,
   formatHistoryAxisValue,
   resolvePerformancePalette,
 } from "./pane-model";
@@ -101,20 +103,23 @@ function PortfolioAnalyticsPane({ focused, width, height }: PaneProps) {
       .filter((ticker) => ticker.metadata.portfolios.includes(activePortfolioId))
       .filter((ticker) => hasPortfolioPosition(ticker, activePortfolioId));
   }, [activePortfolioId, tickersBySymbol]);
+  const instrumentOptions = useMemo(() => ({
+    portfolioId: activePortfolioId || undefined,
+  }), [activePortfolioId]);
 
   const chartTargets = useMemo(
-    () => buildPortfolioChartTargets(portfolioTickers),
-    [portfolioTickers],
+    () => buildPortfolioChartTargets(portfolioTickers, instrumentOptions),
+    [portfolioTickers, instrumentOptions],
   );
   const chartRequests = useMemo(
-    () => chartTargets.map((target) => target.request),
+    () => chartTargets.flatMap((target) => target.request ? [target.request] : []),
     [chartTargets],
   );
   const chartEntries = useChartQueries(chartRequests);
 
   const spyRequest = useMemo(
     () => ({
-      instrument: { symbol: "SPY", exchange: "" },
+      instrument: { symbol: PORTFOLIO_BENCHMARK.symbol, exchange: PORTFOLIO_BENCHMARK.exchange },
       bufferRange: "1Y" as const,
       granularity: "range" as const,
     }),
@@ -123,14 +128,11 @@ function PortfolioAnalyticsPane({ focused, width, height }: PaneProps) {
   const spyChartRequests = useMemo(() => [spyRequest], [spyRequest]);
   const spyChartEntries = useChartQueries(spyChartRequests);
 
-  const marketFinancials = useTickerFinancialsMap(portfolioTickers);
-  const financials = useMemo(() => {
-    const merged = new Map(cachedFinancials);
-    for (const [symbol, data] of marketFinancials) {
-      merged.set(symbol, data);
-    }
-    return merged;
-  }, [cachedFinancials, marketFinancials]);
+  const marketFinancials = useTickerFinancialsMap(portfolioTickers, instrumentOptions);
+  const financials = useMemo(
+    () => buildPortfolioFinancialsMap(portfolioTickers, cachedFinancials, marketFinancials, instrumentOptions),
+    [portfolioTickers, cachedFinancials, marketFinancials, instrumentOptions],
+  );
   const brokerPerformance = useBrokerPortfolioPerformance(activePortfolio, config);
   const performanceChartPoints = useMemo(
     () => buildPerformanceChartPoints(brokerPerformance.performance),
@@ -186,14 +188,15 @@ function PortfolioAnalyticsPane({ focused, width, height }: PaneProps) {
   );
 
   const sharpe = useMemo(
-    () => (portfolioReturns ? computeSharpeRatio(portfolioReturns) : null),
-    [portfolioReturns],
+    () => (portfolioReturns && returnSeriesResult.sharpeCadence.supported ? computeSharpeRatio(portfolioReturns) : null),
+    [portfolioReturns, returnSeriesResult.sharpeCadence],
   );
 
-  const beta = useMemo(
-    () => (portfolioReturnSeries ? computeDatedBeta(portfolioReturnSeries, spyReturnSeries.returns) : null),
-    [portfolioReturnSeries, spyReturnSeries],
+  const betaResult = useMemo(
+    () => buildPortfolioBetaResult(returnSeriesResult, spyReturnSeries),
+    [returnSeriesResult, spyReturnSeries],
   );
+  const beta = betaResult.value;
 
   const sectorAllocation = useMemo(
     () => buildSectorRowsFromPortfolioColumns(portfolioTickers, financials, columnContext),
@@ -241,8 +244,14 @@ function PortfolioAnalyticsPane({ focused, width, height }: PaneProps) {
       unsupportedReason: returnSeriesResult.unsupportedReason,
       historyIntegrity: returnSeriesResult.historyIntegrity,
       benchmarkIntegrity: spyReturnSeries.integrity,
+      sharpeCadence: returnSeriesResult.sharpeCadence,
+      returnTimestamps: returnSeriesResult.returnTimestamps,
+      betaHoldingTimestamps: betaResult.holdingTimestamps,
+      benchmarkTimestamps: betaResult.benchmarkTimestamps,
+      returns: portfolioReturnSeries,
+      benchmarkReturns: spyReturnSeries.returns,
     }),
-    [beta, returnSeriesResult, spyReturnSeries.integrity, sharpe],
+    [beta, betaResult, returnSeriesResult, spyReturnSeries, sharpe],
   );
   const metricsHeight = summaryRows.length + riskRows.length + 5;
   const historyNote = performanceHistoryNote(brokerPerformance.performance);
@@ -251,7 +260,7 @@ function PortfolioAnalyticsPane({ focused, width, height }: PaneProps) {
     + (historyNote ? wrapTextLines(historyNote, noticeWidth).length : 0);
   // Keep table rows available after active data warnings wrap.
   const availableHistoryChartHeight = height - metricsHeight - 7 - noticeHeight;
-  const historyChartHeight = performanceChartPoints.length >= 2 && availableHistoryChartHeight >= 5
+  const historyChartHeight = performanceChartPoints.filter((point) => Number.isFinite(point.close)).length >= 2 && availableHistoryChartHeight >= 5
     ? Math.min(8, availableHistoryChartHeight)
     : 0;
   const showHistoryChart = historyChartHeight >= 5;
@@ -261,8 +270,6 @@ function PortfolioAnalyticsPane({ focused, width, height }: PaneProps) {
   );
   const historyAxisLabel = buildHistoryAxisLabel({
     performance: brokerPerformance.performance,
-    activePortfolio,
-    baseCurrency,
   });
   const formatHistoryAxis = useCallback((value: number) => (
     formatHistoryAxisValue(value, brokerPerformance.performance)

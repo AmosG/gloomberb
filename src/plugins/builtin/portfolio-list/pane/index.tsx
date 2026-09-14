@@ -12,6 +12,7 @@ import {
 } from "../../../../components";
 import { useTickerSourceActivate } from "../../shared/ticker-source";
 import { useFxRatesMap, useTickerFinancialsMap } from "../../../../market-data/hooks";
+import { buildPortfolioFinancialsMap } from "../../../../market-data/portfolio-financials";
 import { useAppActive } from "../../../../state/app/activity";
 import {
   useAppSelector,
@@ -119,13 +120,10 @@ export function PortfolioListPane({ focused, width, height }: PaneProps) {
     portfolioId: isPortfolioTab ? activeCollectionId : undefined,
   }), [activeCollectionId, isPortfolioTab]);
   const marketFinancialsMap = useTickerFinancialsMap(tickers, financialsInstrumentOptions);
-  const financialsMap = useMemo(() => {
-    const merged = new Map(cachedFinancials);
-    for (const [symbol, financials] of marketFinancialsMap) {
-      merged.set(symbol, financials);
-    }
-    return merged;
-  }, [cachedFinancials, marketFinancialsMap]);
+  const financialsMap = useMemo(
+    () => buildPortfolioFinancialsMap(tickers, cachedFinancials, marketFinancialsMap, financialsInstrumentOptions),
+    [tickers, cachedFinancials, marketFinancialsMap, financialsInstrumentOptions],
+  );
   const valueFlashingEnabled = useAppSelector((state) => state.config.valueFlashingEnabled);
   const flashSymbols = useQuoteFlashMap(financialsMap, valueFlashingEnabled);
 

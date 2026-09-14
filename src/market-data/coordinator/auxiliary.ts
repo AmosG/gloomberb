@@ -1,3 +1,4 @@
+import { nextResponseSequence } from "../../data/response-sequence";
 import { exchangeRateMetadata, isUsableCachedExchangeRate } from "../../utils/exchange-rate-snapshot";
 import type { DataProvider, SecFilingDocument, SecFilingItem } from "../../types/data-provider";
 import type { OptionsChain } from "../../types/financials";
@@ -32,6 +33,8 @@ import {
 type RunSingleFlight = <T>(key: string, task: () => Promise<T>) => Promise<T>;
 
 interface AuxiliaryLoaderOptions<T> {
+  /** SEC resources join an active request; a completed request can be forced again. */
+  coalesceRefresh?: boolean;
   dataProvider: DataProvider;
   forceRefresh?: boolean;
   key: string;
@@ -69,21 +72,28 @@ export function loadOptionsEntry(options: {
         toMarketDataContext(request.instrument),
       );
       const attempts = [createAttempt(dataProvider.id, startedAt, data.expirationDates.length > 0 ? "success" : "empty", data.expirationDates.length === 0 ? "NO_DATA" : undefined)];
-      return store.update(key, (current) => readyEntry(current, data.expirationDates.length > 0 ? data : null, dataProvider.id, attempts, { keepLastGoodOnEmpty: true }));
+      return store.update(key, (current) => ({
+        ...readyEntry(current, data, dataProvider.id, attempts),
+        responseSequence: nextResponseSequence(),
+        error: data.expirationDates.length === 0 ? { reasonCode: "NO_DATA", message: "No data available" } : null,
+      }));
     },
   });
 }
 
 export function loadSecFilingsEntry(options: {
   dataProvider: DataProvider;
+  forceRefresh?: boolean;
   request: SecFilingsRequest;
   store: QueryStore<SecFilingItem[]>;
   runSingleFlight: RunSingleFlight;
 }): Promise<QueryEntry<SecFilingItem[]>> {
-  const { dataProvider, request, store, runSingleFlight } = options;
+  const { dataProvider, forceRefresh = false, request, store, runSingleFlight } = options;
   const key = buildSecFilingsKey(request);
   return loadAuxiliaryEntry({
     dataProvider,
+    forceRefresh,
+    coalesceRefresh: true,
     key,
     store,
     ttlMs: SEC_FILINGS_CACHE_TTL_MS,
@@ -97,7 +107,7 @@ export function loadSecFilingsEntry(options: {
         request.instrument.symbol,
         request.count ?? 50,
         request.instrument.exchange ?? "",
-        toMarketDataContext(request.instrument),
+        { ...toMarketDataContext(request.instrument), ...(forceRefresh ? { cacheMode: "refresh" as const } : {}) },
       );
       const attempts = [createAttempt(dataProvider.id, startedAt, data.length > 0 ? "success" : "empty", data.length === 0 ? "NO_DATA" : undefined)];
       return store.update(key, (current) => readyEntry(current, data.length > 0 ? data : null, dataProvider.id, attempts, { keepLastGoodOnEmpty: true }));
@@ -107,14 +117,17 @@ export function loadSecFilingsEntry(options: {
 
 export function loadSecFilingContentEntry(options: {
   dataProvider: DataProvider;
+  forceRefresh?: boolean;
   filing: SecFilingItem;
   store: QueryStore<string | null>;
   runSingleFlight: RunSingleFlight;
 }): Promise<QueryEntry<string | null>> {
-  const { dataProvider, filing, store, runSingleFlight } = options;
+  const { dataProvider, forceRefresh = false, filing, store, runSingleFlight } = options;
   const key = buildSecContentKey(filing.accessionNumber);
   return loadAuxiliaryEntry({
     dataProvider,
+    forceRefresh,
+    coalesceRefresh: true,
     key,
     store,
     ttlMs: SEC_CONTENT_CACHE_TTL_MS,
@@ -134,14 +147,17 @@ export function loadSecFilingContentEntry(options: {
 
 export function loadSecFilingDocumentsEntry(options: {
   dataProvider: DataProvider;
+  forceRefresh?: boolean;
   filing: SecFilingItem;
   store: QueryStore<SecFilingDocument[]>;
   runSingleFlight: RunSingleFlight;
 }): Promise<QueryEntry<SecFilingDocument[]>> {
-  const { dataProvider, filing, store, runSingleFlight } = options;
+  const { dataProvider, forceRefresh = false, filing, store, runSingleFlight } = options;
   const key = buildSecDocumentsKey(filing.accessionNumber);
   return loadAuxiliaryEntry({
     dataProvider,
+    forceRefresh,
+    coalesceRefresh: true,
     key,
     store,
     ttlMs: SEC_CONTENT_CACHE_TTL_MS,
@@ -228,6 +244,7 @@ export function loadFxRateEntry(options: {
 
 function loadAuxiliaryEntry<T>({
   dataProvider,
+  coalesceRefresh = false,
   forceRefresh = false,
   key,
   store,
@@ -239,7 +256,7 @@ function loadAuxiliaryEntry<T>({
   if (!forceRefresh && hasFreshReadyEntry(current, ttlMs)) {
     return Promise.resolve(current);
   }
-  return runSingleFlight(forceRefresh ? `${key}|refresh` : key, async () => {
+  return runSingleFlight(forceRefresh && !coalesceRefresh ? `${key}|refresh` : key, async () => {
     store.update(key, loadingEntry);
     const startedAt = Date.now();
     try {

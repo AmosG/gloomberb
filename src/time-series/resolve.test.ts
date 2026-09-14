@@ -1357,6 +1357,7 @@ describe("resolveChartSpecData", () => {
     const provider = createTestDataProvider({
       getTickerFinancials: async (symbol) => ({
         ...emptyFinancials(),
+        financialCurrency: "USD",
         quarterlyStatements: symbol === "LEFT"
           ? [
             {

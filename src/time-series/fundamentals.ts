@@ -14,6 +14,7 @@ type NumericStatementField =
   | "grossProfit"
   | "operatingIncome"
   | "netIncome"
+  | "netIncomeCommonStockholders"
   | "ebitda"
   | "operatingCashFlow"
   | "capitalExpenditure"
@@ -32,6 +33,7 @@ type NumericStatementField =
 type InternalStatement = FinancialStatement & {
   __timeSeriesDerivedFields?: NumericStatementField[];
   __timeSeriesTtm?: boolean;
+  __timeSeriesIncompleteCommonIncome?: boolean;
 };
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
@@ -41,6 +43,7 @@ export const QUARTERLY_FLOW_FIELDS: readonly NumericStatementField[] = [
   "grossProfit",
   "operatingIncome",
   "netIncome",
+  "netIncomeCommonStockholders",
   "ebitda",
   "operatingCashFlow",
   "capitalExpenditure",
@@ -235,6 +238,11 @@ function mergeStatementPeriodGroup(statements: readonly InternalStatement[]): In
 
   merged.fieldAvailability = fieldAvailability;
   merged.availableAt = completeStatementAvailability(merged);
+  if (NUMERIC_STATEMENT_FIELDS.every(field => statementNumber(merged, field) === null)) {
+    // Even an empty statement can establish when a missing period became
+    // known. Its empty field map still cannot date any numeric metric.
+    merged.availableAt = completeAvailability([dateSource.availableAt]);
+  }
   if (derivedFields.length > 0) merged.__timeSeriesDerivedFields = derivedFields;
   return merged;
 }
@@ -359,13 +367,17 @@ function buildTtmStatements(statements: readonly FinancialStatement[]): Internal
   const result: InternalStatement[] = [];
   for (let index = 3; index < sorted.length; index += 1) {
     const window = sorted.slice(index - 3, index + 1);
+    const latest = window.at(-1)!;
     const times = window.map(statementTime);
     if (new Set(window.map((statement) => statement.currency)).size > 1
       || times.some((time, index) => !Number.isFinite(time) || (index > 0 && (time - times[index - 1]! < 60 * DAY_MS || time - times[index - 1]! > 120 * DAY_MS)))) {
+      // Retain the known period as a gap. Removing an incomplete window joins
+      // the last usable TTM observation to the first recovered one.
+      result.push({ date: latest.date, currency: latest.currency, availableAt: latest.availableAt,
+        __timeSeriesTtm: true });
       continue;
     }
 
-    const latest = window.at(-1)!;
     const ttm: InternalStatement = {
       date: latest.date,
       currency: latest.currency,
@@ -375,6 +387,10 @@ function buildTtmStatements(statements: readonly FinancialStatement[]): Internal
     };
     const unresolvedEps = window.find((statement) => statement.epsBasis?.status === "unresolved");
     if (unresolvedEps) ttm.epsBasis = unresolvedEps.epsBasis;
+    const commonIncomeCount = window.filter((statement) => finiteNumber(statement.netIncomeCommonStockholders)).length;
+    // Known common claims in some quarters cannot be ignored by substituting
+    // aggregate income for the entire window or only its missing quarters.
+    if (commonIncomeCount > 0 && commonIncomeCount < window.length) ttm.__timeSeriesIncompleteCommonIncome = true;
 
     for (const field of [...QUARTERLY_FLOW_FIELDS, ...QUARTERLY_AVERAGE_FIELDS]) {
       const values = window.map((statement) => statementNumber(statement, field));
@@ -479,17 +495,19 @@ function selectedCash(statement: FinancialStatement): SelectedStatementField | n
 }
 
 function selectedEps(
-  statement: FinancialStatement,
+  statement: InternalStatement,
 ): { value: number; dependencies: NumericStatementField[] } | null {
   if (statement.epsBasis?.status === "unresolved") return null;
-  if (finiteNumber(statement.eps) && statement.eps !== 0) {
+  if (finiteNumber(statement.eps)) {
     return { value: statement.eps, dependencies: ["eps"] };
   }
+  if (statement.__timeSeriesIncompleteCommonIncome) return null;
   const shares = selectedShares(statement);
-  if (!shares || !finiteNumber(statement.netIncome)) return null;
+  const income = selectStatementField(statement, ["netIncomeCommonStockholders", "netIncome"]);
+  if (!shares || !income) return null;
   return {
-    value: statement.netIncome / shares.value,
-    dependencies: ["netIncome", shares.field],
+    value: income.value / shares.value,
+    dependencies: [income.field, shares.field],
   };
 }
 
@@ -587,7 +605,10 @@ function pointForStatement(
 ): TimeSeriesPoint | null {
   const observedAt = validDate(statement.date);
   if (!observedAt) return null;
-  const availableAtString = metricAvailability(statement, metric);
+  // A missing metric is known to be unavailable with its statement. It has
+  // no metric-specific publication date to substitute for that boundary.
+  const availableAtString = metricAvailability(statement, metric)
+    ?? (value === null ? statement.availableAt : undefined);
   const availableAt = validDate(availableAtString);
   const date = timestampMode !== "period-end" && availableAt ? availableAt : observedAt;
   return {
@@ -621,11 +642,11 @@ function historicalValuation(
   return { value: comparablePrice === null ? null : valuationAtPrice(statement, metric, comparablePrice), integrity: price.integrity, issue: price.issue };
 }
 
-function hasValuationInputs(statement: FinancialStatement, metric: string): boolean {
+function hasValuationInputs(statement: InternalStatement, metric: string): boolean {
   if (metric === "trailingPE") {
     return statement.epsBasis?.status === "unresolved"
-      || finiteNumber(statement.eps)
-      || (finiteNumber(statement.netIncome) && selectedShares(statement) !== null);
+      || statement.__timeSeriesIncompleteCommonIncome === true
+      || selectedEps(statement) !== null;
   }
   if (!selectedShares(statement)) return false;
   if (metric === "priceSales") return finiteNumber(statement.totalRevenue);
@@ -734,15 +755,6 @@ export function valuationSeriesUsesLiveQuote(fieldId: string): boolean {
   return namespace === "valuation" && QUOTE_DERIVED_VALUATION_IDS.has(metric);
 }
 
-function dedupeAndSortPoints(points: readonly TimeSeriesPoint[]): TimeSeriesPoint[] {
-  const byTimestamp = new Map<number, TimeSeriesPoint>();
-  for (const point of points) {
-    const time = point.date.getTime();
-    if (Number.isFinite(time)) byTimestamp.set(time, point);
-  }
-  return [...byTimestamp.values()].sort((left, right) => left.date.getTime() - right.date.getTime());
-}
-
 function preferredPeriodPoint(
   existing: TimeSeriesPoint,
   candidate: TimeSeriesPoint,
@@ -809,9 +821,10 @@ export function extractFundamentalSeries(
   const [namespace, metric = ""] = canonicalId.split(".");
   if (namespace === "fundamental" && FUNDAMENTAL_IDS.has(metric)) {
     const selected = sourceStatements(financials, source.period);
+    let hasObservation = false;
     const points = selected.statements.flatMap((statement) => {
       const result = fundamentalValue(statement, metric);
-      if (result.value === null) return [];
+      if (result.value !== null) hasObservation = true;
       const point = pointForStatement(
         statement,
         metric,
@@ -822,6 +835,7 @@ export function extractFundamentalSeries(
       );
       return point ? [point] : [];
     });
+    if (!hasObservation) return [];
     const deduped = dedupeFundamentalPeriods(points);
     return getTimeSeriesField(canonicalId)?.unit.startsWith("currency")
       ? reportingCurrencySeries(deduped, financials.financialCurrency).points : deduped;
@@ -835,25 +849,32 @@ export function extractFundamentalSeries(
 
   const selected = sourceStatements(financials, source.period, metric);
   const currencies = createValuationCurrencyContext(financials);
+  let hasHistoricalObservation = false;
   const historical = selected.statements.flatMap((statement) => {
     const historical = historicalValuation(financials, statement, metric, currencies);
-    if (historical === null) return [];
+    if (historical !== null) hasHistoricalObservation = true;
     const point = pointForStatement(
       statement,
       metric,
-      historical.value,
+      historical?.value ?? null,
       selected.period,
       source.timestampMode,
       true,
     );
-    if (point && historical.integrity) point.provenance = { ...point.provenance, priceHistoryIntegrity: historical.integrity };
-    if (point && historical.issue) point.provenance = { ...point.provenance,
+    if (point && historical?.integrity) point.provenance = { ...point.provenance, priceHistoryIntegrity: historical.integrity };
+    if (point && historical?.issue) point.provenance = { ...point.provenance,
       valuationPriceIssues: [{ ...historical.issue, affectedAt: point.date.toISOString() }] };
     return point ? [point] : [];
   });
   const current = currentDerivedValuationPoint(financials, selected.statements, metric, currencies);
+  if (!hasHistoricalObservation && !current) return [];
   const dedupedHistorical = dedupeFundamentalPeriods(historical);
-  return dedupeAndSortPoints(current ? [...dedupedHistorical, current] : dedupedHistorical);
+  // Publication timestamps can be shared by distinct fiscal periods. Their
+  // period identities were deduplicated above; a gap must not overwrite a
+  // different period's usable observation released on the same date.
+  return (current ? [...dedupedHistorical, current] : dedupedHistorical).sort((left, right) => (
+    left.date.getTime() - right.date.getTime() || left.observedAt.getTime() - right.observedAt.getTime()
+  ));
 }
 
 export function fundamentalSeriesUsesAvailabilityFallback(

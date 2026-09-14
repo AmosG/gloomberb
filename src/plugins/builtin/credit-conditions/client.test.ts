@@ -45,6 +45,48 @@ describe("loadCreditConditions", () => {
     })).rejects.toThrow("offline");
   });
 
+  test("rejects another index before storing it under the requested FRED series", async () => {
+    const persistence = new MemoryPluginPersistence();
+    attachFredSeriesPersistence(persistence);
+    const aaa = CREDIT_SERIES[1].seriesId;
+    const result = await loadCreditConditions(false, async (seriesId) =>
+      payload(seriesId === aaa ? CREDIT_SERIES[5].seriesId : seriesId));
+    expect(result.rows.some((row) => row.seriesId === aaa)).toBe(false);
+    expect(result.errors).toEqual([`${aaa}: unexpected FRED metadata`]);
+    expect(persistence.getResource("fred-series", `${aaa}:limit=45:sort=desc`,
+      { sourceKey: "gloomberb-cloud", schemaVersion: 2 })).toBeNull();
+  });
+
+  test("invalid metadata refresh retains the dated prior row and cache until valid recovery", async () => {
+    const persistence = new MemoryPluginPersistence();
+    attachFredSeriesPersistence(persistence);
+    const aaa = CREDIT_SERIES[1].seriesId;
+    const readCached = () => persistence.getResource<ReturnType<typeof payload>>(
+      "fred-series", `${aaa}:limit=45:sort=desc`, { sourceKey: "gloomberb-cloud", schemaVersion: 2 });
+    await loadCreditConditions(false, async (seriesId) => payload(seriesId));
+    const before = readCached();
+    for (const change of ["units", "identity"] as const) {
+      const failed = await loadCreditConditions(true, async (seriesId) => {
+        const data = payload(seriesId);
+        if (seriesId === aaa) {
+          if (change === "units") data.info.units = "Index";
+          else data.info.id = CREDIT_SERIES[5].seriesId;
+        }
+        return data;
+      });
+      expect(failed.rows.find((row) => row.seriesId === aaa))
+        .toMatchObject({ oasBp: 82, date: "2026-07-03", stale: true });
+      expect(failed.errors.join(" ")).toContain("unexpected FRED metadata");
+      expect(readCached()).toEqual(before);
+    }
+    const recovered = await loadCreditConditions(true, async (seriesId) => ({
+      ...payload(seriesId), observations: [{ date: "2026-07-06", value: 0 }],
+    }));
+    expect(recovered.rows.find((row) => row.seriesId === aaa))
+      .toMatchObject({ oasBp: 0, date: "2026-07-06", stale: false });
+    expect(recovered.errors).toEqual([]);
+  });
+
   test("reuses bounded persisted history across midnight", async () => {
     const persistence = new MemoryPluginPersistence();
     attachFredSeriesPersistence(persistence);

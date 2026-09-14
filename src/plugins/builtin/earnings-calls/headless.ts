@@ -127,6 +127,7 @@ function selectedSection(args: HeadlessPaneLoadArgs): TranscriptSection {
 function transcriptResult(
   transcript: CloudEarningsTranscriptPayload,
   call: CloudEarningsCallPayload,
+  calls: EarningsCallsResult,
   args: HeadlessPaneLoadArgs,
 ): HeadlessRowsResult {
   const section = selectedSection(args);
@@ -141,7 +142,12 @@ function transcriptResult(
   return {
     columns: TRANSCRIPT_COLUMNS,
     rows,
+    errors: calls.refreshError ? [calls.refreshError] : undefined,
+    ...(calls.stale || calls.pending ? { complete: false } : {}),
     metadata: {
+      stale: calls.stale,
+      callListFetchedAt: calls.fetchedAt,
+      callListPending: calls.pending ?? false,
       callId: call.id,
       ticker: transcript.ticker,
       company: transcript.companyName,
@@ -300,7 +306,7 @@ export function createEarningsTranscriptHeadless(
       if (isPendingTranscript(transcript)) {
         throw new Error(`Transcript for ${ticker} ${quarter} is still being produced.`);
       }
-      return transcriptResult(transcript, selected, args);
+      return transcriptResult(transcript, selected, calls, args);
     },
   };
 }

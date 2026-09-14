@@ -3,120 +3,115 @@ import {
   type CloudRiskReportListPayload,
   type CloudRiskReportPayload,
 } from "../../../api-client";
-import type { PluginPersistence } from "../../../types/plugin";
+import { ApiRequestError } from "../../../api-client/errors";
+import type { HeadlessPaneApiClient, PluginPersistence } from "../../../types/plugin";
 
-/**
- * Risk factor reports come from Gloom Cloud's open reads. A report is built
- * once per 10-K and does not change, so it is kept a long time; the list of
- * years gains one a year.
- */
-
+/** Annual reports are immutable; discovery of newly produced reports is not. */
 const LIST_KIND = "reports";
 const REPORT_KIND = "report";
 const CACHE_SOURCE = "risk-factors";
 const CACHE_SCHEMA_VERSION = 1;
+const LIST_CACHE_POLICY = { staleMs: 6 * 60 * 60 * 1000, expireMs: 30 * 24 * 60 * 60 * 1000 };
+const REPORT_CACHE_POLICY = { staleMs: 7 * 24 * 60 * 60 * 1000, expireMs: 365 * 24 * 60 * 60 * 1000 };
 
-const LIST_CACHE_POLICY = {
-  staleMs: 6 * 60 * 60 * 1000,
-  expireMs: 30 * 24 * 60 * 60 * 1000,
-} as const;
-const REPORT_CACHE_POLICY = {
-  staleMs: 7 * 24 * 60 * 60 * 1000,
-  expireMs: 365 * 24 * 60 * 60 * 1000,
-} as const;
-
-let persistence: PluginPersistence | null = null;
-const activeListFetches = new Map<
-  string,
-  Promise<CloudRiskReportListPayload>
->();
-const activeReportFetches = new Map<string, Promise<CloudRiskReportPayload>>();
-
-export function attachRiskFactorsPersistence(value: PluginPersistence): void {
-  persistence = value;
+type RiskApiClient = Pick<HeadlessPaneApiClient, "getRiskReports" | "getRiskReport">;
+interface RiskFreshness {
+  fetchedAt: number;
+  stale: boolean;
+  refreshError?: string;
+  errorStatus?: number;
 }
+export type RiskReportsResult = CloudRiskReportListPayload & RiskFreshness;
+export type RiskReportResult = CloudRiskReportPayload & RiskFreshness;
+type ActiveRequest<T> = { client: RiskApiClient; store: PluginPersistence | null; promise: Promise<T & RiskFreshness> };
+let persistence: PluginPersistence | null = null;
+const activeListFetches = new Map<string, ActiveRequest<CloudRiskReportListPayload>>();
+const activeReportFetches = new Map<string, ActiveRequest<CloudRiskReportPayload>>();
+const failedRefreshes = new Map<string, PluginPersistence | null>();
 
+export function attachRiskFactorsPersistence(value: PluginPersistence): void { persistence = value; }
 export function resetRiskFactorsPersistence(): void {
   persistence = null;
   activeListFetches.clear();
   activeReportFetches.clear();
+  failedRefreshes.clear();
 }
 
-function cached<T>(kind: string, key: string, allowExpired = false) {
-  return persistence?.getResource<T>(kind, key, {
-    sourceKey: CACHE_SOURCE,
-    schemaVersion: CACHE_SCHEMA_VERSION,
-    allowExpired,
-  });
+/** A missing/denied resource must not be replaced by previously cached content. */
+export function discardRiskData(error: unknown): boolean {
+  const status = error instanceof ApiRequestError ? error.status : undefined;
+  return status !== undefined && status >= 400 && status < 500 && status !== 408 && status !== 429;
 }
 
-function remember<T>(
+function loadCached<T extends object>(
+  client: RiskApiClient,
   kind: string,
   key: string,
-  value: T,
+  active: Map<string, ActiveRequest<T>>,
   policy: { staleMs: number; expireMs: number },
-) {
-  persistence?.setResource(kind, key, value, {
-    sourceKey: CACHE_SOURCE,
-    schemaVersion: CACHE_SCHEMA_VERSION,
-    cachePolicy: policy,
+  force: boolean,
+  fetch: () => Promise<T>,
+): Promise<T & RiskFreshness> {
+  const store = persistence;
+  const options = { sourceKey: CACHE_SOURCE, schemaVersion: CACHE_SCHEMA_VERSION };
+  const failedKey = `${kind}:${key}`;
+  const failed = failedRefreshes.has(failedKey) && failedRefreshes.get(failedKey) === store;
+  const cached = store?.getResource<T>(kind, key, options);
+  if (!force && !failed && cached && !cached.stale) {
+    return Promise.resolve({ ...cached.value, fetchedAt: cached.fetchedAt, stale: false });
+  }
+  const existing = active.get(key);
+  if (!force && existing?.client === client && existing.store === store) return existing.promise;
+  const request: ActiveRequest<T> = { client, store, promise: null! };
+  const current = () => active.get(key) === request && persistence === store;
+  request.promise = Promise.resolve().then(fetch).then((payload) => {
+    const fetchedAt = Date.now();
+    if (current()) {
+      failedRefreshes.delete(failedKey);
+      store?.setResource(kind, key, payload, { ...options, cachePolicy: policy });
+    }
+    return { ...payload, fetchedAt, stale: false };
+  }).catch((error: unknown) => {
+    // A failed forced refresh must be retried when this pane is reopened, even
+    // when the previously cached value has not reached its ordinary TTL yet.
+    if (current()) failedRefreshes.set(failedKey, store);
+    if (discardRiskData(error)) {
+      if (current()) store?.deleteResource(kind, key, { sourceKey: CACHE_SOURCE });
+      throw error;
+    }
+    const fallback = store?.getResource<T>(kind, key, { ...options, allowExpired: true });
+    if (!fallback) throw error;
+    return {
+      ...fallback.value,
+      fetchedAt: fallback.fetchedAt,
+      stale: true,
+      refreshError: (error instanceof Error ? error.message : String(error)).trim() || "Request failed",
+      errorStatus: error instanceof ApiRequestError ? error.status : undefined,
+    };
+  }).finally(() => { if (active.get(key) === request) active.delete(key); });
+  active.set(key, request);
+  return request.promise;
+}
+
+export function loadRiskReportsWithClient(client: RiskApiClient, ticker: string, options?: { force?: boolean }): Promise<RiskReportsResult> {
+  const key = ticker.trim().toUpperCase();
+  return loadCached(client, LIST_KIND, key, activeListFetches, LIST_CACHE_POLICY, options?.force ?? false, async () => {
+    const payload = await client.getRiskReports(key);
+    if (!payload || !Array.isArray(payload.reports)) throw new Error(`Risk report list unavailable for ${key}.`);
+    return payload;
   });
 }
 
-export async function loadRiskReports(
-  ticker: string,
-  options?: { force?: boolean },
-): Promise<CloudRiskReportListPayload> {
-  const key = ticker.toUpperCase();
-  const force = options?.force ?? false;
-  const hit = cached<CloudRiskReportListPayload>(LIST_KIND, key);
-  if (!force && hit && !hit.stale) return hit.value;
-  const active = activeListFetches.get(key);
-  if (active && !force) return active;
-  const request = apiClient
-    .getRiskReports(key)
-    .then((payload) => {
-      remember(LIST_KIND, key, payload, LIST_CACHE_POLICY);
-      return payload;
-    })
-    .catch((error: unknown) => {
-      const expired = cached<CloudRiskReportListPayload>(LIST_KIND, key, true);
-      if (expired) return expired.value;
-      throw error;
-    })
-    .finally(() => {
-      if (activeListFetches.get(key) === request) activeListFetches.delete(key);
-    });
-  activeListFetches.set(key, request);
-  return request;
+export function loadRiskReportWithClient(client: RiskApiClient, ticker: string, year: number, options?: { force?: boolean }): Promise<RiskReportResult> {
+  const symbol = ticker.trim().toUpperCase();
+  return loadCached(client, REPORT_KIND, `${symbol}:${year}`, activeReportFetches, REPORT_CACHE_POLICY, options?.force ?? false, async () => {
+    const payload = await client.getRiskReport(symbol, year);
+    if (!payload || payload.ticker?.toUpperCase() !== symbol || payload.reportYear !== year) {
+      throw new Error(`Risk report response does not match ${symbol} ${year}.`);
+    }
+    return payload;
+  });
 }
 
-export async function loadRiskReport(
-  ticker: string,
-  year: number,
-  options?: { force?: boolean },
-): Promise<CloudRiskReportPayload> {
-  const key = `${ticker.toUpperCase()}:${year}`;
-  const force = options?.force ?? false;
-  const hit = cached<CloudRiskReportPayload>(REPORT_KIND, key);
-  if (!force && hit && !hit.stale) return hit.value;
-  const active = activeReportFetches.get(key);
-  if (active && !force) return active;
-  const request = apiClient
-    .getRiskReport(ticker, year)
-    .then((payload) => {
-      remember(REPORT_KIND, key, payload, REPORT_CACHE_POLICY);
-      return payload;
-    })
-    .catch((error: unknown) => {
-      const expired = cached<CloudRiskReportPayload>(REPORT_KIND, key, true);
-      if (expired) return expired.value;
-      throw error;
-    })
-    .finally(() => {
-      if (activeReportFetches.get(key) === request)
-        activeReportFetches.delete(key);
-    });
-  activeReportFetches.set(key, request);
-  return request;
-}
+export const loadRiskReports = (ticker: string, options?: { force?: boolean }) => loadRiskReportsWithClient(apiClient, ticker, options);
+export const loadRiskReport = (ticker: string, year: number, options?: { force?: boolean }) => loadRiskReportWithClient(apiClient, ticker, year, options);

@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { Box, Text } from "../../../../ui";
-import { EmptyState, Prose, Spinner, TickerListTableView, type DataTableKeyEvent } from "../../../../components";
+import { EmptyState, Spinner, TickerListTableView, type DataTableKeyEvent } from "../../../../components";
 import type { ColumnConfig } from "../../../../types/config";
 import type { TickerFinancials } from "../../../../types/financials";
 import type { TickerRecord } from "../../../../types/ticker";
@@ -93,12 +93,6 @@ export function AiScreenerResultsView({
           ))}
         </Box>
       )}
-      {activeTab && activeTab.results.length > 0 && (
-        <Box paddingX={1} flexDirection="column">
-          <Prose width={detailTextWidth} color={colors.textDim} text={t("AI rationale; listing identity checked. Verify financial criteria in company research.")} />
-        </Box>
-      )}
-
       <Box flexGrow={1} minHeight={0}>
         {!activeTab ? (
           <Box padding={1} flexGrow={1}>

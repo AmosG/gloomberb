@@ -19,6 +19,16 @@ function createTotals(overrides: Partial<PortfolioSummaryTotals> = {}): Portfoli
 }
 
 describe("resolvePortfolioAccountMetrics", () => {
+  test("broker account profit cannot supply a missing or zero acquisition-cost denominator", () => {
+    const account: BrokerAccount = { accountId: "test", name: "Test", unrealizedPnl: 200 };
+    for (const cost of [Number.NaN, 0]) {
+      const result = resolvePortfolioAccountMetrics(createTotals({ totalCostBasis: cost, unrealizedPnlPct: 0 }), account);
+      expect(result.unrealizedPnl).toBe(200);
+      expect(result.unrealizedPnlPct).toBeNaN();
+    }
+    expect(resolvePortfolioAccountMetrics(createTotals({ totalCostBasis: 1000 }), account).unrealizedPnlPct).toBe(20);
+  });
+
   test("prefers broker account P&L while preserving position fallback percentages", () => {
     const account: BrokerAccount = {
       accountId: "DU12345",

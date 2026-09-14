@@ -3,7 +3,7 @@ import { hasValidQuoteObservationTime } from "../../../market-data/quotes/freshn
 import type { HeadlessPaneColumn, HeadlessPaneDefinition } from "../../../types/headless";
 import type { TimeRange } from "../../../time-series/range";
 import { formatNumber, formatPercentRaw } from "../../../utils/format";
-import { formatMarketPrice, formatMarketPriceWithCurrency } from "../../../market-data/market/format";
+import { formatMarketPrice, formatMarketPriceWithCurrency, formatPriceObservation } from "../../../market-data/market/format";
 import { pricePointValues, priceHistoryIntegrityNotice } from "../../../utils/price-history-integrity";
 import { buildFinancialTableModel, financialStatementCurrency, financialStatementDateNotice, financialStatementLimitations, formatFinancialHeader } from "./financials/model";
 import { paneSchemas } from "./headless-schema";
@@ -18,21 +18,29 @@ export const financialStatementsHeadless: HeadlessPaneDefinition<"rows"> = {
   async load({ symbols, options }, ctx) {
     const symbol = symbols[0]!;
     const financials = await loadHeadlessFinancials(ctx, symbol);
-    const table = buildFinancialTableModel(financials, {
-      period: options.period === "quarterly" ? "quarterly" : "annual",
+    const requestedPeriod = options.period === "quarterly" ? "quarterly" : "annual";
+    const hasRequestedStatements = (requestedPeriod === "quarterly"
+      ? financials.quarterlyStatements : financials.annualStatements).length > 0;
+    // The interactive tabs visibly select their fallback. A headless request
+    // has no such selection change, so it must keep the requested period.
+    const table = hasRequestedStatements ? buildFinancialTableModel(financials, {
+      period: requestedPeriod,
       statement: String(options.statement ?? "income"),
       expandAll: true,
-    });
-    const statementCurrency = financialStatementCurrency(financials, table?.statements ?? []);
-    const dates = table?.statements.map(({ date, currency, dateSource, providerDate, dateEvidence, availableAt, fieldAvailability, epsBasis }) => ({
+    }) : null;
+    const statementCurrency = financialStatementCurrency(financials, [
+      ...financials.annualStatements, ...financials.quarterlyStatements,
+    ]);
+    const dates = table?.statements.map(({ date, currency, dateSource, providerDate, dateEvidence, availableAt, fieldAvailability, epsBasis, aggregation }) => ({
       date, currency: currency ?? statementCurrency ?? null,
       availableAt: availableAt ?? null,
       fieldAvailability: fieldAvailability ? { ...fieldAvailability } : null,
       ...(epsBasis ? { epsBasis } : {}),
+      ...(aggregation ? { aggregation } : {}),
       dateSource: date === "TTM" ? "derived" : dateSource ?? "provider",
       providerDate: date === "TTM" ? null : providerDate ?? null,
       dateEvidence: date === "TTM" || dateSource !== "sec" ? null : dateEvidence ?? null,
-      label: formatFinancialHeader(date, currency ?? statementCurrency, dateSource).trim(),
+      label: formatFinancialHeader(date, currency ?? statementCurrency, dateSource, false, aggregation?.periodEnd).trim(),
     })) ?? [];
     const rows = table?.rows.map((row) => ({
       id: row.id, kind: row.kind, metric: row.unitLabel,
@@ -54,10 +62,11 @@ export const financialStatementsHeadless: HeadlessPaneDefinition<"rows"> = {
     ];
     return {
       rows, columns, unavailableSymbols: rows.length ? [] : [symbol],
+      ...(!hasRequestedStatements ? { errors: [`${symbol}: No ${requestedPeriod} financial statement coverage.`] } : {}),
       metadata: {
         symbol, name: financials.quote?.name ?? symbol, currency: statementCurrency ?? null, quoteCurrency: financials.quote?.currency ?? null,
         statement: table?.subTab.key ?? options.statement, statementLabel: table?.subTab.name ?? null,
-        period: table?.period ?? options.period, growthBasis: table?.period === "quarterly" ? "QoQ" : "YoY", columns: dates,
+        period: requestedPeriod, growthBasis: requestedPeriod === "quarterly" ? "QoQ" : "YoY", columns: dates,
         notices: rows.length ? [FINANCIAL_VINTAGE_NOTICE] : [],
         limitations: financialStatementLimitations(financials),
         dateProvenance: financialStatementDateNotice(table?.statements ?? []),
@@ -68,11 +77,12 @@ export const financialStatementsHeadless: HeadlessPaneDefinition<"rows"> = {
 
 function quoteAmount(value: unknown, row: Record<string, unknown>, signed = false): string {
   if (typeof value !== "number" || !Number.isFinite(value)) return "—";
-  const options = { assetCategory: typeof row.instrumentType === "string" ? row.instrumentType : undefined, minimumFractionDigits: 2 };
+  const options = { assetCategory: typeof row.instrumentType === "string" ? row.instrumentType : undefined,
+    priceBasis: row.priceBasis === "per-unit" || row.priceBasis === "percent-of-par" ? row.priceBasis : undefined, minimumFractionDigits: 2 } as const;
   const amount = typeof row.currency === "string" && row.currency.trim()
     ? formatMarketPriceWithCurrency(value, row.currency, options)
     : formatMarketPrice(value, options);
-  return `${signed && value >= 0 ? "+" : ""}${amount}`;
+  return amount === "—" ? amount : `${signed && value >= 0 ? "+" : ""}${amount}`;
 }
 
 export const quoteComparisonHeadless: HeadlessPaneDefinition<"rows"> = {
@@ -84,7 +94,7 @@ export const quoteComparisonHeadless: HeadlessPaneDefinition<"rows"> = {
     { key: "name", header: "Name" },
     { key: "price", header: "Last", align: "right", format: (value, row) => quoteAmount(value, row) },
     { key: "change", header: "Change", align: "right", format: (value, row) => quoteAmount(value, row, true) },
-    { key: "changePercent", header: "Change %", align: "right", format: (value) => formatPercentRaw(Number(value)) },
+    { key: "changePercent", header: "Change %", align: "right", format: (value) => formatPercentRaw(typeof value === "number" && Number.isFinite(value) ? value : undefined) },
   ],
   async load({ symbols }, ctx) {
     const loaded = await loadHeadlessSymbols(symbols, ctx, async (key) => {
@@ -98,6 +108,7 @@ export const quoteComparisonHeadless: HeadlessPaneDefinition<"rows"> = {
       rows: loaded.entries.map(({ symbol, data: quote }) => ({
         symbol, name: quote.name ?? "", price: quote.price, currency: quote.currency,
         ...(quote.instrumentType ? { instrumentType: quote.instrumentType } : {}),
+        ...(quote.priceBasis ? { priceBasis: quote.priceBasis } : {}),
         change: quote.change, changePercent: quote.changePercent,
         marketCap: quote.marketCap ?? null, updatedAt: quote.lastUpdated,
       })),
@@ -116,7 +127,7 @@ export const historicalPricesHeadless: HeadlessPaneDefinition<"rows"> = {
       key, header: key, align: "right" as const,
       format: (value: unknown) => value == null || !Number.isFinite(Number(value)) ? "-"
         : key === "volume" ? formatNumber(Number(value), 0)
-        : formatMarketPrice(Number(value), { minimumFractionDigits: 2 }),
+        : formatPriceObservation(Number(value), { minimumFractionDigits: 2 }),
     })),
   ],
   async load({ symbols, options }, ctx) {

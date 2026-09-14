@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { Button, ConfirmDialog, Tabs } from "../../../components";
 import { useAppSelector } from "../../../state/app/context";
 import { useChartQueries, useFxRatesMap, useTickerFinancialsMap } from "../../../market-data/hooks";
+import { buildPortfolioFinancialsMap } from "../../../market-data/portfolio-financials";
 import { selectEffectiveExchangeRates } from "../../../utils/exchange-rate-map";
 import { blendHex, colors } from "../../../theme/colors";
 import type { PaneProps } from "../../../types/plugin";
@@ -415,14 +416,14 @@ export function AccountManagementPane({ focused, width, height }: PaneProps) {
       : [],
     [activeTab, draft.sharedPortfolioId, tickers],
   );
-  const marketFinancials = useTickerFinancialsMap(portfolioTickers);
-  const financials = useMemo(() => {
-    const merged = new Map(cachedFinancials);
-    for (const [symbol, data] of marketFinancials) {
-      merged.set(symbol, data);
-    }
-    return merged;
-  }, [cachedFinancials, marketFinancials]);
+  const instrumentOptions = useMemo(() => ({
+    portfolioId: draft.sharedPortfolioId || undefined,
+  }), [draft.sharedPortfolioId]);
+  const marketFinancials = useTickerFinancialsMap(portfolioTickers, instrumentOptions);
+  const financials = useMemo(
+    () => buildPortfolioFinancialsMap(portfolioTickers, cachedFinancials, marketFinancials, instrumentOptions),
+    [portfolioTickers, cachedFinancials, marketFinancials, instrumentOptions],
+  );
   const trackedCurrencies = useMemo(
     () => buildTrackedCurrencies(portfolioTickers, financials, baseCurrency),
     [baseCurrency, financials, portfolioTickers],
@@ -430,11 +431,11 @@ export function AccountManagementPane({ focused, width, height }: PaneProps) {
   const fetchedExchangeRates = useFxRatesMap(trackedCurrencies);
   const effectiveExchangeRates = selectEffectiveExchangeRates(fetchedExchangeRates, cachedExchangeRates);
   const chartTargets = useMemo(
-    () => buildPortfolioChartTargets(portfolioTickers),
-    [portfolioTickers],
+    () => buildPortfolioChartTargets(portfolioTickers, instrumentOptions),
+    [portfolioTickers, instrumentOptions],
   );
   const chartRequests = useMemo(
-    () => chartTargets.map((target) => target.request),
+    () => chartTargets.flatMap((target) => target.request ? [target.request] : []),
     [chartTargets],
   );
   const chartEntries = useChartQueries(chartRequests);

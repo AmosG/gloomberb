@@ -12,6 +12,7 @@ import {
 
 function datedReturns(values: number[], startDay = 1): DatedReturn[] {
   return values.map((value, index) => ({
+    startDateKey: new Date(Date.UTC(2024, 0, startDay + index - 1)).toISOString().slice(0, 10),
     dateKey: `2024-01-${String(startDay + index).padStart(2, "0")}`,
     value,
   }));
@@ -52,8 +53,8 @@ describe("computeBeta", () => {
       0.005, 0.010,
     ], 2);
     const asset = [
-      { dateKey: "2024-01-01", value: 0.25 },
-      ...market.map((point) => ({ dateKey: point.dateKey, value: point.value * 2 })),
+      { startDateKey: "2023-12-31", dateKey: "2024-01-01", value: 0.25 },
+      ...market.map((point) => ({ startDateKey: point.startDateKey, dateKey: point.dateKey, value: point.value * 2 })),
     ];
 
     expect(computeDatedBeta(asset, market)).toBeCloseTo(2, 5);
@@ -68,11 +69,11 @@ describe("computeBeta", () => {
     const portfolio = computeWeightedPortfolioReturns([
       {
         weight: 80,
-        returns: market.map((point) => ({ dateKey: point.dateKey, value: point.value * 2 })),
+        returns: market.map((point) => ({ startDateKey: point.startDateKey, dateKey: point.dateKey, value: point.value * 2 })),
       },
       {
         weight: 20,
-        returns: market.map((point) => ({ dateKey: point.dateKey, value: 0 })),
+        returns: market.map((point) => ({ startDateKey: point.startDateKey, dateKey: point.dateKey, value: 0 })),
       },
     ]);
 
@@ -87,8 +88,8 @@ describe("computeBeta", () => {
     ]);
 
     expect(returns).toEqual([
-      { dateKey: "2024-01-02", value: 0.1 },
-      { dateKey: "2024-01-03", value: -0.1 },
+      { startDateKey: "2024-01-01", dateKey: "2024-01-02", value: 0.1 },
+      { startDateKey: "2024-01-02", dateKey: "2024-01-03", value: -0.1 },
     ]);
   });
 

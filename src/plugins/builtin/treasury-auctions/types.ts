@@ -16,7 +16,7 @@ export interface TreasuryAuction {
   securityTerm: string;
   /** ISO "YYYY-MM-DD". */
   auctionDate: string;
-  /** High investment rate, reported by Bills and FRNs. */
+  /** Bill investment rate, in percentage points. FRN discount margin is not loaded. */
   highInvestmentRate: number | null;
   /** High yield, reported by Notes, Bonds, and TIPS. */
   highYield: number | null;
@@ -27,7 +27,7 @@ export interface TreasuryAuction {
   bidToCoverRatio: number | null;
   /** Competitive accepted dollar amount. */
   competitiveAccepted: number | null;
-  /** Indirect bidder accepted dollars (foreign central banks and similar). */
+  /** Indirect bidder accepted dollars, including customers bidding through direct submitters. */
   indirectAccepted: number | null;
   /** Primary dealer accepted dollars. */
   primaryDealerAccepted: number | null;

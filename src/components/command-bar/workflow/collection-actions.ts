@@ -188,8 +188,9 @@ export function createCommandBarCollectionWorkflowActions(options: {
         throw new Error("Shares must be greater than 0.");
       }
 
-      const avgCost = Number(coerceFieldString(values.avgCost));
-      if (!Number.isFinite(avgCost)) {
+      const rawAvgCost = coerceFieldString(values.avgCost).trim();
+      const avgCost = Number(rawAvgCost);
+      if (!rawAvgCost || !Number.isFinite(avgCost)) {
         throw new Error("Avg Cost must be a valid number.");
       }
 

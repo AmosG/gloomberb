@@ -62,7 +62,7 @@ export function IndustryPane({ focused, width, height }: PaneProps) {
   const { articles, allArticles, loading, error, newsState } = useIndustryArticles(category);
   const { scrollRef, onBodyScrollActivity } = useNewsTableLoadMore(NEWS_QUERY_PRESETS.sectorAll, newsState);
   const loadNewsStory = useLoadNewsStory();
-  const { detailArticle, openArticle, closeDetail } = useNewsArticleDetail(articles, loadNewsStory);
+  const { detailArticle, detailLoading, detailError, openArticle, closeDetail } = useNewsArticleDetail(articles, loadNewsStory);
   const { readArticleIds, markArticleRead } = useNewsReadState();
   const counts = useMemo(() => {
     const next: Record<string, number> = { all: allArticles.length };
@@ -87,8 +87,8 @@ export function IndustryPane({ focused, width, height }: PaneProps) {
     registrationId: "news-wire:industry",
     focused,
     article: detailArticle,
-    loading: loading && allArticles.length > 0,
-    error,
+    loading: detailLoading || (loading && allArticles.length > 0),
+    error: [error, detailError].filter(Boolean).join(" ") || null,
   });
 
   const rootBefore = (

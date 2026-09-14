@@ -882,3 +882,32 @@ test("statement retrieval verifies the issuer and preserves class identity witho
   client.fetchJson = async () => ({ ...raw, cik: 789019 });
   await expect(client.getFinancialStatements("BRK.B")).rejects.toThrow("issuer mismatch");
 });
+
+for (const [form, prefix] of [["4/A", "xslF345X05/"], ["4/A", ""], ["4", ""]]) {
+  test(`keeps raw ownership XML for ${form} with path prefix ${prefix || "none"}`, async () => {
+    const requests: string[] = [];
+    const xml = "<ownershipDocument><documentType>4/A</documentType><remarks>Corrected shares</remarks></ownershipDocument>";
+    globalThis.fetch = (async (input) => {
+      requests.push(String(input));
+      return new Response(xml, { headers: { "content-type": "text/xml" } });
+    }) as typeof fetch;
+    const content = await new SecEdgarClient().getFilingContent({ form, filingUrl: "https://www.sec.gov/Archives/edgar/data/999/index.html",
+      primaryDocumentUrl: `https://www.sec.gov/Archives/edgar/data/999/${prefix}ownership.xml` });
+    expect(requests).toEqual(["https://www.sec.gov/Archives/edgar/data/999/ownership.xml"]);
+    expect(content).toBe(xml);
+  });
+}
+
+test("ownership XML support preserves PDF fallback and readable HTML filing content", async () => {
+  const requests: string[] = [];
+  globalThis.fetch = (async (input) => {
+    requests.push(String(input));
+    return new Response("<html><body><p>Ownership filing disclosure.</p></body></html>", { headers: { "content-type": "text/html" } });
+  }) as typeof fetch;
+  const client = new SecEdgarClient();
+  const pdf = "https://www.sec.gov/Archives/edgar/data/999/ownership.pdf";
+  expect(await client.getFilingContent({ form: "4/A", filingUrl: pdf, primaryDocumentUrl: pdf })).toBe("This SEC document is a PDF. Inline PDF text extraction is not supported here.");
+  expect(requests).toEqual([]);
+  const html = "https://www.sec.gov/Archives/edgar/data/999/ownership.html";
+  expect(await client.getFilingContent({ form: "4/A", filingUrl: html, primaryDocumentUrl: html })).toBe("Ownership filing disclosure.");
+});

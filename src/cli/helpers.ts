@@ -1,3 +1,4 @@
+import type { PriceBasis } from "../types/instrument";
 import {
   formatCompact,
   formatCurrency,
@@ -45,13 +46,14 @@ export function formatBidAsk(
   askSize: number | undefined,
   currency: string,
   assetCategory?: string,
+  priceBasis?: PriceBasis,
 ): string {
   if (bid == null && ask == null) return "—";
   const bidText = bid != null
-    ? `${formatMarketPriceWithCurrency(bid, currency, { assetCategory })}${bidSize != null ? ` x ${formatNumber(bidSize, 0)}` : ""}`
+    ? `${formatMarketPriceWithCurrency(bid, currency, { assetCategory, priceBasis })}${bidSize != null ? ` x ${formatNumber(bidSize, 0)}` : ""}`
     : "—";
   const askText = ask != null
-    ? `${formatMarketPriceWithCurrency(ask, currency, { assetCategory })}${askSize != null ? ` x ${formatNumber(askSize, 0)}` : ""}`
+    ? `${formatMarketPriceWithCurrency(ask, currency, { assetCategory, priceBasis })}${askSize != null ? ` x ${formatNumber(askSize, 0)}` : ""}`
     : "—";
   return `${bidText} / ${askText}`;
 }

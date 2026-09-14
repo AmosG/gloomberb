@@ -47,7 +47,7 @@ import type { DataProvider } from "./data-provider";
 import type { TickerFinancials } from "./financials";
 import type { CachePolicy, PersistedResourceValue } from "./persistence";
 import type { TickerRecord } from "./ticker";
-import type { InstrumentSearchResult } from "./instrument";
+import type { BrokerContractRef, InstrumentSearchResult, TickerListingRef } from "./instrument";
 import type { SyncContributor, SyncTransport } from "../sync/types";
 
 export interface GloomSlots {
@@ -207,6 +207,8 @@ export interface PaneTemplateContext {
   layout: LayoutConfig;
   focusedPaneId: string | null;
   activeTicker: string | null;
+  activeInstrument?: BrokerContractRef | null;
+  activeListing?: TickerListingRef;
   activeCollectionId: string | null;
 }
 
@@ -224,6 +226,8 @@ export interface PaneTemplateCreateOptions {
   symbols?: string[] | null;
   ticker?: TickerRecord | null;
   searchResult?: InstrumentSearchResult | null;
+  instrument?: BrokerContractRef | null;
+  listing?: TickerListingRef;
   /** Template-owned, validated data restored from a public pane share. */
   shareData?: unknown;
 }
@@ -609,6 +613,9 @@ export interface PinTickerOptions {
   floating?: boolean;
   paneType?: string;
   forceNewPane?: boolean;
+  /** Preserve a contract explicitly selected from instrument search. */
+  instrument?: BrokerContractRef | null;
+  listing?: TickerListingRef;
   /** Select this research tab once the requested ticker has resolved. */
   tabId?: string;
 }

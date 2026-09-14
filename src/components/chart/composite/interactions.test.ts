@@ -80,6 +80,19 @@ function frameFor(
 }
 
 describe("composite chart interactions", () => {
+  test("default navigation retains dated edge gaps without extending to wholly unavailable series", () => {
+    const data = series([1, 2, 3, 10]);
+    data.points[0]!.value = null;
+    data.points[3]!.value = Number.NaN;
+    const unavailable = series([-100, 100]);
+    unavailable.points.forEach((point) => { point.value = null; });
+    const frame = buildCompositeNavigationFrame([data, unavailable], [data])!;
+    expect(frame.dataStart).toBe(viewport(1, 10).start.getTime());
+    expect(frame.dataEnd).toBe(viewport(1, 10).end.getTime());
+    expect(buildCompositeNavigationFrame([unavailable], [unavailable])).toBeNull();
+    expect(panCompositeViewport(frame, viewport(2, 3), -100 * DAY_MS).end).toEqual(viewport(1, 10).end);
+  });
+
   test("zooms around the right edge and clamps zoom-out to the loaded data", () => {
     const frame = frameFor(series([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]));
     const full = viewport(1, 11);

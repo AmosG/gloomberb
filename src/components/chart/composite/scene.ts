@@ -4,7 +4,7 @@ import type {
   ResolvedSeries,
   TimeSeriesPoint,
 } from "../../../time-series/types";
-import { effectiveTimeSeriesPointTime } from "../../../time-series/alignment";
+import { effectiveTimeSeriesPointTime, timeSeriesObservationKey } from "../../../time-series/alignment";
 import type {
   BuildCompositeChartSceneOptions,
   CompositeAxisDomain,
@@ -79,20 +79,21 @@ function computeNormalizedSourcePoints(
   series: ResolvedSeries,
   timeScale?: CompositeTimeScale,
 ): NormalizedSourcePoint[] {
-  const bySourceTimestamp = new Map<number, NormalizedSourcePoint>();
+  const byObservation = new Map<string, NormalizedSourcePoint>();
   for (const point of series.points) {
     const sourceTimestamp = pointTime(point);
     const timestamp = pointTimestampForScale(series, point, timeScale);
     if (sourceTimestamp === null || timestamp === null || !Number.isFinite(timestamp)) continue;
-    bySourceTimestamp.set(sourceTimestamp, {
+    byObservation.set(timeSeriesObservationKey(point), {
       point,
       timestamp,
       value: resolveTimeSeriesPointValue(point),
     });
   }
-  return [...bySourceTimestamp.values()].sort((left, right) => (
+  return [...byObservation.values()].sort((left, right) => (
     left.timestamp - right.timestamp
     || left.point.date.getTime() - right.point.date.getTime()
+    || left.point.observedAt.getTime() - right.point.observedAt.getTime()
   ));
 }
 
@@ -438,8 +439,9 @@ function attachLastPriceMarker(
   const projected = panel?.series.find((entry) => entry.source.id === primary.id);
   const domain = panel?.axes[primary.axis];
   if (!panel || !projected || !domain) return;
-  // A rejected latest bar does not turn the preceding close into a current price.
-  if (normalizedSourcePoints(primary).at(-1)?.point.provenance?.priceHistoryIntegrity) return;
+  // A rejected or missing latest bar cannot make an older close current.
+  const latest = normalizedSourcePoints(primary).at(-1);
+  if (latest?.point.provenance?.priceHistoryIntegrity || latest?.value === null) return;
   const value = lastCloseOf(projected.points);
   if (value === null) return;
   const yRatio = projectCompositeValue(value, domain);
@@ -490,16 +492,19 @@ function cursorPointForSeries(
 function buildCursorValues(
   panels: CompositePanelScene[],
   cursorDate: Date | null,
-  viewport: Pick<CompositeChartScene, "startTime" | "endTime">,
+  viewport: Pick<CompositeChartScene, "startTime" | "endTime" | "timeScale">,
 ): CompositeCursorValue[] {
   const cursorTime = cursorDate?.getTime() ?? viewport.endTime;
   return panels.flatMap((panel) => panel.series.map((entry) => {
     let projected = cursorPointForSeries(entry, cursorTime);
-    const integrityGap = normalizedSourcePoints(entry.source).findLast(({ timestamp, point }) => (
-      timestamp <= cursorTime && timestamp > (projected?.timestamp ?? Number.NEGATIVE_INFINITY)
-      && point.provenance?.priceHistoryIntegrity
+    // Sparse observations can carry forward, but an explicitly unavailable
+    // observation ends that value at its date, including the idle legend.
+    const gap = normalizedSourcePoints(entry.source, viewport.timeScale).findLast(({ timestamp, point, value }) => (
+      timestamp <= cursorTime && (timestamp > (projected?.timestamp ?? Number.NEGATIVE_INFINITY)
+        || (timestamp === projected?.timestamp && point.observedAt > projected.point.observedAt))
+      && (point.provenance?.priceHistoryIntegrity || value === null)
     ));
-    if (integrityGap) projected = null;
+    if (gap) projected = null;
     // The drawn navigation buffer can include observations after the chosen
     // end. An unarmed legend describes the active window, including when the
     // pointer leaves; explicitly inspected cursor dates keep their own behavior.
@@ -510,7 +515,7 @@ function buildCursorValues(
       color: entry.source.color,
       unit: entry.source.unit,
       value: projected?.value ?? null,
-      point: projected?.point ?? integrityGap?.point ?? null,
+      point: projected?.point ?? gap?.point ?? null,
     };
   }));
 }
@@ -548,9 +553,9 @@ export function buildCompositeChartScene(
   const dataSeries = series.filter((entry) => normalizedPoints(entry).length > 0);
   if (dataSeries.length === 0) return null;
 
-  const times = dataSeries.flatMap((entry) => normalizedSourcePoints(entry)
-    .filter(({ value, point }) => value !== null || point.provenance?.priceHistoryIntegrity)
-    .map((point) => point.timestamp));
+  // A known missing observation owns a date even though it has no drawable
+  // value. Retain it in the window and cursor timeline, including trailing gaps.
+  const times = dataSeries.flatMap((entry) => normalizedSourcePoints(entry).map((point) => point.timestamp));
   const uniqueTimes = [...new Set(times)].sort((left, right) => left - right);
   if (uniqueTimes.length === 0) return null;
   const firstTime = uniqueTimes[0]!;
@@ -662,7 +667,7 @@ export function buildCompositeChartScene(
     panels: panelScenes,
     cursorDate,
     cursorXRatio,
-    cursorValues: buildCursorValues(panelScenes, cursorDate, { startTime, endTime }),
+    cursorValues: buildCursorValues(panelScenes, cursorDate, { startTime, endTime, timeScale }),
   };
 }
 

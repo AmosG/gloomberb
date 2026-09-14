@@ -4,6 +4,10 @@ import {
   attachRiskFactorsPersistence,
   resetRiskFactorsPersistence,
 } from "./data";
+import { riskFactorsHeadless } from "./headless";
+
+export { riskFactorsHeadless } from "./headless";
+
 import { RISK_FACTORS_PANE_ID, RiskFactorsPane } from "./pane";
 
 const description =
@@ -31,6 +35,7 @@ export const riskFactorsModule: PluginModule = {
       name: "Risk Factors",
       icon: "R",
       component: RiskFactorsPane,
+      headless: riskFactorsHeadless,
       defaultPosition: "right",
       defaultMode: "floating",
       defaultFloatingSize: { width: 100, height: 30 },

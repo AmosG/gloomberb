@@ -8,7 +8,7 @@ import { measurePerf } from "../../../../utils/perf-marks";
 import { useDoubleClickActivation } from "../../../use-double-click-activation";
 import { useScrollBoxScrollActivity } from "../../../table-view-shared";
 import { EmptyState } from "../../status";
-import { observeScrollBoxContentSize } from "../../../../renderers/opentui/scrollbox-layout";
+import { observeScrollBoxContentSize, observeScrollBoxViewportSize } from "../../../../renderers/opentui/scrollbox-layout";
 import {
   expandTableColumns,
   fitTableCellText,
@@ -58,6 +58,7 @@ function OpenTuiDataTableRowInner<
   contentWidth,
   displayColumns,
   focusPane,
+  frozenColumnOffset,
   getRowBackgroundColor,
   handleRowMouseDown,
   horizontalPadding,
@@ -77,6 +78,7 @@ function OpenTuiDataTableRowInner<
   contentWidth: number;
   displayColumns: C[];
   focusPane: () => void;
+  frozenColumnOffset?: number;
   getRowBackgroundColor?: DataTableProps<T, C>["getRowBackgroundColor"];
   handleRowMouseDown: (
     targetKey: string,
@@ -148,12 +150,20 @@ function OpenTuiDataTableRowInner<
         onRowContextMenu?.(item, index, event);
       }}
     >
-      {displayColumns.map((column) => {
+      {displayColumns.map((column, columnIndex) => {
         const cell = renderCell(item, column, index, rowState);
+        const frozen = columnIndex === 0 && frozenColumnOffset !== undefined;
+        const columnStart = displayColumns.slice(0, columnIndex).reduce((sum, current) => sum + current.width + columnGap, 0);
+        const inset = !frozen && frozenColumnOffset !== undefined
+          ? Math.min(column.width, Math.max(0, frozenColumnOffset + (displayColumns[0]?.width ?? 0) + columnGap - columnStart)) : 0;
         return (
           <Box
             key={column.id}
-            width={column.width + columnGap}
+            width={column.width + columnGap + (frozen ? horizontalPadding : 0)}
+            marginLeft={frozen ? -horizontalPadding : 0}
+            position="relative"
+            left={frozen ? frozenColumnOffset : undefined}
+            zIndex={frozen ? 1 : undefined}
             backgroundColor={cell.backgroundColor ?? rowBg}
             onMouseDown={(event: any) => {
               focusPane();
@@ -171,14 +181,19 @@ function OpenTuiDataTableRowInner<
               handleRowMouseDown(itemKey, { item, index }, event);
             }}
           >
-            {cell.content !== undefined ? (
-              cell.content
-            ) : (
+            {cell.content !== undefined ? (frozenColumnOffset === undefined ? cell.content : (
+              <>
+                {frozen && <Text position="absolute" left={0} top={0}>{" ".repeat(column.width + columnGap + horizontalPadding)}</Text>}
+                <Box marginLeft={frozen ? horizontalPadding : inset} width={Math.max(0, column.width - inset)} overflow="hidden">
+                  {cell.content}
+                </Box>
+              </>
+            )) : (
               <Text
                 attributes={cell.attributes ?? TextAttributes.NONE}
                 fg={cell.color ?? (selected ? colors.selectedText : colors.text)}
               >
-                {fitTableCellText(cell.text, column.width, column.align)}
+                {`${frozen ? " ".repeat(horizontalPadding) : ""}${" ".repeat(inset)}${inset < column.width ? fitTableCellText(cell.text, column.width - inset, column.align) : ""}${frozen ? " ".repeat(columnGap) : ""}`}
               </Text>
             )}
           </Box>
@@ -225,6 +240,7 @@ export function OpenTuiDataTable<T, C extends DataTableColumn = DataTableColumn>
   horizontalPadding = 1,
   fillAvailableWidth = true,
   showHorizontalScrollbar = true,
+  freezeFirstColumn = false,
   scrollToIndex,
   scrollToIndexAlign = "nearest",
   scrollToIndexVersion = 0,
@@ -235,6 +251,10 @@ export function OpenTuiDataTable<T, C extends DataTableColumn = DataTableColumn>
   const appViewport = useViewport();
   const nativeRenderer = useNativeRenderer();
   const [scrollVersion, setScrollVersion] = useState(0);
+  const [frozenColumnOffset, setFrozenColumnOffset] = useState(0);
+  useEffect(() => {
+    if (freezeFirstColumn) setFrozenColumnOffset(scrollRef.current?.scrollLeft ?? 0);
+  }, [freezeFirstColumn, scrollRef]);
   const lastAppliedScrollRequestRef = useRef<string | null>(null);
   const controlledScrollTopRef = useRef<number | null>(null);
   const lastVisibleRangeRef = useRef<{
@@ -334,10 +354,26 @@ export function OpenTuiDataTable<T, C extends DataTableColumn = DataTableColumn>
     emitVisibleRange();
     nativeRenderer.requestRender();
   }, [emitVisibleRange, nativeRenderer, onBodyScrollActivity, scrollRef, virtualize]);
+  const syncHorizontalScroll = useCallback(() => {
+    syncHeaderScroll();
+    if (freezeFirstColumn) setFrozenColumnOffset(scrollRef.current?.scrollLeft ?? 0);
+  }, [freezeFirstColumn, scrollRef, syncHeaderScroll]);
   useScrollBoxScrollActivity({
     scrollRef,
     onVerticalScroll: handleBodyScrollActivity,
-    onHorizontalScroll: syncHeaderScroll,
+    onHorizontalScroll: syncHorizontalScroll,
+  });
+  const syncBodyScroll = useCallback(() => {
+    const header = headerScrollRef.current;
+    const body = scrollRef.current;
+    if (!header || !body || body.scrollLeft === header.scrollLeft) return;
+    body.scrollLeft = header.scrollLeft;
+    if (freezeFirstColumn) setFrozenColumnOffset(body.scrollLeft ?? 0);
+    nativeRenderer.requestRender();
+  }, [freezeFirstColumn, headerScrollRef, nativeRenderer, scrollRef]);
+  useScrollBoxScrollActivity({
+    scrollRef: headerScrollRef,
+    onHorizontalScroll: syncBodyScroll,
   });
   const handleBodySizeChange = useCallback(() => {
     measureContentWidth();
@@ -346,6 +382,7 @@ export function OpenTuiDataTable<T, C extends DataTableColumn = DataTableColumn>
   }, [emitVisibleRange, measureContentWidth]);
 
   useEffect(() => observeScrollBoxContentSize(scrollRef.current, handleBodySizeChange), [handleBodySizeChange, scrollRef]);
+  useEffect(() => observeScrollBoxViewportSize(scrollRef.current, handleBodySizeChange), [handleBodySizeChange, scrollRef]);
 
   useEffect(() => {
     emitVisibleRange();
@@ -472,7 +509,7 @@ export function OpenTuiDataTable<T, C extends DataTableColumn = DataTableColumn>
       <ScrollBox
         id={headerScrollId}
         ref={headerScrollRef}
-        width="100%"
+        width={measuredViewportWidth || "100%"}
         height={1}
         backgroundColor={colors.panel}
         scrollX={showHorizontalScrollbar}
@@ -487,22 +524,30 @@ export function OpenTuiDataTable<T, C extends DataTableColumn = DataTableColumn>
           backgroundColor={colors.panel}
         >
           {displayColumns.map((column, columnIndex) => {
+            const frozen = freezeFirstColumn && columnIndex === 0;
+            const columnStart = displayColumns.slice(0, columnIndex).reduce((sum, current) => sum + current.width + columnGap, 0);
+            const inset = freezeFirstColumn && !frozen
+              ? Math.min(column.width, Math.max(0, frozenColumnOffset + (displayColumns[0]?.width ?? 0) + columnGap - columnStart)) : 0;
             const isSorted = sortColumnId === column.id;
             const indicator = isSorted
               ? sortDirection === "asc"
                 ? " ▲"
                 : " ▼"
               : "";
-            const labelText = fitTableHeaderText(
+            const labelText = " ".repeat(inset) + (inset < column.width ? fitTableHeaderText(
               column.label + indicator,
-              column.width,
+              column.width - inset,
               column.align,
               columnIndex < displayColumns.length - 1,
-            );
+            ) : "");
             return (
               <Box
                 key={column.id}
-                width={column.width + columnGap}
+                width={column.width + columnGap + (frozen ? horizontalPadding : 0)}
+                marginLeft={frozen ? -horizontalPadding : 0}
+                position="relative"
+                left={frozen ? frozenColumnOffset : undefined}
+                zIndex={frozen ? 1 : undefined}
                 backgroundColor={column.headerBackgroundColor ?? colors.panel}
                 onMouseDown={(event: any) => {
                   focusPane();
@@ -515,7 +560,7 @@ export function OpenTuiDataTable<T, C extends DataTableColumn = DataTableColumn>
                   attributes={TextAttributes.BOLD}
                   fg={isSorted ? colors.text : column.headerColor ?? colors.textDim}
                 >
-                  {labelText}
+                  {frozen ? `${" ".repeat(horizontalPadding)}${labelText}${" ".repeat(columnGap)}` : labelText}
                 </Text>
               </Box>
             );
@@ -561,6 +606,7 @@ export function OpenTuiDataTable<T, C extends DataTableColumn = DataTableColumn>
                     contentWidth={contentWidth}
                     displayColumns={displayColumns}
                     focusPane={focusPane}
+                    frozenColumnOffset={freezeFirstColumn ? frozenColumnOffset : undefined}
                     getRowBackgroundColor={getRowBackgroundColor}
                     handleRowMouseDown={handleRowMouseDown}
                     horizontalPadding={horizontalPadding}

@@ -198,22 +198,31 @@ export class ChatController {
   async refreshSession(): Promise<void> {
     if (this.sessionRefreshPromise) return this.sessionRefreshPromise;
     this.realtime.stopSessionRetry();
-    const request = this.runSessionRefresh()
+    const generation = this.sessionRefreshGeneration;
+    const isCurrent = () => generation === this.sessionRefreshGeneration;
+    const request = this.runSessionRefresh(isCurrent)
       .catch((error) => {
-        this.realtime.scheduleSessionRetry();
+        if (isCurrent()) this.realtime.scheduleSessionRetry();
         throw error;
       })
       .finally(() => {
-        this.sessionRefreshPromise = null;
+        if (this.sessionRefreshPromise === request) this.sessionRefreshPromise = null;
       });
     this.sessionRefreshPromise = request;
     return request;
   }
 
   private sessionRefreshPromise: Promise<void> | null = null;
+  private sessionRefreshGeneration = 0;
 
-  private async runSessionRefresh(): Promise<void> {
+  private invalidateSessionRefresh(): void {
+    this.sessionRefreshGeneration += 1;
+    this.sessionRefreshPromise = null;
+  }
+
+  private async runSessionRefresh(isCurrent: () => boolean): Promise<void> {
     return refreshChatControllerSession({
+      isCurrent,
       applySignedOut: () => this.applySignedOutSession(),
       channelStates: this.storage.channelStates,
       emit: () => this.emit(),
@@ -315,6 +324,7 @@ export class ChatController {
    * pick up the full profile.
    */
   adoptSession(sessionToken: string, user: PersistedAuthUser): void {
+    this.invalidateSessionRefresh();
     apiClient.setSessionToken(sessionToken);
     apiClient.setWebSocketToken(null);
     apiClient.restoreCachedUser(user);
@@ -326,6 +336,7 @@ export class ChatController {
   }
 
   clearSession(): void {
+    this.invalidateSessionRefresh();
     clearChatControllerSessionState({
       channelStates: this.storage.channelStates.values(),
       clearSessionIdentity: () => {
@@ -355,6 +366,7 @@ export class ChatController {
   }
 
   reset(clearSession = false): void {
+    this.invalidateSessionRefresh();
     resetChatControllerRuntime({
       channelStates: this.storage.channelStates,
       clearApiSessionToken: () => apiClient.setSessionToken(null),
@@ -375,6 +387,7 @@ export class ChatController {
   }
 
   dispose(): void {
+    this.invalidateSessionRefresh();
     chatLog.info("dispose controller", {
       listeners: this.view.listenerCount,
       connections: countOpenConnections(this.storage.channelStates.values()),

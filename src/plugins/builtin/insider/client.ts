@@ -1,5 +1,6 @@
 import type { DataProvider, SecFilingItem } from "../../../types/data-provider";
 import { parseInsiderFiling, type ParsedInsiderFiling } from "./model";
+import { isInsiderForm } from "./insider-data";
 
 export async function loadInsiderFilings(
   provider: DataProvider,
@@ -9,7 +10,7 @@ export async function loadInsiderFilings(
 ): Promise<SecFilingItem[]> {
   if (!provider.getSecFilings) throw new Error("Insider filing data unavailable");
   const filings = await provider.getSecFilings(symbol, count, exchange);
-  return filings.filter((filing) => filing.form.trim() === "4");
+  return filings.filter((filing) => isInsiderForm(filing.form));
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {

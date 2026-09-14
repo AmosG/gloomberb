@@ -1,7 +1,11 @@
+import { nextResponseSequence } from "./response-sequence";
+
 /** A value's age belongs to its source, not to the consumer that last read it. */
 export interface CachedValue<T> {
   value: T;
   fetchedAt: number;
+  /** Process-local successful response order; absent on unsequenced hydrated cache. */
+  responseSequence?: number;
   staleAt: number;
   expiresAt: number;
   source: string;
@@ -78,12 +82,15 @@ export class CachedQuery<T> implements CachedQueryHandle<T> {
       const generation = ++this.generation;
       this.publish({ result: cached, loading: true, error: null });
       const request = Promise.resolve().then(() => fetch(force)).then((result) => {
-        if (generation === this.generation) this.publish({ result, loading: false, error: null });
-        return result;
+        if (generation !== this.generation) return result;
+        const accepted = { ...result, responseSequence: nextResponseSequence() };
+        this.publish({ result: accepted, loading: false, error: null });
+        return accepted;
       }, (error: unknown) => {
         const fallback = this.usable(cached) ?? this.usable(this.options.read(true));
-        if (generation === this.generation) this.publish({ result: fallback, loading: false, error });
-        if (fallback) return { ...fallback, refreshError: error };
+        const retained = fallback ? { ...fallback, refreshError: error } : null;
+        if (generation === this.generation) this.publish({ result: retained, loading: false, error });
+        if (retained) return retained;
         throw error;
       }).finally(() => {
         if (this.active === request) this.active = null;

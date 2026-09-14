@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { getTimeSeriesField } from "./field-catalog";
 import { normalizeChartSpec, validateChartSpec } from "./spec";
 import { maxStudyWarmupPoints, resolveStudies } from "./studies";
+import { applyResolvedSeriesTransform } from "./transforms";
 import type { ChartStudySpec, ResolvedSeries, TimeSeriesPoint } from "./types";
 
 function resolved(id: string, multiplier = 1): ResolvedSeries {
@@ -457,7 +458,7 @@ describe("study resolution", () => {
     expect(result.series[0]?.points.every(({ value }) => value === 0.5)).toBe(true);
   });
 
-  test("warns when raw pair formulas mix currencies without FX conversion", () => {
+  test("rejects a foreign-currency spread while preserving the ratio's derived units and warning", () => {
     const usd = { ...resolved("usd"), unit: "USD/share", unitGroup: "price:USD" };
     const jpy = { ...resolved("jpy"), unit: "JPY/share", unitGroup: "price:JPY" };
     const result = resolveStudies([usd, jpy], [
@@ -467,8 +468,9 @@ describe("study resolution", () => {
 
     expect(result.warnings).toEqual([
       "ratio: ratio inputs use different currencies (USD and JPY); raw values are not FX-converted.",
-      "spread: spread inputs use different currencies (USD and JPY); raw values are not FX-converted.",
     ]);
+    expect(result.errors).toEqual([expect.stringContaining("spread: spread cannot subtract JPY (JPY/share) from USD (USD/share)")]);
+    expect(result.series.find(({ id }) => id === "spread")).toBeUndefined();
     expect(result.series.find(({ id }) => id === "ratio")).toMatchObject({
       unit: "USD/JPY",
       unitGroup: "derived-unit:usd/jpy",
@@ -482,8 +484,130 @@ describe("study resolution", () => {
       study("spread", "spread", ["price", "revenue"]),
     ]);
 
-    expect(result.warnings).toEqual([
-      "spread: spread cannot subtract USD from USD/share; choose inputs with matching units.",
+    expect(result.warnings).toEqual([]);
+    expect(result.errors).toEqual([expect.stringContaining("spread: spread cannot subtract REVENUE (USD) from PRICE (USD/share)")]);
+    expect(result.series).toEqual([]);
+  });
+
+  test.each([
+    ["unknown peer currency", "USD/share", "price:USD", "currency/share", "price", false],
+    ["two unknown currencies", "currency/share", "price", "currency/share", "price", false],
+    ["blank units", "", "unknown", "", "unknown", false],
+    ["placeholder units", "unknown", "unknown", "unknown", "unknown", false],
+    ["untyped scalar unit", "unit", "unknown", "unit", "unknown", false],
+    ["unspecified price versus total", "USD", "price:USD", "USD", "currency-total:USD", false],
+    ["two unspecified price bases", "USD", "price:USD", "USD", "price:USD", false],
+    ["trailing price denominator", "USD/", "price:USD", "USD/", "price:USD", false],
+    ["blank price denominator", "USD/   ", "price:USD", "USD/   ", "price:USD", false],
+    ["empty compound price denominator", "USD//barrel", "price:USD", "USD//barrel", "price:USD", false],
+    ["placeholder price denominator", "USD/?", "price:USD", "USD/?", "price:USD", false],
+    ["explicit common physical basis", "USD/barrel", "price:USD", "USD/barrel", "price:USD", true],
+    ["different physical bases", "USD/barrel", "price:USD", "USD/gallon", "price:USD", false],
+    ["physical basis with conflicting currency metadata", "USD/barrel", "price:EUR", "USD/barrel", "price:EUR", false],
+    ["same totals", "USD", "currency-total:USD", "USD", "currency-total:USD", true],
+    ["price versus EPS", "USD/share", "price:USD", "USD/share", "per-share:USD", true],
+    ["known crypto units", "USD/unit", "price:USD", "USD/unit", "price:USD", true],
+    ["explicit common currency", "USD/share", "price:USD", "USD/share", "price:USD", true],
+    ["pounds versus pence", "GBP/share", "price:GBP", "GBp/share", "price:GBp", false],
+    ["equivalent pence symbols", "GBp/share", "price:GBp", "GBX/share", "price:GBX", true],
+    ["same FX units", "USD/EUR", "derived-unit:usd/eur", "USD/EUR", "derived-unit:usd/eur", true],
+    ["inverted FX units", "USD/EUR", "derived-unit:usd/eur", "EUR/USD", "derived-unit:eur/usd", false],
+    ["rate percentages", "%", "percent", "%", "percent", true],
+  ] as const)("checks spread units independently of ratio/correlation: %s", (_label, leftUnit, leftGroup, rightUnit, rightGroup, available) => {
+    const inputs = [
+      { ...resolved("left"), unit: leftUnit, unitGroup: leftGroup },
+      { ...resolved("right", 2), unit: rightUnit, unitGroup: rightGroup },
+    ];
+    const others = [study("ratio", "ratio", ["left", "right"]), study("correlation", "correlation", ["left", "right"], { period: 3 })]
+      .map((spec) => ({ ...spec, color: "#fff" }));
+    const result = resolveStudies(inputs, [study("spread", "spread", ["left", "right"]), ...others]);
+    expect(result.series.filter(({ id }) => id !== "spread")).toEqual(resolveStudies(inputs, others).series);
+    expect(result.series.some(({ id }) => id === "spread")).toBe(available);
+    expect(result.errors.length).toBe(available ? 0 : 1);
+  });
+
+  test("uses actual normalized input units and ignores their original currency provenance", () => {
+    const usd = { ...resolved("usd"), unitGroup: "price:USD" };
+    const eur = { ...resolved("eur", 2), unit: "EUR/share", unitGroup: "price:EUR" };
+    for (const transform of ["percent", "index100"] as const) {
+      const result = resolveStudies([usd, eur].map((input) => applyResolvedSeriesTransform(input, transform)), [study("spread", "spread", ["usd", "eur"])]);
+      expect(result.errors).toEqual([]);
+      expect(result.series[0]?.points.every(({ value }) => value === 0)).toBe(true);
+    }
+  });
+
+  test("rejects incompatible spread metadata before empty or interrupted history can bypass it", () => {
+    const left = resolved("left");
+    const right = { ...resolved("right", 2), unit: "EUR/share", unitGroup: "price:EUR" };
+    left.points[1] = { ...left.points[1]!, value: null, close: undefined, provenance: { priceHistoryIntegrity: {
+      reason: "inconsistent-ohlc", sourcePoints: [{ date: left.points[1]!.date.toISOString(), open: 2, high: 1, low: 0, close: 2 }],
+    } } };
+    for (const inputs of [[left, right], [left, right].map((input) => ({ ...input, points: [] }))]) {
+      const result = resolveStudies(inputs, [study("spread", "spread", ["left", "right"])]);
+      expect(result.series).toEqual([]);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain("spread: spread cannot subtract");
+    }
+  });
+
+  test("a multiplier cannot establish missing physical price units even across interrupted history", () => {
+    const inputs = ["left", "right"].map((id) => ({ ...resolved(id), unit: "USD", unitGroup: "price:USD", priceAssetCategory: "FUTURE" }));
+    inputs[0]!.points[1] = { ...inputs[0]!.points[1]!, value: null, close: undefined };
+    for (const multiplier of [1, 42]) {
+      const result = resolveStudies(inputs, [study("spread", "spread", ["left", "right"], { multiplier })]);
+      expect(result.series).toEqual([]);
+      expect(result.errors).toHaveLength(1);
+    }
+  });
+
+  test.each([
+    ["missing price basis", "USD", "price:USD", "USD", "price:USD", "unknown"],
+    ["blank denominator", "USD/", "price:USD", "USD/", "price:USD", "unknown"],
+    ["placeholder denominator", "USD/-", "price:USD", "USD/?", "price:USD", "unknown"],
+    ["conflicting currency metadata", "USD/share", "price:EUR", "USD/share", "price:EUR", "unknown"],
+    ["explicit same physical basis", "USD/barrel", "price:USD", "USD/barrel", "price:USD", "x"],
+    ["explicit different physical bases", "USD/barrel", "price:USD", "USD/gallon", "price:USD", "gallon/barrel"],
+    ["same currency totals", "USD", "currency-total:USD", "USD", "currency-total:USD", "x"],
+    ["currency scales", "GBP/share", "price:GBP", "GBp/share", "price:GBp", "GBP/GBp"],
+    ["pence aliases", "GBp/share", "price:GBp", "GBX/share", "price:GBX", "x"],
+    ["currency and share aliases", "usd/shares", "price:USD", "USD/share", "price:USD", "x"],
+  ] as const)("retains ratio values with verified unit factors: %s", (_label, leftUnit, leftGroup, rightUnit, rightGroup, expected) => {
+    const inputs = [
+      { ...resolved("left"), unit: leftUnit, unitGroup: leftGroup },
+      { ...resolved("right", 2), unit: rightUnit, unitGroup: rightGroup },
+    ];
+    inputs[1]!.points[1] = { ...inputs[1]!.points[1]!, value: 0, close: 0 };
+    const result = resolveStudies(inputs, [study("ratio", "ratio", ["left", "right"])]);
+    expect(result.errors).toEqual([]);
+    expect(result.series[0]?.unit).toBe(expected);
+    expect(result.series[0]?.points[1]?.value).toBeNull();
+    expect(result.series[0]?.points.filter((_, index) => index !== 1).every(({ value }) => value === 0.5)).toBe(true);
+  });
+
+  test("unknown ratio units remain unknown through nested ratios and cannot establish a spread", () => {
+    const inputs = ["left", "right"].map((id) => ({ ...resolved(id), unit: "USD", unitGroup: "price:USD" }));
+    const first = resolveStudies(inputs, [study("ratio", "ratio", ["left", "right"])]);
+    const nested = resolveStudies(first.series, [study("nested", "ratio", ["ratio", "ratio"])]);
+    const combined = [...first.series, ...nested.series];
+    const spread = resolveStudies(combined, [study("spread", "spread", ["nested", "ratio"])]);
+    expect(combined.map(({ id, unit, unitGroup }) => ({ id, unit, unitGroup }))).toEqual([
+      { id: "ratio", unit: "unknown", unitGroup: "derived-unit:unknown" },
+      { id: "nested", unit: "unknown", unitGroup: "derived-unit:unknown" },
     ]);
+    expect(combined.every(({ points }) => points.every(({ value }) => value === 1))).toBe(true);
+    expect(spread.errors).toEqual([expect.stringContaining("spread cannot subtract")]);
+  });
+
+  test("ratio axis groups distinguish opposite currency scales while retaining equivalent aliases", () => {
+    const inputs = ["GBP", "GBp", "GBX"].map((currency) => ({ ...resolved(currency), unit: `${currency}/share`, unitGroup: `price:${currency}` }));
+    const result = resolveStudies(inputs, [
+      study("up", "ratio", ["GBP", "GBp"]),
+      study("down", "ratio", ["GBp", "GBP"]),
+      study("alias", "ratio", ["GBP", "GBX"]),
+    ]);
+    expect(result.series.map(({ unit }) => unit)).toEqual(["GBP/GBp", "GBp/GBP", "GBP/GBX"]);
+    expect(result.series[0]!.unitGroup).not.toBe(result.series[1]!.unitGroup);
+    expect(result.series[0]!.unitGroup).toBe(result.series[2]!.unitGroup);
+    expect(result.series.every(({ points }) => points.every(({ value }) => value === 1))).toBe(true);
   });
 });

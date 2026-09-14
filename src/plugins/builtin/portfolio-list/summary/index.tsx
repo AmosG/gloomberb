@@ -213,6 +213,12 @@ export function buildPortfolioSummarySegments({
     ]));
   }
 
+  if (totals.unavailableCostSymbols?.length) {
+    candidates.push(createSummarySegment("cost-unavailable", [
+      { text: "Cost unavailable", tone: "muted", color: colors.warning },
+    ]));
+  }
+
   if (accountState?.account.netLiquidation != null) {
     candidates.push(createSummarySegment("netliq", [
       { text: "Net Liq", tone: "label" },
@@ -245,7 +251,10 @@ export function buildPortfolioSummarySegments({
     { text: `(${formatPercentRaw(accountMetrics.dailyPnlPct)})`, tone: "muted", color: priceColor(accountMetrics.dailyPnlPct) },
   ]));
   candidates.push(createSummarySegment("pnl", [
-    { text: "P&L", tone: "label" },
+    { text: !Number.isFinite(accountState?.account.unrealizedPnl)
+      && totals.unrealizedPnlBasis === "broker-snapshot" ? "Broker P&L"
+      : !Number.isFinite(accountState?.account.unrealizedPnl)
+        && totals.unrealizedPnlBasis === "mixed" ? "Mixed P&L" : "P&L", tone: "label" },
     { text: formatSignedCompact(accountMetrics.unrealizedPnl), tone: "value", color: priceColor(accountMetrics.unrealizedPnl), bold: true },
     { text: `(${formatPercentRaw(accountMetrics.unrealizedPnlPct)})`, tone: "muted", color: priceColor(accountMetrics.unrealizedPnlPct) },
   ]));

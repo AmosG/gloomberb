@@ -512,6 +512,12 @@ function ChartComposerSurface({
     ? "Comparison unavailable: need two shared dates and a nonzero baseline."
     : null;
   const statusError = resolution.errors[0];
+  const spreadUnitError = spec.studies.some((study) => study.kind === "spread"
+    && statusError?.startsWith(`${study.id}: spread cannot subtract `)
+    && statusError.endsWith("; inputs require matching known units, currencies and scales."));
+  const statusErrorNotice = spreadUnitError
+    ? "Spread unavailable: incompatible or unknown units."
+    : statusError;
   // Failed series use their authored id in errors and their display label in warnings.
   const errorSeries = spec.series.find((entry) => statusError?.startsWith(`${entry.label ?? entry.id}: `));
   const errorMessage = errorSeries ? statusError?.slice(`${errorSeries.label ?? errorSeries.id}: `.length) : undefined;
@@ -526,8 +532,14 @@ function ChartComposerSurface({
   const statusWarnings = resolution.warnings.filter((warning) => (
     warning !== FINANCIAL_VINTAGE_NOTICE && warning !== SEC_EPS_BASIS_NOTICE && warning !== comparisonNotice
     && !duplicateErrorNotices.has(warning) && !comparisonEmptyNotices.has(warning)
+    && !spec.studies.some((study) => (
+      (study.kind === "ratio" && warning.startsWith(`${study.id}: ratio inputs use different currencies (`)
+        && warning.endsWith("); raw values are not FX-converted."))
+      || (study.kind === "correlation" && warning.startsWith(`${study.id}: correlation mixes `)
+        && warning.endsWith("; only matching observation times contribute."))
+    ))
   ));
-  const statusNotices = [...new Set([...(statusError ? [statusError] : []), ...(comparisonUnavailable ? [comparisonUnavailable] : []), ...statusWarnings])];
+  const statusNotices = [...new Set([...(statusErrorNotice ? [statusErrorNotice] : []), ...(comparisonUnavailable ? [comparisonUnavailable] : []), ...statusWarnings])];
   // Leave one cell for a scrollbar when a short pane cannot show the full notice.
   const statusNoticeWidth = Math.max(8, width - 3);
   const statusNoticeHeight = statusNotices.length > 0

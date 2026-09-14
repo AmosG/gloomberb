@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
 import { MemoryPluginPersistence as MemoryPersistence } from "../../../../../test-support/plugin-persistence";
-import { createRssNewsCapability, RSS_FEED_CACHE_POLICY } from "./source";
+import { createRssNewsCapability, RSS_FEED_CACHE_POLICY, RSS_FEED_CACHE_VERSION } from "./source";
 import type { RssFeedConfig } from "./parser";
 
 const FEED: RssFeedConfig = {
@@ -72,6 +72,7 @@ describe("createRssNewsCapability", () => {
       }],
     }, {
       sourceKey: FEED.url,
+      schemaVersion: RSS_FEED_CACHE_VERSION,
       cachePolicy: RSS_FEED_CACHE_POLICY,
     });
 
@@ -98,6 +99,7 @@ describe("createRssNewsCapability", () => {
       }],
     }, {
       sourceKey: FEED.url,
+      schemaVersion: RSS_FEED_CACHE_VERSION,
       cachePolicy: stalePolicy,
     });
 
@@ -113,4 +115,39 @@ describe("createRssNewsCapability", () => {
     expect(items).toHaveLength(1);
     expect(items[0]!.title).toBe("Stale headline");
   });
+});
+
+test("partial feed failure preserves successful and stale articles, reports the gap, and recovers", async () => {
+  const persistence = new MemoryPersistence();
+  const other = { ...FEED, id: "other", url: "https://other.example.com/rss" };
+  let broken = false;
+  const source = createRssNewsCapability([FEED, other], { persistence, fetchText: async (url) => ({
+    ok: true,
+    text: async () => broken && url === FEED.url ? "<html><body>Proxy error</body></html>" : RSS_FIXTURE.replace("nvda</link>", `${url === FEED.url ? "nvda" : "other"}</link>`),
+  }) });
+  await source.provider.fetchNewsPage!({ feed: "latest" });
+  const cached = persistence.getResource<{ items: unknown[] }>("rss-feed", FEED.id, { sourceKey: FEED.url })!;
+  persistence.seedResource("rss-feed", FEED.id, cached.value, { sourceKey: FEED.url, schemaVersion: RSS_FEED_CACHE_VERSION, stale: true });
+  broken = true;
+  const failed = await source.provider.fetchNewsPage!({ feed: "latest" });
+  expect(failed.articles).toHaveLength(2);
+  expect(failed.error).toBe("1 of 2 RSS feeds unavailable.");
+  expect(persistence.getResource("rss-feed", FEED.id, { sourceKey: FEED.url })!.stale).toBe(true);
+  broken = false;
+  expect((await source.provider.fetchNewsPage!({ feed: "latest" })).error).toBeNull();
+  expect(persistence.getResource("rss-feed", FEED.id, { sourceKey: FEED.url })!.stale).toBe(false);
+});
+
+test("legacy parser cache is refetched and valid empty feeds are cached without claiming pagination", async () => {
+  const persistence = new MemoryPersistence();
+  persistence.setResource("rss-feed", FEED.id, { items: [{ id: "old", title: "Old self link", url: "https://example.com/api", source: FEED.name, publishedAt: new Date().toISOString() }] }, { sourceKey: FEED.url, cachePolicy: RSS_FEED_CACHE_POLICY });
+  const fetchText = mock(async () => ({ ok: true, text: async () => '<feed xmlns="http://www.w3.org/2005/Atom"/>' }));
+  const source = createRssNewsCapability([FEED], { persistence, fetchText });
+  expect(source.provider.getCachedNews!({ feed: "latest" })).toEqual([]);
+  expect((await source.provider.fetchNewsPage!({ feed: "latest" })).articles).toEqual([]);
+  expect((await source.provider.fetchNewsPage!({ feed: "latest" })).error).toBeNull();
+  expect(fetchText).toHaveBeenCalledTimes(1);
+  expect(source.provider.supports!({ feed: "latest", cursor: "next" })).toBe(false);
+  expect((await source.provider.fetchNewsPage!({ feed: "latest", cursor: "next" })).articles).toEqual([]);
+  expect(fetchText).toHaveBeenCalledTimes(1);
 });

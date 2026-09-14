@@ -806,18 +806,26 @@ export function setPairStudies(spec: ChartSpec, selected: readonly PairStudySele
   const pairStudies: ChartStudySpec[] = inputs.length === 2
     ? (["ratio", "spread", "correlation"] as PairStudySelection[])
       .filter((kind) => selectedSet.has(kind))
-      .map((kind): ChartStudySpec => ({
-        id: `${PAIR_STUDY_ID_PREFIX}${kind}`,
-        kind,
-        inputSeriesIds: inputs.map((series) => series.id),
-        parameters: kind === "spread"
-          ? { multiplier: 1 }
-          : kind === "correlation"
-            ? { period: 20, returns: 1 }
-            : {},
-        panelId: kind === "correlation" ? "correlation" : "formula",
-        axis: "auto",
-      }))
+      .map((kind): ChartStudySpec => {
+        const id = `${PAIR_STUDY_ID_PREFIX}${kind}`;
+        const inputSeriesIds = inputs.map((series) => series.id);
+        const previous = spec.studies.find((study) => study.id === id && study.kind === kind
+          && study.inputSeriesIds.length === inputSeriesIds.length
+          && study.inputSeriesIds.every((inputId, index) => inputId === inputSeriesIds[index]));
+        if (previous) return { ...previous, inputSeriesIds, parameters: { ...previous.parameters } };
+        return {
+          id,
+          kind,
+          inputSeriesIds,
+          parameters: kind === "spread"
+            ? { multiplier: 1 }
+            : kind === "correlation"
+              ? { period: 20, returns: 1 }
+              : {},
+          panelId: kind === "correlation" ? "correlation" : "formula",
+          axis: "auto",
+        };
+      })
     : [];
   const studies: ChartStudySpec[] = [
     ...spec.studies.filter((study) => !study.id.startsWith(PAIR_STUDY_ID_PREFIX)),

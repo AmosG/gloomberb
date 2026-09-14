@@ -2,10 +2,11 @@ import { createThrottledFetch } from "../../../../../utils/throttled-fetch";
 import { newsProvider, type NewsCapability } from "../../../../../capabilities";
 import type { NewsQuery, MarketNewsItem } from "../../../../../types/news-source";
 import type { PluginPersistence } from "../../../../../types/plugin";
-import { parseRssFeed, type RssFeedConfig } from "./parser";
+import { parseRssFeedDocument, type RssFeedConfig } from "./parser";
 import { enrichNewsItem } from "../categories";
 
 const RSS_CACHE_KIND = "rss-feed";
+export const RSS_FEED_CACHE_VERSION = 2;
 export const RSS_FEED_CACHE_POLICY = {
   staleMs: 2 * 60 * 1000,
   expireMs: 7 * 24 * 60 * 60 * 1000,
@@ -37,7 +38,7 @@ export interface RssNewsCapabilityOptions {
 
 function supportsQuery(query: NewsQuery): boolean {
   const feed = query.feed ?? (query.scope === "ticker" ? "ticker" : "latest");
-  return feed === "latest";
+  return feed === "latest" && !query.cursor;
 }
 
 function serializeItem(item: MarketNewsItem): CachedNewsItem {
@@ -100,6 +101,7 @@ function readFeedCache(
 ): MarketNewsItem[] | null {
   const cached = persistence?.getResource<CachedFeedPayload>(RSS_CACHE_KIND, feed.id, {
     sourceKey: feed.url,
+    schemaVersion: RSS_FEED_CACHE_VERSION,
     allowExpired: options?.allowExpired,
   });
   if (cached?.stale && !options?.allowStale && !options?.allowExpired) return null;
@@ -107,7 +109,7 @@ function readFeedCache(
   const items = cached.value.items
     .map(deserializeItem)
     .filter((item): item is MarketNewsItem => !!item);
-  return items.length > 0 ? items : null;
+  return items.length === cached.value.items.length ? items : null;
 }
 
 function writeFeedCache(
@@ -120,6 +122,7 @@ function writeFeedCache(
     items: items.map(serializeItem),
   }, {
     sourceKey: feed.url,
+    schemaVersion: RSS_FEED_CACHE_VERSION,
     cachePolicy: RSS_FEED_CACHE_POLICY,
     provenance: { url: feed.url, name: feed.name },
   });
@@ -132,21 +135,31 @@ export function createRssNewsCapability(
   const fetchText = options.fetchText ?? ((url: string) => rssClient.fetch(url));
   const getFeeds = () => Array.isArray(feedsOrGetter) ? feedsOrGetter : feedsOrGetter();
 
-  async function fetchFeed(feed: RssFeedConfig): Promise<MarketNewsItem[]> {
+  async function fetchFeed(feed: RssFeedConfig): Promise<{ articles: MarketNewsItem[]; failed: boolean }> {
     const freshCache = readFeedCache(options.persistence, feed);
-    if (freshCache) return freshCache;
+    if (freshCache) return { articles: freshCache, failed: false };
 
     try {
       const resp = await fetchText(feed.url);
-      if (!resp.ok) return readFeedCache(options.persistence, feed, { allowExpired: true }) ?? [];
-      const xml = await resp.text();
-      const items = parseRssFeed(xml, feed)
+      if (!resp.ok) throw new Error("Feed request failed.");
+      const articles = parseRssFeedDocument(await resp.text(), feed)
         .map((item) => enrichNewsItem(item, feed.authority, options.knownTickers));
-      writeFeedCache(options.persistence, feed, items);
-      return items;
+      writeFeedCache(options.persistence, feed, articles);
+      return { articles, failed: false };
     } catch {
-      return readFeedCache(options.persistence, feed, { allowExpired: true }) ?? [];
+      return { articles: readFeedCache(options.persistence, feed, { allowExpired: true }) ?? [], failed: true };
     }
+  }
+
+  async function fetchPage(query: NewsQuery) {
+    if (!supportsQuery(query)) return { articles: [] };
+    const feeds = getFeeds().filter((feed) => feed.enabled);
+    const results = await Promise.all(feeds.map(fetchFeed));
+    const failed = results.filter((result) => result.failed).length;
+    return {
+      articles: results.flatMap((result) => result.articles),
+      error: failed ? `${failed} of ${feeds.length} RSS feeds unavailable.` : null,
+    };
   }
 
   return newsProvider({
@@ -160,21 +173,9 @@ export function createRssNewsCapability(
         const enabledFeeds = getFeeds().filter((feed) => feed.enabled);
         return enabledFeeds.flatMap((feed) => readFeedCache(options.persistence, feed, { allowExpired: true }) ?? []);
       },
+      fetchNewsPage: fetchPage,
       async fetchNews(query: NewsQuery): Promise<MarketNewsItem[]> {
-        if (!supportsQuery(query)) return [];
-        const enabledFeeds = getFeeds().filter((f) => f.enabled);
-        const results = await Promise.allSettled(
-          enabledFeeds.map(fetchFeed),
-        );
-
-        const allItems: MarketNewsItem[] = [];
-        for (const result of results) {
-          if (result.status === "fulfilled") {
-            allItems.push(...result.value);
-          }
-        }
-
-        return allItems;
+        return (await fetchPage(query)).articles;
       },
     },
   });

@@ -11,8 +11,12 @@ export function reportingCurrencySeries(points: readonly TimeSeriesPoint[], fall
     ...point,
     provenance: { ...point.provenance, currency: point.provenance?.currency?.trim() || fallback },
   }));
-  const latest = [...withCurrency].sort((a, b) => b.observedAt.getTime() - a.observedAt.getTime())
-    .find((point) => point.provenance.currency);
+  const newestFirst = [...withCurrency].sort((a, b) => b.observedAt.getTime() - a.observedAt.getTime());
+  // Missing later data cannot change the units of the monetary observations
+  // that are actually plotted. A new currency takes over when a value arrives.
+  const latest = newestFirst.find(point => point.provenance.currency
+    && typeof point.value === "number" && Number.isFinite(point.value))
+    ?? newestFirst.find(point => point.provenance.currency);
   const currency = latest?.provenance.currency;
   if (!currency) return {
     points: withCurrency,

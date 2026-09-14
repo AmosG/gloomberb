@@ -1,9 +1,11 @@
-import type { BrokerContractRef } from "./instrument";
+import type { BrokerContractRef, PriceBasis } from "./instrument";
 
 export interface TickerPosition {
   portfolio: string;
   shares: number;
-  avgCost: number;
+  /** Absent when the source did not provide a finite cost; explicit zero is retained. */
+  avgCost?: number;
+  priceBasis?: PriceBasis;
   currency?: string;
   dateAcquired?: string;
   broker: string; // "manual" | future broker plugin IDs
@@ -17,6 +19,8 @@ export interface TickerPosition {
   brokerInstanceId?: string;
   brokerAccountId?: string;
   brokerContractId?: number;
+  /** Source-declared fallback contract identity when no canonical conId was supplied. */
+  brokerContractIdentity?: string;
 }
 
 export interface TickerMetadata {

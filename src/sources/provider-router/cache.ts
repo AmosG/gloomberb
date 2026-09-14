@@ -6,6 +6,7 @@ import type { CachePolicy, CachePolicyMap } from "../../types/persistence";
 import { canonicalExchange, parsePublicTickerKey, resolveExchangeTimeZone } from "../../utils/exchanges";
 import { redactUnavailableFundamentals, RETRACTABLE_VALUATION_FIELDS } from "../../utils/fundamentals";
 import { isPriceHistoryStaleForCurrentWindow } from "../../utils/price-history";
+import { brokerContractIdentityKey } from "../../utils/instrument-identity";
 
 const MARKET_NAMESPACE = "market";
 const FINANCIALS_SCHEMA_VERSION = 7;
@@ -50,9 +51,7 @@ export function buildVariantKey(parts: Array<[string, string | number | undefine
 }
 
 export function getRouterEntityKey(ticker: string, instrument?: BrokerContractRef | null): string {
-  if (instrument?.conId != null) return `contract:${instrument.conId}`;
-  if (instrument?.localSymbol) return `contract:${instrument.localSymbol.toUpperCase()}`;
-  if (instrument?.symbol) return `contract:${instrument.symbol.toUpperCase()}`;
+  if (instrument) return `contract:${brokerContractIdentityKey(instrument)}`;
   return normalizeTicker(ticker);
 }
 

@@ -10,6 +10,7 @@ import type { ColumnConfig } from "../../../types/config";
 import type { TickerFinancials } from "../../../types/financials";
 import type { TickerRecord } from "../../../types/ticker";
 import { getColumnValue, type ColumnContext } from "./metrics";
+import { portfolioPnlLabel } from "./position-metrics";
 
 export type { QuoteFlashDirection };
 
@@ -94,11 +95,21 @@ export function PortfolioTickerTable({
     },
     [columnContext],
   );
+  const pnlColumn = columns.find((column) => column.id === "pnl" || column.id === "pnl_pct");
+  const pnlLabel = pnlColumn ? portfolioPnlLabel(sortedTickers.map((ticker) =>
+    resolveCell({ ...pnlColumn, id: "pnl" }, ticker, financialsMap.get(ticker.metadata.ticker)).pnlBasis ?? "unavailable")) : "P&L";
+  const hasNonShareQuantity = sortedTickers.some(ticker => ticker.metadata.positions.some(position =>
+    (!columnContext.activeTab || position.portfolio === columnContext.activeTab) && position.shares !== 0 && (position.priceBasis === "percent-of-par" || ticker.metadata.assetCategory?.toUpperCase() === "BOND")));
+  const displayColumns = columns.map((column) => column.id === "shares" && hasNonShareQuantity ? { ...column, label: "QTY" }
+    : pnlLabel !== "P&L" && (column.id === "pnl" || column.id === "pnl_pct") ? {
+    ...column,
+    label: column.id === "pnl_pct" ? pnlLabel.replace("P&L", "%") : pnlLabel,
+  } : column);
 
   return (
     <TickerListTableView
       focused={focused}
-      columns={columns}
+      columns={displayColumns}
       tickers={sortedTickers}
       cursorSymbol={cursorSymbol}
       setCursorSymbol={setCursorSymbol}

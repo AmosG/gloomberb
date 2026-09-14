@@ -3,6 +3,7 @@ import { createDefaultConfig, createPaneInstance } from "../types/config";
 import type { TickerFinancials } from "../types/financials";
 import type { TickerRecord } from "../types/ticker";
 import { buildAppSessionSnapshot, reconcileAppSessionSnapshot } from "../core/state/session-persistence";
+import { buildInstrumentKey } from "../market-data/selectors";
 
 function createTicker(symbol: string, exchange = "NASDAQ"): TickerRecord {
   return {
@@ -22,6 +23,51 @@ function createTicker(symbol: string, exchange = "NASDAQ"): TickerRecord {
 }
 
 describe("session persistence", () => {
+  test("saves portfolio and follower targets without selecting the first contract or resolving ambiguous lots", () => {
+    const config = createDefaultConfig("/tmp/session-contracts");
+    config.portfolios = ["a", "b", "manual", "unknown"].map((id) => ({ id, name: id }));
+    const contracts = [101, 202].map((conId) => ({ brokerId: "ibkr", brokerInstanceId: "same", symbol: "DUAL", conId }));
+    const ticker = createTicker("DUAL");
+    ticker.metadata.portfolios = config.portfolios.map(({ id }) => id);
+    ticker.metadata.broker_contracts = contracts;
+    ticker.metadata.positions = [
+      ...contracts.map((contract, index) => ({ portfolio: index ? "b" : "a", broker: "ibkr", brokerInstanceId: "same", brokerContractId: contract.conId, shares: 1 })),
+      { portfolio: "manual", broker: "manual", shares: 1 },
+      { portfolio: "unknown", broker: "ibkr", brokerInstanceId: "same", brokerContractId: 999, shares: 1 },
+    ];
+    config.layout.instances = config.portfolios.map(({ id }) => createPaneInstance("portfolio-list", { instanceId: id, params: { collectionId: id } }));
+    config.layout.instances.push(createPaneInstance("ticker-detail", { instanceId: "follow-b", binding: { kind: "follow", sourceInstanceId: "b" } }));
+    const state = { config, paneState: Object.fromEntries(config.portfolios.map(({ id }) => [id, { cursorSymbol: "DUAL", collectionId: id }])),
+      focusedPaneId: "b", activePanel: "left" as const, statusBarVisible: true, recentTickers: [], tickers: new Map([["DUAL", ticker]]), exchangeRates: new Map<string, number>() };
+    const snapshot = buildAppSessionSnapshot(state);
+    expect(snapshot.hydrationTargets.map(({ instrument }) => instrument?.conId ?? null)).toEqual([101, 202, null]);
+    expect(snapshot.hydrationTargets.map(buildInstrumentKey)).toHaveLength(3);
+    expect(ticker.metadata.broker_contracts).toEqual(contracts);
+    // A stale cursor does not change which collection supplies other rows.
+    state.paneState.b.cursorSymbol = "MISSING";
+    expect(buildAppSessionSnapshot(state).hydrationTargets.some(({ instrument }) => instrument?.conId === 202)).toBe(true);
+    expect(buildAppSessionSnapshot(state).hydrationTargets.some(({ symbol }) => symbol === "MISSING")).toBe(false);
+  });
+
+  test("fixed and followed legacy contracts keep full distinct identities in the saved working set", () => {
+    const config = createDefaultConfig("/tmp/session-fixed-contracts");
+    const ticker = createTicker("DUAL");
+    const contracts = ["202610", "202611"].map((lastTradeDateOrContractMonth) => ({ brokerId: "ibkr", brokerInstanceId: "same",
+      symbol: "DUAL", localSymbol: "DUAL", secType: "FUT", currency: "USD", lastTradeDateOrContractMonth }));
+    ticker.metadata.broker_contracts = contracts;
+    config.layout.instances = contracts.map((instrument, index) => createPaneInstance("ticker-detail", {
+      instanceId: `fixed:${index}`, binding: { kind: "fixed", symbol: "DUAL", instrument },
+    }));
+    config.layout.instances.push(createPaneInstance("ticker-detail", { instanceId: "follow", binding: { kind: "follow", sourceInstanceId: "fixed:1" } }));
+    const snapshot = buildAppSessionSnapshot({ config, paneState: {}, focusedPaneId: "follow", activePanel: "right", statusBarVisible: true,
+      recentTickers: ["DUAL"], tickers: new Map([["DUAL", ticker]]), exchangeRates: new Map() });
+    expect(snapshot.hydrationTargets.map(({ instrument }) => instrument?.lastTradeDateOrContractMonth)).toEqual(["202610", "202611"]);
+    expect(new Set(snapshot.hydrationTargets.map(buildInstrumentKey)).size).toBe(2);
+    config.layout.instances = [];
+    expect(buildAppSessionSnapshot({ config, paneState: {}, focusedPaneId: null, activePanel: "right", statusBarVisible: true,
+      recentTickers: ["DUAL"], tickers: new Map([["DUAL", ticker]]), exchangeRates: new Map() }).hydrationTargets).toEqual([]);
+  });
+
   test("builds a working-set snapshot from runtime state", () => {
     const config = createDefaultConfig("/tmp/gloomberb-test");
     const tickers = new Map<string, TickerRecord>([

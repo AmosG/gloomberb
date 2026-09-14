@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { act, useReducer, type ReactElement } from "react";
 import { testRender } from "../../../renderers/opentui/test-utils";
 import { appReducer, createInitialState } from "../../../state/app/context";
-import { setSharedMarketDataCoordinator } from "../../../market-data/coordinator";
+import { MarketDataCoordinator, setSharedMarketDataCoordinator } from "../../../market-data/coordinator";
+import { createTestDataProvider } from "../../../test-support/data-provider";
 import { createTestPluginRuntime } from "../../../test-support/plugin-runtime";
 import type { AppConfig } from "../../../types/config";
 import type { TickerFinancials } from "../../../types/financials";
@@ -19,6 +20,7 @@ const BROKER_PORTFOLIO_ID = "broker:ibkr-flex:DU12345";
 const GATEWAY_PORTFOLIO_ID = "broker:ibkr-live:DU12345";
 
 let testSetup: Awaited<ReturnType<typeof testRender>> | undefined;
+let controlledCoordinator: MarketDataCoordinator | undefined;
 let harnessState: ReturnType<typeof createInitialState> | null = null;
 
 const AnalyticsPane = portfolioAnalyticsModule.panes![0]!.component as (props: {
@@ -196,6 +198,8 @@ afterEach(async () => {
     });
     testSetup = undefined;
   }
+  controlledCoordinator?.destroy();
+  controlledCoordinator = undefined;
   harnessState = null;
   setSharedMarketDataCoordinator(null);
 });
@@ -472,3 +476,52 @@ describe("PortfolioAnalyticsPane", () => {
     expect(frame).not.toContain("1.3k");
   });
 });
+
+
+for (const scenario of ["unknown currency", "dated correction", "empty observations"] as const) {
+  test(`account history renders ${scenario} without changing the holdings table`, async () => {
+    const points: BrokerPortfolioPerformance["points"] = [
+      { date: "2026-01-01", value: 10000, cumulativeReturn: 0 },
+      { date: "2026-01-02", value: 11000, cumulativeReturn: .1 },
+      { date: "2026-09-10", value: 21000, cumulativeReturn: .1 },
+    ];
+    if (scenario === "dated correction") points.push({ date: "2026-09-10", cumulativeReturn: .1 });
+    const performance: BrokerPortfolioPerformance = {
+      accountId: "DU12345", source: "flex", period: "2026", fetchedAt: 1,
+      currency: scenario === "unknown currency" ? undefined : "USD",
+      points: scenario === "empty observations" ? points.map(({ date }) => ({ date })) : points,
+    };
+    const adapter: BrokerAdapter = {
+      id: "ibkr", name: "Controlled history", configSchema: [], validate: async () => true,
+      importPositions: async () => [], getPortfolioPerformance: async () => performance,
+    };
+    const config = createAnalyticsConfig(BROKER_PORTFOLIO_ID);
+    config.baseCurrency = "EUR";
+    config.portfolios[1]!.currency = "JPY";
+    config.brokerInstances = [{ id: "ibkr-flex", brokerType: "ibkr", enabled: true, config: {} }];
+    controlledCoordinator = new MarketDataCoordinator(createTestDataProvider({
+      getQuote: async () => null, getPriceHistory: async () => [], getPriceHistoryForResolution: async () => [],
+    }));
+    setSharedMarketDataCoordinator(controlledCoordinator);
+    await act(async () => {
+      testSetup = await testRender(<AnalyticsHarness config={config}
+        runtime={createTestPluginRuntime({ getBrokerAdapter: () => adapter })}
+        financials={createFinancials(125)} width={80} height={32} />, { width: 80, height: 32 });
+    });
+    for (let index = 0; index < 6; index++) await flushFrame();
+    const frame = testSetup!.captureCharFrame();
+    expect(frame).toContain("Technology");
+    if (scenario === "empty observations") {
+      expect(frame).toContain("at least two observations");
+      expect(frame).not.toContain("Enlarge this pane");
+      expect(frame).not.toContain("Broker return");
+    } else {
+      expect(frame).toContain("Broker return +10.00%");
+      expect(frame).toContain("Jan 1 2026");
+      expect(frame).toContain("Sep 10 2026");
+      expect(frame).toContain(scenario === "unknown currency" ? "Value (unknown currency)" : "Value (USD)");
+      expect(frame).not.toContain("Value (JPY)");
+      if (scenario === "dated correction") expect(frame).toContain("1 missing value observation.");
+    }
+  });
+}

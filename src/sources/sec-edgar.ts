@@ -794,13 +794,9 @@ export class SecEdgarClient {
     // SEC ownership forms (3/4/5) have XSL-prefixed primaryDocument paths
     // (e.g., "xslF345X06/wk-form4_xxx.xml") which return rendered HTML.
     // Strip the prefix and return the raw XML for programmatic parsing.
-    const ownershipForms = new Set(["3", "4", "5"]);
-    if (filing.primaryDocumentUrl && filing.form && ownershipForms.has(filing.form.trim())) {
-      const rawUrl = filing.primaryDocumentUrl.replace(/\/xsl[^/]+\//, "/");
-      if (rawUrl !== filing.primaryDocumentUrl) {
-        const { body } = await this.fetchText(rawUrl);
-        return body;
-      }
+    const ownershipForm = !!filing.form && /^[345](?:\/A)?$/i.test(filing.form.trim());
+    if (filing.primaryDocumentUrl && ownershipForm) {
+      targetUrl = filing.primaryDocumentUrl.replace(/\/xsl[^/]+\//, "/");
     }
 
     if (filing.primaryDocumentUrl && isPdfDocument("", "", filing.primaryDocumentUrl)) {
@@ -817,6 +813,8 @@ export class SecEdgarClient {
     }
 
     const { body, contentType } = await this.fetchText(targetUrl);
+    if (ownershipForm && /<(?:[\w.-]+:)?ownershipDocument(?:\s|>)/i.test(body)
+      && !isPdfDocument(body, contentType, targetUrl)) return body;
     return extractFilingContent(body, contentType, { form: filing.form, sourceUrl: targetUrl });
   }
 }

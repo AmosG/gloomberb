@@ -193,6 +193,7 @@ export function TreasuryAuctionsPane({ focused, width, height }: PaneProps) {
         setAuctions(result.auctions);
         setFetchedAt(result.fetchedAt);
         setStale(result.stale);
+        setError(result.refreshError ?? null);
         setStatus("loaded");
       })
       .catch((loadError: unknown) => {
@@ -281,7 +282,7 @@ export function TreasuryAuctionsPane({ focused, width, height }: PaneProps) {
   usePaneFooter(TREASURY_AUCTIONS_PANE_ID, () => {
     const info: PaneFooterSegment[] = [];
     if (status === "loading") info.push({ id: "loading", parts: [{ text: "loading", tone: "muted" }] });
-    if (error) info.push({ id: "error", parts: [{ text: "error", tone: "warning" }] });
+    if (error) info.push({ id: "error", parts: [{ text: error, tone: "warning" }] });
     if (stale) info.push({ id: "stale", parts: [{ text: "stale cache", tone: "warning" }] });
     if (filter !== "all") info.push({ id: "filter", parts: [{ text: activeFilterLabel, tone: "value" }] });
     if (searchQuery.trim()) {

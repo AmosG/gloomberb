@@ -10,6 +10,7 @@ import {
 } from "../../../components";
 import type { PaneProps } from "../../../types/plugin";
 import { useFxRatesMap, useTickerFinancials, useTickerFinancialsMap } from "../../../market-data/hooks";
+import { buildPortfolioFinancialsMap } from "../../../market-data/portfolio-financials";
 import { formatCurrency } from "../../../utils/format";
 import { selectEffectiveExchangeRates } from "../../../utils/exchange-rate-map";
 import {
@@ -180,13 +181,18 @@ export function KellySizerPane({ focused, width, height }: PaneProps) {
     () => activePortfolioId ? getCollectionTickersFromConfig(config, tickersBySymbol, activePortfolioId) : [],
     [activePortfolioId, config, tickersBySymbol],
   );
-  const livePortfolioFinancials = useTickerFinancialsMap(portfolioTickers);
-  const portfolioFinancials = useMemo(() => {
-    const merged = new Map(cachedPortfolioFinancials);
-    for (const [symbol, value] of livePortfolioFinancials) merged.set(symbol, value);
-    if (requestedSymbol && financials) merged.set(requestedSymbol, financials);
-    return merged;
-  }, [cachedPortfolioFinancials, financials, livePortfolioFinancials, requestedSymbol]);
+  const instrumentOptions = useMemo(() => ({ portfolioId: activePortfolioId }), [activePortfolioId]);
+  const livePortfolioFinancials = useTickerFinancialsMap(portfolioTickers, instrumentOptions);
+  const portfolioFinancials = useMemo(
+    () => buildPortfolioFinancialsMap(portfolioTickers, cachedPortfolioFinancials, livePortfolioFinancials, instrumentOptions),
+    [portfolioTickers, cachedPortfolioFinancials, livePortfolioFinancials, instrumentOptions],
+  );
+  const hasPortfolioPosition = activePortfolioId && ticker?.metadata.positions.some(
+    (position) => position.portfolio === activePortfolioId && position.shares !== 0,
+  );
+  const positionFinancials = hasPortfolioPosition
+    ? portfolioFinancials.get(requestedSymbol!) ?? null
+    : financials;
   const { accountState } = usePortfolioAccountState(activePortfolio, { brokerAccounts, config });
   const trackedCurrencies = useMemo(
     () => buildTrackedCurrencies(portfolioTickers, portfolioFinancials, accountState, config.baseCurrency),
@@ -210,14 +216,14 @@ export function KellySizerPane({ focused, width, height }: PaneProps) {
     ?? 0;
   const sourceCurrentValue = getPortfolioPositionValue({
     ticker,
-    financials,
+    financials: positionFinancials,
     portfolioId: activePortfolioId,
     baseCurrency: config.baseCurrency,
     exchangeRates,
   });
   const bankroll = bankrollOverride ?? sourceBankroll;
   const currentValue = currentValueOverride ?? sourceCurrentValue;
-  const price = financials?.quote?.price ?? null;
+  const price = positionFinancials?.quote?.price ?? null;
   const rawActiveDraft = drafts[mode] ?? DEFAULT_KELLY_DRAFTS[mode];
   const { commonAssumptions, updateCommon } = useKellyCommonAssumptions(rawActiveDraft);
   const activeDraft = useMemo(
@@ -444,7 +450,7 @@ export function KellySizerPane({ focused, width, height }: PaneProps) {
         </Box>
         {price != null && (
           <Text fg={colors.textDim}>
-            {formatCurrency(price, financials?.quote?.currency ?? ticker.metadata.currency ?? config.baseCurrency)}
+            {formatCurrency(price, positionFinancials?.quote?.currency ?? ticker.metadata.currency ?? config.baseCurrency)}
           </Text>
         )}
       </Box>

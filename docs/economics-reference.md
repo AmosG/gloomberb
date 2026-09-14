@@ -12,6 +12,10 @@ NSA means not seasonally adjusted. An annual-rate housing count is a flow stated
 
 The latest observation date identifies the source period, not necessarily its release date. The previous value is the preceding available print. The 1Y comparison uses the matching calendar period for monthly and quarterly data and a nearby prior business observation for daily data.
 
+Ordinary loads and automatic checks reuse series retrieved within six hours. Pressing `r` requests current observations, including revisions to earlier periods. If a request fails, available cached observations remain visible with the existing error and stale status; independently available statistics still update. This is current-series research, not reconstruction of publication-time vintages.
+
+Exports retain each statistic's retrieval time separately from its observation-period date. Aggregate `fetchedAt` is the oldest known retrieval among included statistics, or `null` when none is known. `fetchedAtComplete` is false if any included statistic lacks retrieval provenance, so the aggregate does not establish freshness for that statistic. Hydrated or injected observations without retrieval metadata keep a null retrieval time and unknown cache freshness. Reading or projecting cached observations does not advance their retrieval time.
+
 ## Series catalog
 
 | Statistic | FRED series | Transform | Description |

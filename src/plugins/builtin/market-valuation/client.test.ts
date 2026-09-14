@@ -1,12 +1,12 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
 import { MemoryPluginPersistence } from "../../../test-support/plugin-persistence";
 import { attachValuationPersistence, loadCachedSeries, resetValuationPersistence } from "./cache";
 import { createValuationSeriesLoader, getCachedValuationBundle, loadValuationBundle, requiredSeries, type ValuationSeriesLoader } from "./client";
-import { BUFFETT_INDICATOR, INDICATORS, SHILLER_CAPE, TOBINS_Q } from "./indicators";
+import { BUFFETT_INDICATOR, INDICATORS, EXCESS_CAPE_YIELD, SHILLER_CAPE, TOBINS_Q } from "./indicators";
 import type { DatedObservation, DatedSeries } from "./series";
 import { buildValuationSeries } from "./align";
 import { resolveValuationSeries } from "./chart-series";
-import { createSourceLoader, shillerObservations } from "./sources";
+import { createCloudSourceDeps, createSourceLoader, shillerObservations } from "./sources";
 
 function obs(values: Array<[string, number]>): DatedObservation[] {
   return values.map(([date, value]) => ({ date, value }));
@@ -185,4 +185,92 @@ describe("market-capitalization source basis", () => {
     expect(allocation.unitGroup).toBe("valuation-percent");
     expect(cape.unit).toBe("x");
   });
+});
+
+
+test("refresh bypasses fresh caches, shares pending Shiller work and retains failed-refresh provenance until success", async () => {
+  let now = Date.parse("2026-09-14T12:00:00Z");
+  const clock = spyOn(Date, "now").mockImplementation(() => now);
+  let calls = 0;
+  let cape = 30;
+  let date = "2026-09-01";
+  let failing = false;
+  const loader = createValuationSeriesLoader({
+    loadFred: async () => { throw new Error("unexpected FRED"); },
+    loadMarketHistory: async () => { throw new Error("unexpected history"); },
+    loadShiller: async () => {
+      calls += 1;
+      if (failing) throw new Error("Shiller refresh unavailable");
+      return { observations: [{ date, price: 100, dividend: 2,
+        earnings: 5, cpi: 300, longRate: 4, cape, excessCapeYield: 0 }],
+        sourceUrl: "controlled:shiller", fetchedAt: new Date(now).toISOString() };
+    },
+  });
+  const indicators = [SHILLER_CAPE, EXCESS_CAPE_YIELD];
+  const load = (force = false) => loadValuationBundle({ loader, indicators, force });
+  try {
+    const initial = await load();
+    await load();
+    expect(calls).toBe(1);
+    expect(initial.fetchedAt).toBe(now);
+    now += 1000; cape = 40;
+    const revised = await load(true);
+    expect(calls).toBe(2);
+    expect(revised.builds[0]!.series.points.at(-1)!.ratio).toBe(40);
+    expect(revised.fetchedAt).toBe(now);
+    now += 1000; failing = true;
+    const failed = await load(true);
+    expect(calls).toBe(3);
+    expect(failed.fetchedAt).toBe(revised.fetchedAt);
+    expect(failed.errors.join(" ")).toContain("Shiller refresh unavailable");
+    expect(failed.sources!.SHILLER_CAPE).toMatchObject({ stale: true, source: "stale-fallback", fetchedAt: revised.fetchedAt });
+    const cached = await load();
+    expect(calls).toBe(3);
+    expect(cached.errors).toEqual(failed.errors);
+    expect(getCachedValuationBundle(indicators)!.errors).toEqual(failed.errors);
+    now += 1000; failing = false; cape = 50;
+    const recovered = await load(true);
+    expect(calls).toBe(4);
+    expect(recovered.errors).toEqual([]);
+    expect(recovered.sources!.SHILLER_CAPE).toMatchObject({ stale: false, source: "network", fetchedAt: now });
+    now += 6 * 60 * 60 * 1000 + 1; cape = 60;
+    const expired = await load();
+    expect(calls).toBe(5);
+    expect(expired.builds[0]!.series.points.at(-1)!.ratio).toBe(60);
+    expect(expired.fetchedAt).toBe(now);
+    date = "2026-02-30";
+    const invalid = await load(true);
+    expect(invalid.errors.join(" ")).toContain("Invalid observation date: 2026-02-30");
+    expect(invalid.builds[0]!.series.points.at(-1)!.date).toBe("2026-09-01");
+    expect(invalid.sources!.SHILLER_CAPE).toMatchObject({ stale: true, source: "stale-fallback", fetchedAt: expired.fetchedAt });
+  } finally {
+    clock.mockRestore();
+  }
+});
+
+
+test("cloud-declared stale legs remain usable and stale after a cache restart", async () => {
+  const persistence = new MemoryPluginPersistence();
+  attachValuationPersistence(persistence);
+  let calls = 0;
+  const loader = createValuationSeriesLoader(createCloudSourceDeps({
+    getCloudFredSeries: async (id) => {
+      calls += 1;
+      return { info: null, observations: [{ date: "2026-07-01", value: id === "NCBEILQ027S" ? 100 : 50 }],
+        fetchedAt: "2026-09-10T12:00:00Z", stale: id === "TNWMVBSNNCB" };
+    },
+    getCloudShiller: async () => { throw new Error("unexpected Shiller"); },
+    getCloudHistory: async () => { throw new Error("unexpected history"); },
+  }));
+  const bundle = await loadValuationBundle({ loader, indicators: [TOBINS_Q] });
+  expect(bundle.builds[0]!.sourceStale).toBe(true);
+  expect(bundle.builds[0]!.series.points.at(-1)!.ratio).toBe(2);
+  expect(bundle.sources!.TNWMVBSNNCB!.provider).toEqual({ fetchedAt: "2026-09-10T12:00:00Z", stale: true });
+  resetValuationPersistence();
+  attachValuationPersistence(persistence);
+  const cached = await loadValuationBundle({ loader, indicators: [TOBINS_Q] });
+  expect(calls).toBe(2);
+  expect(cached.builds[0]!.sourceStale).toBe(true);
+  expect(cached.sources!.TNWMVBSNNCB!.provider).toEqual(bundle.sources!.TNWMVBSNNCB!.provider);
+  expect((await resolveValuationSeries("tobins-q", loader)).warning).toContain("source data is stale");
 });

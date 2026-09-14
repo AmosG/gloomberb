@@ -403,7 +403,11 @@ test("keeps expiration tabs independently scrollable from a narrow strike table"
   const provider = createTestDataProvider({
     getOptionsChain: async (_ticker, _exchange, expirationDate) => {
       requestedExpirations.push(expirationDate);
-      return makeChain([100, 101], 101, expirationDates);
+      const chain = makeChain([100, 101], 101, expirationDates);
+      for (const contract of [...chain.calls, ...chain.puts]) {
+        contract.expiration = expirationDate ?? expirationDates[0]!;
+      }
+      return chain;
     },
   });
   setSharedMarketDataCoordinator(new MarketDataCoordinator(provider));

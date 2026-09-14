@@ -149,6 +149,20 @@ export function sectorReturnTargetDate(asOfDate: string, range: SectorReturnRang
   return shifted.toISOString().slice(0, 10);
 }
 
+function returnBaseline(history: readonly PricePoint[], asOfDate: string, range: SectorReturnRange) {
+  const target = sectorReturnTargetDate(asOfDate, range);
+  const baseline = getSortedHistory(history).findLast(({ timestamp }) => new Date(timestamp).toISOString().slice(0, 10) <= target);
+  if (!baseline) return null;
+  const startDate = new Date(baseline.timestamp).toISOString().slice(0, 10);
+  if (Date.parse(target) - Date.parse(startDate) > 7 * DAY_MS) return null;
+  return { ...baseline, startDate };
+}
+
+/** A reported session establishes the calendar even when its price or the ending observation is unavailable. */
+export function sectorReturnStartDate(history: readonly PricePoint[], range: SectorReturnRange, asOfDate: string | null): string | null {
+  return asOfDate ? returnBaseline(history, asOfDate, range)?.startDate ?? null : null;
+}
+
 export function computeTrailingReturn(
   history: readonly PricePoint[],
   range: SectorReturnRange,
@@ -157,13 +171,11 @@ export function computeTrailingReturn(
 ): { value: number | null; startDate: string; endDate: string; integrity?: PriceHistoryIntegrity } | null {
   if (!asOfDate) return null;
   const points = getSortedHistory(history);
-  const target = sectorReturnTargetDate(asOfDate, range);
   // Use the last close on/before the calendar boundary, allowing a weekend or
   // exchange holiday. A shorter history or a long source gap is not 1M/1Y.
-  const baseline = points.findLast(({ timestamp }) => new Date(timestamp).toISOString().slice(0, 10) <= target);
+  const baseline = returnBaseline(history, asOfDate, range);
   if (!baseline) return null;
-  const startDate = new Date(baseline.timestamp).toISOString().slice(0, 10);
-  if (Date.parse(target) - Date.parse(startDate) > 7 * DAY_MS) return null;
+  const { startDate } = baseline;
   const end = points.findLast(({ timestamp }) => new Date(timestamp).toISOString().slice(0, 10) === asOfDate);
   const integrity = [pricePointIntegrity(baseline.point), end && pricePointIntegrity(end.point)]
     .filter((entry): entry is PriceHistoryIntegrity => !!entry);

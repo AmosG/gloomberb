@@ -23,7 +23,7 @@ import {
 function detailEntries(view: IndicatorViewModel): HeadlessPaneEntry[] {
   const format = view.indicator.formatValue;
   return [
-    { label: "Current", value: view.current.ratio, formatted: format(view.current.ratio) },
+    { label: "Current", value: view.current.ratio, formatted: view.current.ratio == null ? "--" : format(view.current.ratio) },
     { label: "Basis", value: view.indicator.description },
     { label: "Unit", value: view.indicator.axisUnit || "x" },
     {
@@ -35,7 +35,7 @@ function detailEntries(view: IndicatorViewModel): HeadlessPaneEntry[] {
     {
       label: "Rich percentile",
       value: view.richPercentile,
-      formatted: formatNumber(view.richPercentile, 0),
+      formatted: view.richPercentile == null ? "--" : formatNumber(view.richPercentile, 0),
     },
     {
       label: "Trend deviation",
@@ -67,10 +67,10 @@ export function projectValuationHeadlessBundle(
     id: view.indicator.id,
     indicator: view.indicator.label,
     value: view.current.ratio,
-    formattedValue: view.indicator.formatValue(view.current.ratio),
+    formattedValue: view.current.ratio == null ? "--" : view.indicator.formatValue(view.current.ratio),
     basis: view.indicator.description,
     unit: view.indicator.axisUnit || "x",
-    zone: view.zone.label,
+    zone: view.zone?.label ?? "Unavailable",
     richPercentile: view.richPercentile,
     richSigma: view.richSigma,
     asOf: view.asOf,
@@ -94,13 +94,13 @@ export function projectValuationHeadlessBundle(
             key: "richPercentile",
             header: "Rich %ile",
             align: "right",
-            format: (value) => formatNumber(Number(value), 0),
+            format: (value) => value == null ? "--" : formatNumber(Number(value), 0),
           },
           {
             key: "richSigma",
             header: "Trend",
             align: "right",
-            format: (value) => formatSigma(Number(value)),
+            format: (value) => formatSigma(value == null ? null : Number(value)),
           },
           { key: "asOf", header: "As of" },
         ],
@@ -113,6 +113,7 @@ export function projectValuationHeadlessBundle(
     errors: bundle.errors,
     metadata: {
       fetchedAt: bundle.fetchedAt,
+      sources: bundle.sources,
       range,
       selected: selected?.indicator.id ?? null,
     },

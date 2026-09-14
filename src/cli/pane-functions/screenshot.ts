@@ -1,4 +1,5 @@
 import { apiClient } from "../../api-client";
+import { snapshotInstrumentKey, type SnapshotMarketData } from "../../market-data/snapshot-provider";
 import type { ChartPaneModel } from "../../plugins/builtin/chart-composer/headless";
 import { loadResolvedHeadlessPaneModel } from "./headless";
 import { dirname, resolve } from "path";
@@ -472,6 +473,7 @@ export async function buildDesktopShotPayload(
   const tickers: TickerRecord[] = [];
   const financials: Array<[string, TickerFinancials]> = [];
   const intradayHistories: DesktopPaneShotIntradayHistory[] = [];
+  let instrumentFinancials: SnapshotMarketData["instrumentFinancials"];
   const optionsChains: Array<[string, OptionsChain]> = [];
   const [valuationSeries, statSeries] = await Promise.all([
     collectShotValuationSeries(resolved),
@@ -485,16 +487,18 @@ export async function buildDesktopShotPayload(
     shotInstance = { ...shotInstance, settings: { ...shotInstance.settings, chartSpec: chartModel.spec } };
     const authored = parseChartSpec(resolved.instance.settings?.chartSpec);
     const captured = new Map(chartModel.snapshot.financials);
+    instrumentFinancials = chartModel.snapshot.instrumentFinancials;
     const identities = new Map(chartModel.spec.series.flatMap((series) => {
       if (series.source.kind !== "security") return [];
       const key = publicTickerKey(series.source.instrument.symbol, series.source.instrument.exchange);
       const original = authored?.series.find(({ id }) => id === series.id)?.source;
       const label = original?.kind === "security" ? publicTickerKey(original.instrument.symbol, original.instrument.exchange) : key;
-      return [[key, label] as const];
+      return [[snapshotInstrumentKey(series.source.instrument), { key, label, target: series.source.instrument }] as const];
     }));
-    for (const [key, label] of identities) {
-      const data = captured.get(key) ?? { annualStatements: [], quarterlyStatements: [], priceHistory: [] };
-      financials.push([label, data]);
+    for (const [identity, { key, label, target }] of identities) {
+      const data = (target.instrument ? instrumentFinancials?.find(entry => snapshotInstrumentKey(entry.instrument) === identity)?.financials : captured.get(key))
+        ?? { annualStatements: [], quarterlyStatements: [], priceHistory: [] };
+      if (!target.instrument) financials.push([label, data]);
       const { symbol } = parsePublicTickerKey(key);
       const ticker = await context.store.loadTicker(key) ?? await context.store.loadTicker(symbol);
       tickers.push(ticker ?? createFallbackTicker(key, data, context));
@@ -547,6 +551,7 @@ export async function buildDesktopShotPayload(
     watermark,
     tickers,
     financials,
+    ...(instrumentFinancials?.length ? { instrumentFinancials } : {}),
     intradayHistories,
     optionsChains,
     valuationSeries,
@@ -947,7 +952,7 @@ function normalizeChartSeries(
       return Number.isFinite(date.getTime()) ? [{ ...point, date }] : [];
     })
     .sort((left, right) => left.date.getTime() - right.date.getTime());
-  const points = appendLiveQuotePoint(sorted, financials.quote)
+  const points = appendLiveQuotePoint(sorted, financials.quote, { assetCategory: financials.quoteMetadata?.instrumentType })
     .slice()
     .sort((left, right) => new Date(left.date).getTime() - new Date(right.date).getTime());
   return {

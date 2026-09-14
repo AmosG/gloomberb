@@ -17,7 +17,7 @@ export interface OptionsSummary {
   historicalVolatilityUnavailableReason?: string;
   historicalVolatilityIntegrity?: PriceHistoryIntegrity;
   impliedHistoricalRatio: number | null;
-  expirationVolume: number;
+  expirationVolume: number | null;
   putCallVolumeRatio: number | null;
   putCallOpenInterestRatio: number | null;
 }
@@ -26,15 +26,18 @@ function positive(value: number | undefined): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
-function ratio(numerator: number, denominator: number): number | null {
-  return denominator > 0 ? numerator / denominator : null;
+function ratio(numerator: number | null, denominator: number | null): number | null {
+  return numerator != null && denominator != null && denominator > 0 ? numerator / denominator : null;
 }
 
-function sum(contracts: readonly OptionContract[], field: "volume" | "openInterest"): number {
-  return contracts.reduce((total, contract) => {
+function sum(contracts: readonly OptionContract[], field: "volume" | "openInterest"): number | null {
+  let total = 0;
+  for (const contract of contracts) {
     const value = contract[field];
-    return total + (Number.isFinite(value) && value > 0 ? value : 0);
-  }, 0);
+    if (value == null || !Number.isFinite(value) || value < 0) return null;
+    total += value;
+  }
+  return Number.isFinite(total) ? total : null;
 }
 
 function atmImpliedVolatility(chain: OptionsChain, spot: number | undefined): number | null {
@@ -118,7 +121,7 @@ export function calculateOptionsSummary(
     impliedHistoricalRatio: atmIv != null && historicalVolatility != null && historicalVolatility > 0
       ? atmIv / historicalVolatility
       : null,
-    expirationVolume: callVolume + putVolume,
+    expirationVolume: callVolume != null && putVolume != null ? callVolume + putVolume : null,
     putCallVolumeRatio: ratio(putVolume, callVolume),
     putCallOpenInterestRatio: ratio(putOpenInterest, callOpenInterest),
   };

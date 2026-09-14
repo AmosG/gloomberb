@@ -32,13 +32,21 @@ export function scalarPointValue(point: TimeSeriesPoint): number | null {
       : null;
 }
 
+/** Fiscal identity survives distinct periods published at the same instant. */
+export function timeSeriesObservationKey(point: TimeSeriesPoint): string {
+  return point.periodLabel === undefined ? String(point.date.getTime())
+    : JSON.stringify([point.date.getTime(), point.observedAt.getTime(), point.periodLabel]);
+}
+
 function sortedUniquePoints(points: readonly TimeSeriesPoint[]): TimeSeriesPoint[] {
-  const byTime = new Map<number, TimeSeriesPoint>();
+  const byObservation = new Map<string, TimeSeriesPoint>();
   for (const point of points) {
     const time = point.date.getTime();
-    if (Number.isFinite(time)) byTime.set(time, point);
+    if (Number.isFinite(time)) byObservation.set(timeSeriesObservationKey(point), point);
   }
-  return [...byTime.values()].sort((left, right) => left.date.getTime() - right.date.getTime());
+  return [...byObservation.values()].sort((left, right) => (
+    left.date.getTime() - right.date.getTime() || left.observedAt.getTime() - right.observedAt.getTime()
+  ));
 }
 
 export function effectiveTimeSeriesPointTime(point: TimeSeriesPoint): number {

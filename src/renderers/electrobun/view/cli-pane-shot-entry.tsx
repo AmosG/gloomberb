@@ -332,11 +332,11 @@ function waitForShotReadiness(): () => void {
 function createShotDataProvider(payload: DesktopPaneShotPayload): DataProvider {
   const cloudProvider = createGloomberbCloudProvider();
   const bridge: Partial<DataProvider> = {
-    getQuote: (symbol, exchange) => requestShotMarketData<Quote>("getQuote", [symbol, exchange]),
+    getQuote: (symbol, exchange, context) => requestShotMarketData<Quote>("getQuote", [symbol, exchange, context]),
     getQuoteMetadata: (symbol, exchange, context) => requestShotMarketData<QuoteMetadata | null>("getQuoteMetadata", [symbol, exchange, context]),
     getQuotesBatch: (targets) => requestShotMarketData<QuoteBatchResult[]>("getQuotesBatch", [targets])
       .catch(() => targets.map((target) => ({ target, quote: null }))),
-    getPriceHistory: (symbol, exchange, range) => requestShotMarketData<PricePoint[]>("getPriceHistory", [symbol, exchange, range])
+    getPriceHistory: (symbol, exchange, range, context) => requestShotMarketData<PricePoint[]>("getPriceHistory", [symbol, exchange, range, context])
       .then(revivePricePoints).catch(() => []),
     async getExchangeRate(fromCurrency) {
       // Only identity FX is known offline; don't invent a parity rate.

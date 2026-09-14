@@ -199,6 +199,7 @@ export function useCommandBarPaneTemplateActions({
             const ticker = await item.resolveTicker!();
             await openPaneTemplateDirect(template, {
               arg: ticker.metadata.ticker, symbol: ticker.metadata.ticker, ticker,
+              instrument: item.instrument, listing: item.listing,
             });
           } catch (error) {
             notify(error instanceof Error ? error.message : "Could not open the selected listing.", { type: "error" });

@@ -84,8 +84,10 @@ function dataExtent(series: readonly ResolvedSeries[]): { start: number; end: nu
   let start = Number.POSITIVE_INFINITY;
   let end = Number.NEGATIVE_INFINITY;
   for (const entry of series) {
+    // A drawable series owns its dated gaps too. Trimming these dates here
+    // overrides the scene's gap-aware bounds in the mounted chart.
+    if (!entry.points.some((point) => hasRenderableValue(point) && Number.isFinite(point.date.getTime()))) continue;
     for (const point of entry.points) {
-      if (!hasRenderableValue(point)) continue;
       const timestamp = point.date.getTime();
       if (!Number.isFinite(timestamp)) continue;
       if (timestamp < start) start = timestamp;

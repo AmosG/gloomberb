@@ -51,7 +51,7 @@ function aggregatePriceHistory(
     .flatMap((point) => {
       const date = pricePointDate(point.date);
       const integrity = pricePointIntegrity(point);
-      return date && (finiteNumber(point.close) || integrity) ? [{ ...point, date, integrity }] : [];
+      return date ? [{ ...point, date, integrity }] : [];
     })
     .sort((left, right) => left.date.getTime() - right.date.getTime());
   if (period === "auto") return sorted.map((point) => ({ ...point, date: new Date(point.date) }));

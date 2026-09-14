@@ -1,4 +1,4 @@
-import { vintageLabel, type RatioPoint, type ValuationSeries } from "./align";
+import { isUsableRatio, vintageLabel, type RatioPoint, type ValuationSeries } from "./align";
 import { meanRatio, projectChart, type ValuationChartProjection } from "./chart-projection";
 import {
   RANGE_WINDOWS_MS,
@@ -22,15 +22,18 @@ export interface IndicatorBuild {
   indicator: IndicatorDef;
   series: ValuationSeries;
   trend: TrendFit;
+  sourceStale?: boolean;
 }
 
 export interface ValuationBundle {
   builds: IndicatorBuild[];
   errors: string[];
-  fetchedAt: number;
+  fetchedAt: number | null;
+  sources?: Record<string, import("./series").ValuationSourceMetadata>;
 }
 
-export function formatSigma(sigma: number): string {
+export function formatSigma(sigma: number | null): string {
+  if (sigma == null || !Number.isFinite(sigma)) return "--";
   return `${sigma > 0 ? "+" : ""}${formatNumber(sigma, 1)}σ`;
 }
 
@@ -38,20 +41,20 @@ export interface IndicatorViewModel {
   indicator: IndicatorDef;
   range: ValuationRangeId;
   current: RatioPoint;
-  zone: ZoneHit;
+  zone: ZoneHit | null;
   /** Raw fit deviation, in the indicator's own direction. */
-  sigmaVsTrend: number;
+  sigmaVsTrend: number | null;
   /** Deviation restated so positive always means expensive. */
-  richSigma: number;
+  richSigma: number | null;
   /** Share of history this market was cheaper than, so 100 is the richest ever. */
-  richPercentile: number;
+  richPercentile: number | null;
   trendNow: number;
   mean: number;
   vintageLabel: string | null;
   ratioOneYearAgo: number | null;
   allTimeHigh: Extreme;
   allTimeLow: Extreme;
-  percentile: number;
+  percentile: number | null;
   chart: ValuationChartProjection;
   asOf: string;
   observationStale: boolean;
@@ -64,16 +67,15 @@ function parseDateMs(date: string): number {
 export function sliceByRange(
   points: readonly RatioPoint[],
   range: ValuationRangeId,
-  nowMs: number = Date.parse(points.at(-1)!.date),
+  nowMs: number = Date.parse(points.at(-1)?.date ?? ""),
 ): RatioPoint[] {
   const window = RANGE_WINDOWS_MS[range];
   if (window == null) return [...points];
   const cutoff = nowMs - window;
-  const sliced = points.filter((p) => parseDateMs(p.date) >= cutoff);
-  return sliced.length >= 2 ? sliced : [...points];
+  return points.filter((p) => parseDateMs(p.date) >= cutoff && parseDateMs(p.date) <= nowMs);
 }
 
-function findExtreme(points: readonly RatioPoint[], pick: "high" | "low"): Extreme {
+function findExtreme(points: readonly (RatioPoint & { ratio: number })[], pick: "high" | "low"): Extreme {
   let best = points[0]!;
   for (const p of points) {
     if (pick === "high" ? p.ratio > best.ratio : p.ratio < best.ratio) best = p;
@@ -96,36 +98,37 @@ export function projectView(
   opts: { nowMs?: number } = {},
 ): IndicatorViewModel {
   const { indicator, series, trend } = build;
-  const points = series.points;
-  const current = points[points.length - 1]!;
+  const history = series.points;
+  const points = history.filter(isUsableRatio);
+  const current = history.at(-1)!;
   const nowMs = opts.nowMs ?? Date.now();
-  const visible = sliceByRange(points, range);
+  const visible = sliceByRange(history, range);
   const mean = meanRatio(points);
-  const atOrBelow = points.filter((p) => p.ratio <= current.ratio).length;
-  const percentile = points.length === 0 ? 0 : (100 * atOrBelow) / points.length;
-  const sigma = sigmaVsTrend(trend, current.ratio, current.date);
+  const atOrBelow = points.filter((p) => current.ratio != null && p.ratio <= current.ratio).length;
+  const percentile = current.ratio == null ? null : (100 * atOrBelow) / points.length;
+  const sigma = current.ratio == null ? null : sigmaVsTrend(trend, current.ratio, current.date);
   const expensiveUp = higherIsExpensive(indicator);
 
   return {
     indicator,
     range,
     current,
-    zone: classifyZone(indicator, current.ratio),
+    zone: current.ratio == null ? null : classifyZone(indicator, current.ratio),
     sigmaVsTrend: sigma,
-    richSigma: expensiveUp ? sigma : -sigma,
-    richPercentile: expensiveUp ? percentile : 100 - percentile,
+    richSigma: sigma == null ? null : expensiveUp ? sigma : -sigma,
+    richPercentile: percentile == null ? null : expensiveUp ? percentile : 100 - percentile,
     trendNow: trendAt(trend, current.date),
     mean,
     vintageLabel: indicator.input.kind === "ratio" && indicator.input.levels
       ? vintageLabel(indicator.input.levels.denominatorLabel, series.vintageDate)
       : null,
-    ratioOneYearAgo: ratioOneYearAgo(points, current.date),
+    ratioOneYearAgo: ratioOneYearAgo(history, current.date),
     allTimeHigh: findExtreme(points, "high"),
     allTimeLow: findExtreme(points, "low"),
     percentile,
     chart: projectChart(indicator, visible, mean),
     asOf: current.date,
-    observationStale: nowMs - parseDateMs(current.date) > indicator.staleAfterMs,
+    observationStale: build.sourceStale === true || nowMs - parseDateMs(current.date) > indicator.staleAfterMs,
   };
 }
 

@@ -1,4 +1,5 @@
 import type { Portfolio, Watchlist } from "./ticker";
+import type { BrokerContractRef, TickerListingRef } from "./instrument";
 import type { LanguagePreference } from "../i18n/languages";
 
 export const CURRENT_CONFIG_VERSION = 22;
@@ -29,7 +30,7 @@ export interface ColumnConfig {
 
 export type PaneBinding =
   | { kind: "none" }
-  | { kind: "fixed"; symbol: string }
+  | { kind: "fixed"; symbol: string; instrument?: BrokerContractRef | null; listing?: TickerListingRef }
   | { kind: "follow"; sourceInstanceId: string };
 
 export interface DockedPlacementMemory {

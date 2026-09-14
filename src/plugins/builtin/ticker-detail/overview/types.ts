@@ -7,6 +7,7 @@ export interface StatField {
 export interface PositionTableRow {
   account: string;
   qty: string;
+  quantityUnit?: "face";
   avg: string;
   mark: string;
   cost: string;
@@ -14,4 +15,5 @@ export interface PositionTableRow {
   pnl: string;
   ret: string;
   pnlValue: number | null;
+  pnlBasis: "quote-and-cost" | "broker-snapshot" | "mixed" | "unavailable";
 }

@@ -157,3 +157,55 @@ test("a corrected boundary response replaces the cached contradiction without mu
   expect(bad).toEqual(original);
   expect(diagnostic?.sourcePoints[0]?.high).toBe(79);
 });
+
+test.each(["missing end", "invalid baseline"] as const)("a peer's %s cannot move the shared calendar boundaries", async (failure) => {
+  const definitions = [{ name: "Semiconductors", etf: "SMH" }, { name: "Gold Miners", etf: "GDX" }];
+  const provider = {
+    getQuote: async (symbol: string) => symbol === "SMH" && failure === "missing end" ? null : quote(symbol),
+    getPriceHistory: async (symbol: string) => symbol === "SMH" ? [
+      { date: new Date("2025-09-10"), close: failure === "invalid baseline" ? NaN : 80 },
+      { date: new Date("2026-08-10"), close: failure === "invalid baseline" ? 0 : 90 },
+      { date: new Date("2026-09-09"), close: 100 },
+    ] : [
+      { date: new Date("2025-09-09"), close: 80 },
+      { date: new Date("2026-08-07"), close: 90 },
+      { date: new Date("2026-09-10"), close: 100 },
+    ],
+  } as unknown as DataProvider;
+  const outcomes = await loadSectorRows(definitions, provider);
+  expect(outcomes[0]?.row).toMatchObject({ return1M: null, return1Y: null });
+  expect(outcomes[1]?.row).toMatchObject({ price: 105, changePercent: 5, return1M: null, return1Y: null,
+    return1MStartDate: null, return1YStartDate: null, returnAsOfDate: "2026-09-10" });
+});
+
+test("an extended peer baseline counts even when its ending observation remains unavailable", async () => {
+  const provider = {
+    getQuote: async (symbol: string) => symbol === "XLK" ? null : quote(symbol),
+    getPriceHistory: async (symbol: string) => symbol === "XLK" ? [
+      { date: new Date("2026-08-10"), close: 90 },
+      { date: new Date("2026-09-09"), close: 100 },
+    ] : [
+      { date: new Date("2025-09-09"), close: 80 },
+      ...history.slice(1),
+    ],
+    getDetailedPriceHistory: async () => [{ date: new Date("2025-09-10"), close: 80 }],
+  } as unknown as DataProvider;
+  const rows = await loadSectorRows(sectors, provider);
+  expect(rows[0]?.row).toMatchObject({ return1M: null, return1Y: null });
+  expect(rows[1]?.row?.return1M).toBeCloseTo(16.6666667);
+  expect(rows[1]?.row?.return1Y).toBeNull();
+});
+
+test("shared holiday baselines remain valid and a separate history failure cannot erase them", async () => {
+  const provider = {
+    getQuote: async (symbol: string) => ({ ...quote(symbol), changeSessionDate: "2026-10-12" }),
+    getPriceHistory: async (symbol: string) => {
+      if (symbol === "XLK") throw new Error("history unavailable");
+      return [{ date: new Date("2025-10-10"), close: 100 }, { date: new Date("2026-09-11"), close: 100 }];
+    },
+  } as unknown as DataProvider;
+  const rows = await loadSectorRows(sectors, provider);
+  expect(rows[0]?.row).toMatchObject({ price: 105, return1M: null, return1Y: null });
+  expect(rows[1]?.row?.return1Y).toBeCloseTo(5);
+  expect(rows[1]?.row).toMatchObject({ return1MStartDate: "2026-09-11", return1YStartDate: "2025-10-10" });
+});

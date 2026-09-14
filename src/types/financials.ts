@@ -1,3 +1,4 @@
+import type { PriceBasis } from "./instrument";
 
 export type MarketState = "PRE" | "REGULAR" | "POST" | "PREPRE" | "POSTPOST" | "CLOSED";
 export type SessionConfidence = "explicit" | "derived" | "unknown";
@@ -38,6 +39,8 @@ export interface QuoteMetadata {
 }
 
 export interface Quote {
+  /** Applies to this price observation; a stored position cannot supply it. */
+  priceBasis?: PriceBasis;
   symbol: string;
   /** Provider-reported security type, independent of the company profile. */
   instrumentType?: string;
@@ -483,8 +486,9 @@ export interface OptionContract {
   lastPrice: number;
   change: number;
   percentChange: number;
-  volume: number;
-  openInterest: number;
+  /** Missing activity is unknown; an explicitly reported zero remains zero. */
+  volume?: number;
+  openInterest?: number;
   bid: number;
   ask: number;
   impliedVolatility: number;

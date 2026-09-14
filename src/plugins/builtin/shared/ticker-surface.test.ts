@@ -54,7 +54,7 @@ describe("createTickerSurfacePaneTemplate", () => {
     });
 
     expect(shared).toEqual({ title: "FA AAPL", data: { symbol: "AAPL" } });
-    expect(template.publicShare?.restore(shared!.data)).toEqual({ symbol: "AAPL" });
+    expect(template.publicShare?.restore(shared!.data)).toEqual({ symbol: "AAPL", instrument: null });
     expect(template.publicShare?.restore({ symbol: "AAPL", token: "secret" })).toBeNull();
   });
 

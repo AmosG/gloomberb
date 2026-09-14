@@ -1305,3 +1305,9 @@ Other historical `GloomSlots` names have no render sites. Use the explicit regis
 - Use `ctx.persistence` for cached resources, `ctx.resume` for local resume state, and `ctx.configState` for configuration
 - Use `ctx.on()` to react to app events without polling
 - Use `ctx.notify()` for non-intrusive user feedback and desktop notifications
+
+### Bond position price conventions
+
+`BrokerPosition.priceBasis` and the persisted `TickerPosition.priceBasis` accept `per-unit` or `percent-of-par`. The latter is an explicit source contract: `shares` contains nominal face in `currency`; `avgCost` and `markPrice` contain percentage points per 100 face. The host applies exactly 0.01 to nominal-price products and preserves `multiplier` unchanged. Do not pre-scale the prices as well. Supply monetary `marketValue` and `unrealizedPnl` independently when available; omit missing values rather than inventing zero. No accrued-interest or yield inference is part of this contract.
+
+`Quote.priceBasis` belongs to that quote response, including its price-valued session fields. A stored position or a different provider's metadata cannot supply a missing quote basis. Source responses must clear a previous declaration if the new response does not establish it. Percent-of-par quotes require the same nominal currency as the holding. Untagged BOND position prices are unknown; other existing asset contracts retain their per-unit behavior. Persisting and resyncing the source declaration requires no database schema or release-version change.

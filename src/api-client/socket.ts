@@ -576,6 +576,7 @@ export class CloudApiSocket {
     };
 
     ws.onmessage = (event) => {
+      if (this.ws !== ws) return;
       void this.handleSocketMessage(String(event.data));
     };
 

@@ -219,3 +219,24 @@ describe("describeDraftProblem", () => {
     expect(describeDraftProblem({ ...CANONICAL, volatility: -0.1 })).toMatch(/Volatility/);
   });
 });
+
+
+test("IV distinguishes exact zero-volatility prices from numerically unresolved nearby prices", () => {
+  for (const side of ["call", "put"] as const) {
+    const draft={...CANONICAL,side,spot:side==="call"?150:50,daysToExpiry:1,rate:-.01,dividendYield:.02};
+    const lower=valueOption({...draft,volatility:0}).price;
+    expect(solveImpliedVolatility(draft,lower)).toEqual({volatility:0,note:null});
+    for(const offset of [-.000001,.000001]) {
+      const result=solveImpliedVolatility(draft,lower+offset);
+      expect(result.volatility).toBeNull();expect(result.note).toContain("model bound");
+    }
+    expect(solveImpliedVolatility(draft,lower-.01).note).toContain("below intrinsic");
+  }
+});
+
+test("an asymptotic maximum and collapsed numerical bounds cannot produce a finite IV", () => {
+  const long={...CANONICAL,daysToExpiry:36500,rate:0};
+  expect(solveImpliedVolatility(long,100)).toEqual({volatility:null,note:"no finite IV at the model maximum"});
+  expect(solveImpliedVolatility({...CANONICAL,rate:-1e308},50).volatility).toBeNull();
+  expect(solveImpliedVolatility({...CANONICAL,strike:1e-30},100).note).toContain("precision");
+});

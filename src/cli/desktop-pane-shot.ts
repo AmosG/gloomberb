@@ -6,6 +6,8 @@ import type { AppConfig } from "../types/config";
 import type { ChartResolutionResult } from "../time-series/types";
 import type { OptionsChain, PricePoint, TickerFinancials } from "../types/financials";
 import type { ManualChartResolution } from "../time-series/resolution";
+import type { SnapshotMarketData } from "../market-data/snapshot-provider";
+import type { InstrumentRef } from "../market-data/request-types";
 import type { TickerRecord } from "../types/ticker";
 import type { PaneRuntimeState } from "../core/state/app/state";
 import type { RemoteUiNodeSnapshot } from "../remote/types";
@@ -17,6 +19,7 @@ import {
 } from "../renderers/electrobun/view/build-assets";
 
 export interface DesktopPaneShotIntradayHistory {
+  target?: InstrumentRef;
   symbol: string;
   exchange: string;
   rangePreset: "1D" | "1W";
@@ -42,6 +45,7 @@ export interface DesktopPaneShotPayload {
   watermark?: string | null;
   tickers: TickerRecord[];
   financials: Array<[string, TickerFinancials]>;
+  instrumentFinancials?: SnapshotMarketData["instrumentFinancials"];
   intradayHistories: DesktopPaneShotIntradayHistory[];
   optionsChains: Array<[string, OptionsChain]>;
   valuationSeries: Array<[string, DatedObservation[]]>;

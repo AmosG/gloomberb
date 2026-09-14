@@ -1,5 +1,6 @@
 import type { BrokerAccount } from "../../../types/trading";
 import type { PortfolioSummaryTotals } from "./metrics";
+import { portfolioPnlPercent } from "./position-metrics";
 
 export interface PortfolioAccountMetrics {
   dailyPnl: number;
@@ -51,9 +52,7 @@ export function resolvePortfolioAccountMetrics(
 
   const brokerUnrealizedPnl = finiteNumber(account?.unrealizedPnl) ? convertAccountValue(account.unrealizedPnl) : null;
   const unrealizedPnl = brokerUnrealizedPnl ?? totals.unrealizedPnl;
-  const unrealizedPnlPct = totals.totalCostBasis !== 0
-    ? percentChange(unrealizedPnl, totals.totalCostBasis)
-    : totals.unrealizedPnlPct;
+  const unrealizedPnlPct = portfolioPnlPercent(unrealizedPnl, totals.totalCostBasis) ?? Number.NaN;
 
   return {
     dailyPnl,

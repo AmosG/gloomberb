@@ -82,6 +82,29 @@ test("derives call and put Greeks from the chain IV", () => {
   expect(call?.vegaPerPoint).toBeCloseTo(put!.vegaPerPoint, 10);
 });
 
+test("activity totals require each reported contract's input without discarding independent metrics", () => {
+  const chain: OptionsChain = {
+    underlyingSymbol: "AAPL", expirationDates: [],
+    calls: [contract(100, .25, 10, 20)], puts: [contract(100, .25, 0, 0)],
+  };
+  for (const invalid of [undefined, Number.NaN, Infinity, -1]) {
+    const partial = { ...chain, calls: [{ ...chain.calls[0]!, openInterest: invalid }] };
+    const summary = calculateOptionsSummary(partial, 100, []);
+    expect(summary.expirationVolume).toBe(10);
+    expect(summary.putCallVolumeRatio).toBe(0);
+    expect(summary.putCallOpenInterestRatio).toBeNull();
+    expect(summary.atmImpliedVolatility).toBe(.25);
+  }
+  const missingVolume = calculateOptionsSummary({ ...chain, puts: [{ ...chain.puts[0]!, volume: undefined }] }, 100, []);
+  expect(missingVolume.expirationVolume).toBeNull();
+  expect(missingVolume.putCallVolumeRatio).toBeNull();
+  expect(missingVolume.putCallOpenInterestRatio).toBe(0);
+  const zero = calculateOptionsSummary({ ...chain, calls: [{ ...chain.calls[0]!, volume: 0, openInterest: 0 }] }, 100, []);
+  expect(zero.expirationVolume).toBe(0);
+  expect(zero.putCallVolumeRatio).toBeNull();
+  expect(zero.putCallOpenInterestRatio).toBeNull();
+});
+
 
 test("rejects bad observations inside the selected HV window instead of bridging them", () => {
   const good = priceHistory();

@@ -12,6 +12,14 @@ import type { AppNotificationRequest } from "../../../types/plugin";
 import { ChatController } from "./controller";
 import { SESSION_RETRY_MS } from "./controller/state";
 
+const testControllers = new Set<ChatController>();
+
+function createController(): ChatController {
+  const controller = new ChatController();
+  testControllers.add(controller);
+  return controller;
+}
+
 function persistSession(persistence: MemoryPersistence, user: Record<string, unknown> = {}) {
   persistence.setState("session", {
     sessionToken: "token-123",
@@ -111,6 +119,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  for (const controller of testControllers) controller.dispose();
+  testControllers.clear();
   jest.useRealTimers();
   apiClient.dispose();
   apiClient.setSessionToken(null);
@@ -132,7 +142,7 @@ afterEach(() => {
 describe("ChatController", () => {
   test("hydrates cached session, draft, and transcript from plugin persistence", () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const message: ChatMessage = chatMessage({
       id: "m1",
       content: "hello",
@@ -166,7 +176,7 @@ describe("ChatController", () => {
 
   test("uses a browser cookie session without exposing its token", async () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const sentMessages: string[] = [];
 
     apiClient.setCookieSessionMode(true);
@@ -206,7 +216,7 @@ describe("ChatController", () => {
   });
 
   test("rejects unknown shortcut channels after the server list loads", async () => {
-    const controller = new ChatController();
+    const controller = createController();
     apiClient.getChannels = async () => SERVER_CHAT_CHANNELS;
 
     await expect(controller.resolveRequiredChannelId("help")).resolves.toBe("help");
@@ -217,7 +227,7 @@ describe("ChatController", () => {
 
   test("keeps private channels when a public refresh finishes after chat state", async () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const directChannel: ChatChannel = {
       id: "dm:u2",
       name: "u2",
@@ -250,7 +260,7 @@ describe("ChatController", () => {
 
   test("hydrates a cached verified user into the api client for offline use", async () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
 
     persistSession(persistence, { emailVerified: true });
 
@@ -270,7 +280,7 @@ describe("ChatController", () => {
 
   test("does not restore persisted websocket tokens", () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
 
     persistence.setState("session", {
       sessionToken: "token-123",
@@ -291,7 +301,7 @@ describe("ChatController", () => {
 
   test("reset clears persisted chat state and session token", () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
 
     persistSession(persistence);
     persistence.setState("channel:everyone", {
@@ -321,7 +331,7 @@ describe("ChatController", () => {
 
   test("defers draft persistence and subscriber sync until the user pauses or leaves", () => {
     const persistence = new TrackingPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const draftSnapshots: string[] = [];
 
     controller.attachPersistence(persistence);
@@ -348,7 +358,7 @@ describe("ChatController", () => {
   });
 
   test("pauses verification polling while the app is backgrounded", () => {
-    const controller = new ChatController();
+    const controller = createController();
 
     apiClient.setSessionToken("token-123");
     (controller as any).session.sessionToken = "token-123";
@@ -365,7 +375,7 @@ describe("ChatController", () => {
   });
 
   test("dispose stops verification polling and closes the live connection", () => {
-    const controller = new ChatController();
+    const controller = createController();
     let closed = false;
 
     apiClient.setSessionToken("token-123");
@@ -394,7 +404,7 @@ describe("ChatController", () => {
 
   test("runs a quiet safety refresh while the live connection is active", async () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const originalSetInterval = globalThis.setInterval;
     const originalClearInterval = globalThis.clearInterval;
     const intervalCallbacks: Array<() => void> = [];
@@ -459,7 +469,7 @@ describe("ChatController", () => {
 
   test("validates a persisted native session through protected chat state", async () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const directChannel: ChatChannel = {
       id: "dm:u2",
       name: "u2",
@@ -503,7 +513,7 @@ describe("ChatController", () => {
 
   test("clears an expired persisted session when protected chat rejects it", async () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
 
     persistence.setState("session", {
       sessionToken: "expired-token",
@@ -533,7 +543,7 @@ describe("ChatController", () => {
 
   test("clears an expired persisted session for an unverified user", async () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     let profileRequests = 0;
 
     persistence.setState("session", {
@@ -562,7 +572,7 @@ describe("ChatController", () => {
 
   test("downgrades stale verification state when protected chat rejects it", async () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
 
     persistSession(persistence, { emailVerified: true });
 
@@ -589,7 +599,7 @@ describe("ChatController", () => {
 
   test("does not let a stale validation failure clear a replacement session", async () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     let rejectProbe: ((error: Error) => void) | null = null;
     let markProbeStarted: (() => void) | null = null;
     const probeStarted = new Promise<void>((resolve) => {
@@ -636,7 +646,7 @@ describe("ChatController", () => {
 
   test("does not apply stale chat state after a replacement session", async () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     let resolveProbe: ((state: ChatStateResponse) => void) | null = null;
     let markProbeStarted: (() => void) | null = null;
     const probeStarted = new Promise<void>((resolve) => {
@@ -688,7 +698,7 @@ describe("ChatController", () => {
   test("revalidates a persisted session after an offline validation probe", async () => {
     jest.useFakeTimers();
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
 
     persistSession(persistence, { emailVerified: true });
 
@@ -723,7 +733,7 @@ describe("ChatController", () => {
 
   test("signs out when get-session returns no user and no token is stored", async () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
 
     persistence.setState("session", {
       sessionToken: null,
@@ -742,7 +752,7 @@ describe("ChatController", () => {
 
   test("keeps the cached session when session refresh fails transiently", async () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
 
     persistSession(persistence, { emailVerified: true });
 
@@ -771,7 +781,7 @@ describe("ChatController", () => {
 
   test("refreshes the public transcript without requiring a session", async () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const message: ChatMessage = chatMessage({
       id: "m1",
       content: "hello from the lobby",
@@ -794,7 +804,7 @@ describe("ChatController", () => {
 
   test("keeps per-channel drafts and transcripts isolated", () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const everyoneMessage: ChatMessage = chatMessage({
       id: "m1",
       content: "general",
@@ -842,7 +852,7 @@ describe("ChatController", () => {
 
   test("stores the latest message id as the incremental cursor", async () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const initial: ChatMessage = chatMessage({
       id: "m1",
       content: "hello",
@@ -893,7 +903,7 @@ describe("ChatController", () => {
 
   test("recovers a message the cursor already moved past", async () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const asked: ChatMessage = chatMessage({
       id: "m1",
       content: "why is the chart glitching",
@@ -941,7 +951,7 @@ describe("ChatController", () => {
 
   test("hydrates missing transcript cache without marking history unread", async () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const notifications: AppNotificationRequest[] = [];
     const history: ChatMessage = chatMessage({
       id: "m1",
@@ -984,7 +994,7 @@ describe("ChatController", () => {
 
   test("backfills from cached transcript when persisted cursor is ahead of the cache", async () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const cached: ChatMessage = chatMessage({
       id: "m1",
       content: "cached",
@@ -1035,7 +1045,7 @@ describe("ChatController", () => {
 
   test("shows a pending message immediately and replaces it when the send succeeds", async () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const replyTarget: ChatMessage = chatMessage({
       id: "m1",
       content: "first",
@@ -1099,7 +1109,7 @@ describe("ChatController", () => {
 
   test("sends one idempotency key while the same message is pending", () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const clientMessageIds: Array<string | undefined> = [];
 
     persistSession(persistence, { emailVerified: true });
@@ -1130,7 +1140,7 @@ describe("ChatController", () => {
 
   test("edits the latest message from the current user", async () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const original: ChatMessage = chatMessage({
       id: "m1",
       content: "helo",
@@ -1166,7 +1176,7 @@ describe("ChatController", () => {
 
   test("refuses to edit after the edit window expires", async () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const notifications: AppNotificationRequest[] = [];
     const original: ChatMessage = chatMessage({
       id: "m1",
@@ -1196,7 +1206,7 @@ describe("ChatController", () => {
 
   test("refuses to edit an older message from the current user", async () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const notifications: AppNotificationRequest[] = [];
     const messages: ChatMessage[] = [
       chatMessage({
@@ -1233,7 +1243,7 @@ describe("ChatController", () => {
 
   test("marks a pending message as failed when sending errors", async () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const notifications: AppNotificationRequest[] = [];
 
     persistSession(persistence, { emailVerified: true });
@@ -1265,7 +1275,7 @@ describe("ChatController", () => {
 
   test("tracks unread mentions from fetched messages without issuing local notifications", () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const notifications: AppNotificationRequest[] = [];
     const message: ChatMessage = chatMessage({
       id: "m1",
@@ -1293,7 +1303,7 @@ describe("ChatController", () => {
 
   test("delivers background notifications while the focused chat stays unread", async () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const notifications: AppNotificationRequest[] = [];
     const deliveredIds: string[][] = [];
 
@@ -1331,7 +1341,7 @@ describe("ChatController", () => {
 
   test("keeps undeliverable background notifications pending for email fallback", () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const deliveredIds: string[][] = [];
     let desktopAvailable = false;
     let presentationCount = 0;
@@ -1363,7 +1373,7 @@ describe("ChatController", () => {
 
   test("marks mentions viewed when a chat view opens", () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const notifications: AppNotificationRequest[] = [];
     const message: ChatMessage = chatMessage({
       id: "m1",
@@ -1395,7 +1405,7 @@ describe("ChatController", () => {
 
   test("keeps focused foreground notifications read without presenting an alert", () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const notifications: AppNotificationRequest[] = [];
     const deliveredIds: string[][] = [];
 
@@ -1425,7 +1435,7 @@ describe("ChatController", () => {
 
   test("keeps an unfocused foreground chat unread while presenting an in-app alert", () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const notifications: AppNotificationRequest[] = [];
     const deliveredIds: string[][] = [];
 
@@ -1455,7 +1465,7 @@ describe("ChatController", () => {
 
   test("loads server chat state, pending reply notifications, and acks delivery", async () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const notifications: AppNotificationRequest[] = [];
     const deliveredIds: string[][] = [];
 
@@ -1531,7 +1541,7 @@ describe("ChatController", () => {
 
   test("toggles channel notifications optimistically and keeps the channel connected", async () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const connectedChannels: string[] = [];
 
     persistSession(persistence, { emailVerified: true });
@@ -1563,7 +1573,7 @@ describe("ChatController", () => {
 
   test("dedupes reply notifications by message id", () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const notifications: AppNotificationRequest[] = [];
     const notification: ChatNotification = {
       id: "n1",
@@ -1596,7 +1606,7 @@ describe("ChatController", () => {
 
   test("opens a server-issued channel notification at its exact message", () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const notifications: AppNotificationRequest[] = [];
     const openedMessages: string[] = [];
     const message: ChatMessage = chatMessage({
@@ -1637,7 +1647,7 @@ describe("ChatController", () => {
 
   test("uses direct channel labels in server-issued notification titles", async () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const notifications: AppNotificationRequest[] = [];
     const directChannel: ChatChannel = {
       id: "dm:u2",
@@ -1691,7 +1701,7 @@ describe("ChatController", () => {
 
   test("tracks unread channel messages and clears them when the channel opens", () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const message: ChatMessage = chatMessage({
       id: "m1",
       channelId: "options",
@@ -1719,7 +1729,7 @@ describe("ChatController", () => {
 
   test("server reply notifications fire even when channel notifications are disabled", () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const notifications: AppNotificationRequest[] = [];
     const message: ChatMessage = chatMessage({
       id: "m2",
@@ -1756,7 +1766,7 @@ describe("ChatController", () => {
 
   test("recovers from a legacy timestamp cursor by falling back to a full transcript fetch", async () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const cached: ChatMessage = chatMessage({
       id: "m1",
       content: "cached",
@@ -1808,7 +1818,7 @@ describe("ChatController", () => {
 
   test("loads older messages before the oldest cached message without moving the latest cursor", async () => {
     const persistence = new MemoryPersistence();
-    const controller = new ChatController();
+    const controller = createController();
     const cached: ChatMessage[] = [
       chatMessage({
         id: "m3",

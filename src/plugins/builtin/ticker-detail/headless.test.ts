@@ -1,3 +1,4 @@
+import { resolveCanonicalQuote } from "../../../market-data/quotes/resolution";
 import { expect, test } from "bun:test";
 import type { HeadlessPaneContext, HeadlessPaneLoadArgs } from "../../../types/headless";
 import { createTestDataProvider } from "../../../test-support/data-provider";
@@ -15,6 +16,7 @@ test("financial statements keep raw values, dated growth cells, and formatted co
       async getTickerFinancials(symbol, exchange) {
         requested.push(`${symbol}:${exchange}`);
         return {
+          financialCurrency: "USD",
           annualStatements: [
             { date: "2024-12-31", totalRevenue: 100, dilutedShares: 10 },
             { date: "2025-12-31", totalRevenue: 150, dilutedShares: 12 },
@@ -142,4 +144,22 @@ test("financial JSON exports preserve selected metric availability separately fr
   const restored = JSON.parse(JSON.stringify(result));
   expect(restored.metadata.columns[0]).toMatchObject({ date: "2017-06-30", dateEvidence, availableAt: "2018-08-03", fieldAvailability });
   expect(restored.rows.find((row: { metric: string }) => row.metric.includes("Revenue"))["2017-06-30"]).toBe(96_571_000_000);
+});
+
+
+test("canonical missing changes survive JSON roundtrip into default Quote Monitor text beside zero and derived change", async () => {
+  const base = { symbol: "MISSING", price: 12, currency: "USD", lastUpdated: Date.now(), marketState: "CLOSED" };
+  const inputs = [base, { ...base, symbol: "ZERO", change: 0, changePercent: 0 }, { ...base, symbol: "DERIVED", previousClose: 10 }];
+  const quotes = inputs.map(quote => resolveCanonicalQuote({ quote }).quote!);
+  expect(quotes[0]!.change).toBeNaN();
+  expect(quotes[0]!.changePercent).toBeNaN();
+  const ctx = { signal: new AbortController().signal, marketData: createTestDataProvider({ getQuote: async symbol => quotes.find(quote => quote.symbol === symbol)! }) } as HeadlessPaneContext;
+  const input = args(["MISSING", "ZERO", "DERIVED"]);
+  const model = await quoteComparisonHeadless.load(input, ctx);
+  const transported = JSON.parse(JSON.stringify(model));
+  expect(transported.rows[0]).toMatchObject({ change: null, changePercent: null });
+  const text = renderHeadlessPaneText(quoteComparisonHeadless, transported, input, "Quote Monitor");
+  expect(text.split("\n").find(line => line.trim().startsWith("MISSING "))).not.toContain("0.00%");
+  expect(text.split("\n").find(line => line.trim().startsWith("ZERO "))).toContain("0.00%");
+  expect(text.split("\n").find(line => line.trim().startsWith("DERIVED "))).toContain("+20.00%");
 });

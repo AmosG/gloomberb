@@ -1,4 +1,5 @@
-import type { Quote, TickerFinancials } from "../../types/financials";
+import { hasUsablePriceHistory } from "../../utils/price-history";
+import type { PricePoint, Quote, TickerFinancials } from "../../types/financials";
 import { hasFreshQuoteForCurrentSession, isQuoteStaleForCurrentSession } from "../quotes/freshness";
 import type { InstrumentRef } from "../request-types";
 import type { ProviderAttempt, ProviderReasonCode, QueryEntry } from "../result-types";
@@ -92,6 +93,15 @@ export function readyEntry<T>(
     error: data == null ? { reasonCode: "NO_DATA", message: EMPTY_MESSAGE } : null,
     attempts,
   };
+}
+
+/** Keep all-missing observation dates while marking price coverage unavailable. */
+export function readyChartEntry(
+  current: QueryEntry<PricePoint[]>, data: PricePoint[] | null, source: string, attempts: ProviderAttempt[],
+): QueryEntry<PricePoint[]> {
+  const entry = readyEntry(current, data, source, attempts, { keepLastGoodOnEmpty: true });
+  return data && !hasUsablePriceHistory(data)
+    ? { ...entry, error: { reasonCode: "NO_DATA", message: EMPTY_MESSAGE } } : entry;
 }
 
 export function readyQuoteEntry(

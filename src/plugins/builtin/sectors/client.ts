@@ -5,6 +5,7 @@ import {
   computeTrailingReturn,
   latestHistoryDate,
   sectorReturnTargetDate,
+  sectorReturnStartDate,
   type SectorRow,
 } from "./sector-model";
 
@@ -65,7 +66,10 @@ export async function loadSectorRows(
       const end = new Date(`${asOfDate}T00:00:00Z`);
       end.setUTCDate(end.getUTCDate() + 1);
       const extended = await provider.getDetailedPriceHistory(sector.etf, "", start, end, "1d").catch(() => []);
-      if (extended.length > 0) history = [...history, ...extended];
+      if (extended.length > 0) {
+        history = [...history, ...extended];
+        histories.set(sector.etf, history);
+      }
     }
     const month = computeTrailingReturn(history, "1M", price, asOfDate);
     const year = computeTrailingReturn(history, "1Y", price, asOfDate);
@@ -92,9 +96,13 @@ export async function loadSectorRows(
     };
   }));
   // These ETFs share a market calendar. A missing observation for one fund
-  // must not silently give it an earlier baseline than its peers.
-  const monthStartDate = outcomes.map(({ row }) => row?.return1MStartDate).filter((date): date is string => !!date).sort().at(-1);
-  const yearStartDate = outcomes.map(({ row }) => row?.return1YStartDate).filter((date): date is string => !!date).sort().at(-1);
+  // must not silently give it an earlier baseline than its peers. Use every
+  // reported baseline, independently of whether that fund has an ending price.
+  const sharedStartDate = (range: "1M" | "1Y") => [...histories.values()]
+    .map((history) => sectorReturnStartDate(history, range, asOfDate))
+    .filter((date): date is string => !!date).sort().at(-1);
+  const monthStartDate = sharedStartDate("1M");
+  const yearStartDate = sharedStartDate("1Y");
   for (const { row } of outcomes) {
     if (!row) continue;
     if (row.return1MStartDate !== monthStartDate) { row.return1M = null; row.return1MStartDate = null; }

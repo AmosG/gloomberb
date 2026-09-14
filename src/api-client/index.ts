@@ -34,19 +34,28 @@ const ASSIST_QUERY_MAX_LENGTH = 200;
 const ASSIST_COMMAND_LIMIT = 150;
 const ASSIST_REQUEST_TIMEOUT_MS = 6_000;
 
+interface PendingSessionRequest {
+  promise: Promise<AuthUser | null>;
+  consumers: Array<() => boolean>;
+  isCurrent: () => boolean;
+  user: AuthUser | null;
+  credential: string | null;
+}
+
 class GloomApiClient {
   private currentUser: AuthUser | null = null;
   private sessionChecked = false;
   /** Last few session transitions, content-free, for app://auth. */
   private authTrace: Array<{ at: number; event: string; token: boolean; user: string }> = [];
-  private sessionRequest: Promise<AuthUser | null> | null = null;
+  private sessionRequest: PendingSessionRequest | null = null;
+  private sessionRequestGeneration = 0;
   private readonly currentUserListeners = new Set<() => void>();
   private readonly transport = new CloudApiRequestTransport();
   private readonly auth: CloudAuthApi = new CloudAuthApi({
     getCurrentUser: () => this.currentUser,
     getSessionToken: () => this.transport.getSessionToken(),
     hasSessionCredential: () => this.transport.hasSessionCredential(),
-    request: (path, options) => this.request(path, options),
+    request: (path, options, canApplySession) => this.request(path, options, canApplySession),
     requireCapturedSession: (message) => this.requireCapturedSession(message),
     setCurrentUser: (user) => this.setCurrentUser(user),
     setSessionToken: (token) => this.setSessionToken(token),
@@ -226,8 +235,8 @@ class GloomApiClient {
     throw new Error(message);
   }
 
-  private async request<T>(path: string, options?: RequestInit): Promise<T> {
-    return this.transport.request<T>(path, options);
+  private async request<T>(path: string, options?: RequestInit, canApplySession?: () => boolean): Promise<T> {
+    return this.transport.request<T>(path, options, canApplySession);
   }
 
   private getSocketAuthToken(): string | null {
@@ -246,24 +255,41 @@ class GloomApiClient {
   pollDeviceSignIn = this.auth.pollDeviceSignIn.bind(this.auth);
   signOut = this.auth.signOut.bind(this.auth);
 
-  async getSession(): Promise<AuthUser | null> {
-    if (this.sessionRequest) {
+  async getSession(isCurrent: () => boolean = () => true): Promise<AuthUser | null> {
+    if (!isCurrent()) return this.currentUser;
+    const existing = this.sessionRequest;
+    if (existing?.isCurrent()
+      && existing.user === this.currentUser
+      && existing.credential === this.getSessionToken()) {
+      existing.consumers.push(isCurrent);
       this.traceAuth("getSession:joined-inflight");
-      return this.sessionRequest;
+      return existing.promise;
     }
     this.traceAuth("getSession:start");
-    this.sessionRequest = this.auth.getSession();
-    try {
-      const user = await this.sessionRequest;
-      this.sessionChecked = true;
-      this.traceAuth("getSession:done", user);
-      return user;
-    } catch (error) {
-      this.traceAuth(`getSession:error:${error instanceof Error ? error.message.slice(0, 60) : "unknown"}`);
-      throw error;
-    } finally {
-      this.sessionRequest = null;
-    }
+    const generation = ++this.sessionRequestGeneration;
+    const consumers = [isCurrent];
+    const canApply = () => generation === this.sessionRequestGeneration && consumers.some((consumer) => consumer());
+    const request: PendingSessionRequest = {
+      consumers,
+      isCurrent: canApply,
+      user: this.currentUser,
+      credential: this.getSessionToken(),
+      promise: this.auth.getSession(canApply)
+        .then(({ user, validated }) => {
+          if (validated && canApply()) this.sessionChecked = true;
+          this.traceAuth(validated ? "getSession:done" : "getSession:retained", user);
+          return user;
+        })
+        .catch((error) => {
+          this.traceAuth(`getSession:error:${error instanceof Error ? error.message.slice(0, 60) : "unknown"}`);
+          throw error;
+        })
+        .finally(() => {
+          if (this.sessionRequest === request) this.sessionRequest = null;
+        }),
+    };
+    this.sessionRequest = request;
+    return request.promise;
   }
 
   sendVerification = this.auth.sendVerification.bind(this.auth);
@@ -443,6 +469,8 @@ class GloomApiClient {
   subscribeScanner = this.socket.subscribeScanner.bind(this.socket);
 
   dispose(): void {
+    this.sessionRequestGeneration += 1;
+    this.sessionRequest = null;
     this.socket.dispose();
   }
 

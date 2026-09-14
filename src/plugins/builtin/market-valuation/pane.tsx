@@ -1,8 +1,8 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   DataTableView,
-  EmptyState, ExternalLinkText,
-  InputSearchBar, Notice, PaneStatusBody, SegmentedControl, type DataTableCell,
+  EmptyState,
+  InputSearchBar, PaneStatusBody, SegmentedControl, type DataTableCell,
   type DataTableColumn,
   type DataTableKeyEvent,
   type DataTableSelectionChangeReason,
@@ -13,14 +13,14 @@ import { useShortcut } from "../../../react/input";
 import { usePaneSettingValue } from "../../../state/app/context";
 import { colors } from "../../../theme/colors";
 import type { PaneProps } from "../../../types/plugin";
-import { Box, ScrollBox, Text, type InputRenderable } from "../../../ui";
+import { Box, ScrollBox, type InputRenderable } from "../../../ui";
 import { formatNumber } from "../../../utils/format";
 import { isPlainKey } from "../../../utils/keyboard";
 import { stopSearchFocusNavigation } from "../../../utils/search-focus-navigation";
 import { useAutoRefresh } from "../shared/auto-refresh";
 import { usePaneStatusFooter } from "../shared/pane-footer";
 import { getCachedValuationBundle, loadValuationBundle } from "./client";
-import { indicatorUnavailableReason, shortZoneLabel, type IndicatorDef, type ValuationRangeId } from "./defs";
+import { indicatorSeries, indicatorUnavailableReason, shortZoneLabel, type IndicatorDef, type ValuationRangeId } from "./defs";
 import { IndicatorDetail } from "./detail";
 import { INDICATORS } from "./indicators";
 import { RANGE_OPTIONS, VALUATION_DEFAULTS } from "./settings";
@@ -31,7 +31,7 @@ import {
 } from "./view";
 
 /** Below this the detail sits under the table instead of beside it. */
-const loadBundle = () => loadValuationBundle();
+const loadBundle = (force: boolean) => loadValuationBundle({ force });
 
 const SPLIT_MIN_WIDTH = 108;
 const LIST_WIDTH = 46;
@@ -51,7 +51,7 @@ function matchesQuery(row: IndicatorRow, query: string): boolean {
     row.indicator.label,
     row.indicator.shortLabel,
     row.indicator.description,
-    row.view?.zone.label,
+    row.view?.zone?.label,
   ].join(" ").toLowerCase();
   return query.split(/\s+/).every((token) => haystack.includes(token));
 }
@@ -75,7 +75,7 @@ function buildColumns(width: number, stacked: boolean): Column[] {
 
 function cellsFor(row: IndicatorRow): Record<ColumnId, DataTableCell> {
   const view = row.view;
-  if (!view) {
+  if (!view || view.current.ratio == null || !view.zone) {
     return {
       name: { text: row.indicator.shortLabel, color: colors.textBright },
       value: { text: "--", color: colors.textDim },
@@ -90,7 +90,7 @@ function cellsFor(row: IndicatorRow): Record<ColumnId, DataTableCell> {
     zone: { text: shortZoneLabel(view.zone.id), color: view.zone.color },
     // Restated so a high number always means expensive, whichever way the
     // underlying measure runs, otherwise the column cannot be read down.
-    percentile: { text: formatNumber(view.richPercentile, 0), color: colors.text },
+    percentile: { text: view.richPercentile == null ? "--" : formatNumber(view.richPercentile, 0), color: colors.text },
     sigma: { text: formatSigma(view.richSigma), color: colors.textMuted },
   };
 }
@@ -123,12 +123,12 @@ export function MarketValuationPane({ focused, width, height }: PaneProps) {
   );
   const [range, setRange] = usePaneSettingValue<ValuationRangeId>("range", VALUATION_DEFAULTS.range);
   const resource = useAsyncResource(loadBundle, { initialData: () => getCachedValuationBundle() });
-  const { data: bundle, load: refresh, updatedAt: lastUpdated } = resource;
+  const { data: bundle, load, reload: refresh, updatedAt: lastUpdated } = resource;
   const [query, setQuery] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
   const [searchFocusToken, setSearchFocusToken] = useState(0);
   const searchInputRef = useRef<InputRenderable | null>(null);
-  useAutoRefresh(lastUpdated, refresh);
+  useAutoRefresh(lastUpdated, load);
 
   const focusSearch = useCallback(() => {
     setSearchFocused(true);
@@ -163,7 +163,9 @@ export function MarketValuationPane({ focused, width, height }: PaneProps) {
   );
   const rows = useMemo<IndicatorRow[]>(() => bundle ? INDICATORS.flatMap((indicator) => {
     const view = views.find((entry) => entry.indicator.id === indicator.id) ?? null;
-    const error = indicatorUnavailableReason(indicator);
+    const error = indicatorUnavailableReason(indicator)
+      ?? bundle.errors.find((entry) => [indicator.label, ...indicatorSeries(indicator).map((def) => def.key)]
+        .some((prefix) => entry.startsWith(`${prefix}:`))) ?? null;
     return view || error ? [{ indicator, view, error }] : [];
   }) : [], [bundle, views]);
   const normalizedQuery = query.trim().toLowerCase();
@@ -217,7 +219,7 @@ export function MarketValuationPane({ focused, width, height }: PaneProps) {
   usePaneStatusFooter({
     registrationId: "market-valuation",
     loading: resource.loading,
-    error,
+    error: error && !selectedView ? "Unavailable" : error,
     info: footerInfo,
   });
 
@@ -244,7 +246,7 @@ export function MarketValuationPane({ focused, width, height }: PaneProps) {
     ? Math.max(3, height - 2)
     : Math.min(visible.length + 2, Math.max(3, height - 12));
   // The stacked table consumes rows outside the detail scroll viewport.
-  const bodyHeight = Math.max(1, height - (bodyError ? 1 : 0));
+  const bodyHeight = Math.max(1, height);
   const detailHeight = split ? bodyHeight : Math.max(1, bodyHeight - tableHeight - 1);
 
   const list = (
@@ -306,12 +308,6 @@ export function MarketValuationPane({ focused, width, height }: PaneProps) {
           /> : (
             <Box flexDirection="column" padding={1} gap={1}>
               <EmptyState status="error" title={`${selected.indicator.label} unavailable`} message={selected.error ?? undefined} />
-              <Text fg={colors.textDim} wrapMode="word" wrapText>{selected.indicator.description}</Text>
-              {selected.indicator.link ? <ExternalLinkText
-                url={selected.indicator.link.url}
-                label={selected.indicator.link.label}
-                color={colors.textDim}
-              /> : null}
             </Box>
           )}
         </Box>
@@ -325,11 +321,6 @@ export function MarketValuationPane({ focused, width, height }: PaneProps) {
         {list}
         {detail}
       </Box>
-      {bodyError ? (
-        <Box height={1} paddingX={1} overflow="hidden">
-          <Notice>{bodyError}</Notice>
-        </Box>
-      ) : null}
     </Box>
   );
 }

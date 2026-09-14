@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef } from "react";
+import { tickerSelectionFromSearchResult } from "../../../../tickers/selection";
 import type { AppState } from "../../../../state/app/context";
 import type { AppTickerRepositoryPort } from "../../../../core/app-service-ports";
 import type { PluginRegistry } from "../../../../plugins/registry";
 import type { InstrumentSearchResult } from "../../../../types/instrument";
+import type { PinTickerOptions } from "../../../../types/plugin";
 import { publicTickerKey } from "../../../../utils/exchanges";
 import {
   rankTickerSearchItems,
@@ -20,7 +22,7 @@ import {
 interface UseCommandBarTickerSearchActionsOptions {
   closeAll: (options?: { revertThemePreview?: boolean }) => void;
   dispatch: (action: any) => void;
-  focusTicker: (symbol: string, options?: { forceNewPane?: boolean }) => void;
+  focusTicker: (symbol: string, options?: PinTickerOptions) => void;
   pluginRegistry: Pick<PluginRegistry, "events">;
   tickerRepository: AppTickerRepositoryPort;
   tickers: AppState["tickers"];
@@ -48,7 +50,7 @@ export function useCommandBarTickerSearchActions({
   const openTickerResearch = useCallback((result: InstrumentSearchResult, options?: { forceNewPane?: boolean }) => {
     (async () => {
       const ticker = await resolveSearchTicker(result);
-      focusTicker(ticker.metadata.ticker, options);
+      focusTicker(ticker.metadata.ticker, { ...options, ...tickerSelectionFromSearchResult(result) });
       closeAll({ revertThemePreview: false });
     })();
   }, [closeAll, focusTicker, resolveSearchTicker]);
@@ -66,6 +68,8 @@ export function useCommandBarTickerSearchActions({
     if (candidate.kind === "ticker" && candidate.ticker) {
       return {
         id: candidate.id,
+        contractKey: candidate.contractKey,
+        ...tickerSelectionFromSearchResult(candidate.result),
         label: candidate.label,
         instrumentType: candidate.instrumentType,
         detail,
@@ -75,11 +79,11 @@ export function useCommandBarTickerSearchActions({
         kind: "ticker",
         resolveTicker: async () => candidate.ticker!,
         secondaryAction: () => {
-          focusTicker(candidate.ticker!.metadata.ticker, { forceNewPane: true });
+          focusTicker(candidate.ticker!.metadata.ticker, { forceNewPane: true, ...tickerSelectionFromSearchResult(candidate.result) });
           closeAll({ revertThemePreview: false });
         },
         action: () => {
-          focusTicker(candidate.ticker!.metadata.ticker);
+          focusTicker(candidate.ticker!.metadata.ticker, { ...tickerSelectionFromSearchResult(candidate.result) });
           closeAll({ revertThemePreview: false });
         },
       };
@@ -87,6 +91,8 @@ export function useCommandBarTickerSearchActions({
 
     return {
       id: candidate.id,
+      contractKey: candidate.contractKey,
+      ...tickerSelectionFromSearchResult(candidate.result),
       label: candidate.label,
       instrumentType: candidate.instrumentType,
       detail,

@@ -34,6 +34,7 @@ export function normalizeCreditSeries(
 ): CreditConditionRow {
   const info = payload.info;
   if (!info
+    || info.id?.trim().toUpperCase() !== definition.seriesId
     || info.units.toLowerCase() !== "percent"
     || !info.frequency.toLowerCase().startsWith("daily")
     || !info.title.toLowerCase().includes("option-adjusted spread")) {

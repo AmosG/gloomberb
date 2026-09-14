@@ -2,6 +2,7 @@ import { apiClient } from "../../../api-client";
 import type { CloudShillerPayload } from "../../../api-client";
 import type { SeriesDef, ShillerField } from "./defs";
 import type { DatedObservation, DatedSeries } from "./series";
+import type { SeriesCacheInput } from "../shared/series-cache";
 
 /**
  * Every leg goes through the Gloom Cloud proxy. Earlier revisions reached Yahoo and
@@ -9,7 +10,7 @@ import type { DatedObservation, DatedSeries } from "./series";
  * since both are blocked there by CORS and the worker's connect-src policy.
  */
 export interface ValuationSourceDeps {
-  loadFred: (seriesId: string, limit: number) => Promise<DatedObservation[]>;
+  loadFred: (seriesId: string, limit: number) => Promise<DatedObservation[] | SeriesCacheInput>;
   loadMarketHistory: (
     symbol: string,
     exchange: string,
@@ -67,20 +68,26 @@ export function provenanceFor(def: SeriesDef): DatedSeries["provenance"] {
 export function createSourceLoader(deps: ValuationSourceDeps) {
   // One Shiller fetch serves every column the registry asks for.
   let shillerRequest: Promise<CloudShillerPayload> | null = null;
-  const shiller = () => (shillerRequest ??= deps.loadShiller().catch((error) => {
-    shillerRequest = null;
-    throw error;
-  }));
+  const shiller = () => {
+    if (shillerRequest) return shillerRequest;
+    const request = deps.loadShiller().finally(() => {
+      if (shillerRequest === request) shillerRequest = null;
+    });
+    shillerRequest = request;
+    return request;
+  };
 
   return async (def: SeriesDef): Promise<DatedSeries> => {
     const source = def.source;
     switch (source.kind) {
-      case "fred":
+      case "fred": {
+        const loaded = await deps.loadFred(source.seriesId, source.limit);
         return {
           seriesId: def.key,
-          observations: await deps.loadFred(source.seriesId, source.limit),
+          ...(Array.isArray(loaded) ? { observations: loaded } : loaded),
           provenance: "fred",
         };
+      }
       case "market-history":
         return {
           seriesId: def.key,
@@ -91,12 +98,15 @@ export function createSourceLoader(deps: ValuationSourceDeps) {
           ),
           provenance: "market",
         };
-      case "shiller":
+      case "shiller": {
+        const payload = await shiller();
         return {
           seriesId: def.key,
-          observations: shillerObservations(await shiller(), source.field),
+          observations: shillerObservations(payload, source.field),
+          provider: { fetchedAt: providerTimestamp(payload.fetchedAt), stale: null },
           provenance: "shiller",
         };
+      }
       default: {
         const _exhaustive: never = source;
         return _exhaustive;
@@ -110,11 +120,18 @@ export type ValuationCloudClient = Pick<
   "getCloudFredSeries" | "getCloudHistory" | "getCloudShiller"
 >;
 
+function providerTimestamp(value: unknown): string | null {
+  return typeof value === "string" && Number.isFinite(Date.parse(value)) ? value : null;
+}
+
 export function createCloudSourceDeps(client: ValuationCloudClient): ValuationSourceDeps {
   return {
     loadFred: async (seriesId, limit) => {
       const data = await client.getCloudFredSeries(seriesId, { limit, sortOrder: "desc" });
-      return data.observations;
+      return { observations: data.observations, provider: {
+        fetchedAt: providerTimestamp(data.fetchedAt),
+        stale: typeof data.stale === "boolean" ? data.stale : null,
+      } };
     },
     loadMarketHistory: async (symbol, exchange, startDate) => {
       const response = await client.getCloudHistory(symbol, exchange, {

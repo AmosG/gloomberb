@@ -1,4 +1,5 @@
 import type { Quote } from "../../types/financials";
+import { resolvePriceBasis } from "../market/price-basis";
 import { hasLikelyQuoteUnitMismatch, resolveCurrencyUnit } from "../../utils/currency-units";
 import { canonicalExchange, resolveExchangeTimeZone } from "../../utils/exchanges";
 
@@ -28,7 +29,9 @@ function sessionDate(quote: Quote): string | null {
 function sameUnits(left: Quote, right: Quote): boolean {
   const a = resolveCurrencyUnit(left.currency);
   const b = resolveCurrencyUnit(right.currency);
-  return !!a.currency && a.currency === b.currency && a.divisor === b.divisor
+  const basis = resolvePriceBasis(left.priceBasis, left.instrumentType);
+  return basis !== null && !!a.currency && a.currency === b.currency && a.divisor === b.divisor
+    && basis === resolvePriceBasis(right.priceBasis, right.instrumentType)
     && !hasLikelyQuoteUnitMismatch(left, right);
 }
 

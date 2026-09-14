@@ -1,4 +1,4 @@
-import type { RatioPoint } from "./align";
+import { isUsableRatio, type RatioPoint } from "./align";
 import type { IndicatorDef } from "./defs";
 
 const MS_PER_DAY = 86_400_000;
@@ -24,9 +24,7 @@ export function fitTrend(
   points: readonly RatioPoint[],
   model: "log" | "linear" = "log",
 ): TrendFit {
-  const usable = model === "log"
-    ? points.filter((p) => p.ratio > 0 && Number.isFinite(p.ratio))
-    : points.filter((p) => Number.isFinite(p.ratio));
+  const usable = points.filter(isUsableRatio).filter((p) => model !== "log" || p.ratio > 0);
   const empty: TrendFit = { model, alpha: 0, beta: 0, sigma: 0, originMs: 0 };
   if (usable.length === 0) return empty;
 

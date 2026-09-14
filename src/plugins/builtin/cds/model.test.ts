@@ -47,9 +47,19 @@ describe("CDS spread units", () => {
     // Unlabelled raw values are decimals too, not percent.
     expect(spreadToBasisPoints(0.00256, null)).toBeCloseTo(25.6, 6);
     expect(spreadToBasisPoints(25.6, "BPS")).toBe(25.6);
+    expect(spreadToBasisPoints(250, "4")).toBe(250);
     expect(spreadToBasisPoints(25.6, "Basis points")).toBe(25.6);
     expect(spreadToBasisPoints(0.256, "Percentage")).toBeCloseTo(25.6, 6);
     expect(spreadToBasisPoints(null, "3")).toBeNull();
+  });
+
+  test("withholds unsupported notation without confusing known zero or negative spreads", () => {
+    expect(["1", "Monetary amount", "Other", "basis unknown", "percent of price", "-4", "3-"].map((unit) =>
+      spreadToBasisPoints(2.5, unit))).toEqual([null, null, null, null, null, null, null]);
+    expect([0, -25].map((value) => spreadToBasisPoints(value, "4"))).toEqual([0, -25]);
+    expect(spreadToBasisPoints(Number.MAX_VALUE, "3")).toBeNull();
+    const [monetary] = normalizeCdsTrades([payload({ reportedSpread: 2.5, spreadNotation: "1" })]);
+    expect(monetary).toMatchObject({ reportedSpread: 2.5, spreadNotation: "1", spreadBp: null, couponBp: 100 });
   });
 });
 

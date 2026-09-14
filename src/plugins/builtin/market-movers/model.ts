@@ -1,6 +1,11 @@
+import { resolveCurrencyUnit } from "../../../utils/currency-units";
+import { overlayScreenerQuoteEntries } from "../shared/screener-live-quotes";
+import type { Quote } from "../../../types/financials";
+import type { QueryEntry } from "../../../market-data/result-types";
+import { formatCurrency, formatNumber } from "../../../utils/format";
 import type { DataTableColumn } from "../../../components";
 import { compareSortValues, type SortDirection } from "../../../utils/sort-values";
-import { MARKET_SUMMARY_SYMBOLS, type MarketSummaryQuote, type ScreenerCategory, type ScreenerQuote } from "./screener";
+import { MARKET_SUMMARY_SYMBOLS, convertScreenerPriceUnit, screenerNumber, screenerVolume, screenerVolumeRatio, type MarketSummaryQuote, type ScreenerCategory, type ScreenerQuote } from "./screener";
 
 export type TabId = "gainers" | "losers" | "actives" | "trending";
 
@@ -62,8 +67,8 @@ export const INDEX_SHORT: Record<string, string> = {
   "^RUT": "RUT",
 };
 
-export function fiftyTwoWeekPositionPercent(price: number, low: number | undefined, high: number | undefined): number | null {
-  if (low == null || high == null || high <= low) return null;
+export function fiftyTwoWeekPositionPercent(price: number | null, low: number | undefined, high: number | undefined): number | null {
+  if (price == null || !Number.isFinite(price) || low == null || high == null || !Number.isFinite(low) || !Number.isFinite(high) || high <= low) return null;
   return ((price - low) / (high - low)) * 100;
 }
 
@@ -123,6 +128,7 @@ export function nextSortPreference(
 export function createRows(quotes: ScreenerQuote[]): MarketMoverRow[] {
   return quotes.map((quote, index) => ({
     ...quote,
+    volumeRatio: screenerVolumeRatio(quote.volume, quote.avgVolume),
     rank: index + 1,
   }));
 }
@@ -144,14 +150,14 @@ export function screenerQuoteFromQuote(symbol: string, quote: { name?: string; p
   return {
     symbol,
     name: quote.name ?? symbol,
-    price: quote.price ?? 0,
-    change: quote.change ?? 0,
-    changePercent: quote.changePercent ?? 0,
-    volume: quote.volume ?? 0,
-    avgVolume: 0,
-    volumeRatio: 0,
+    price: screenerNumber(quote.price),
+    change: screenerNumber(quote.change),
+    changePercent: screenerNumber(quote.changePercent),
+    volume: screenerVolume(quote.volume),
+    avgVolume: null,
+    volumeRatio: null,
     marketCap: undefined,
-    currency: quote.currency ?? "USD",
+    currency: quote.currency ?? "",
     fiftyTwoWeekHigh: undefined,
     fiftyTwoWeekLow: undefined,
     dayHigh: undefined,
@@ -159,4 +165,32 @@ export function screenerQuoteFromQuote(symbol: string, quote: { name?: string; p
     exchange: quote.listingExchangeName ?? quote.exchangeName ?? "",
     lastUpdated: quote.lastUpdated,
   };
+}
+
+/** A missing listing currency cannot be represented by a USD symbol. */
+export function formatMoverPrice(price: number | null, currency: string): string {
+  if (!currency) return formatNumber(price ?? undefined);
+  const unit = resolveCurrencyUnit(currency);
+  try { return formatCurrency(price == null ? undefined : price / unit.divisor, unit.currency); }
+  catch { return formatNumber(price ?? undefined); }
+}
+
+
+/** Range endpoints belong to the original screener price denomination. */
+export function overlayMarketMoverQuotes(
+  rows: readonly ScreenerQuote[],
+  entries: ReadonlyMap<string, QueryEntry<Quote>>,
+): ScreenerQuote[] {
+  return overlayScreenerQuoteEntries(rows, entries).map((row, index) => {
+    const original = rows[index]!;
+    if (row === original) return row;
+    const convert = (value: number | undefined) => convertScreenerPriceUnit(value, original.currency, row.currency);
+    return {
+      ...row,
+      fiftyTwoWeekLow: convert(original.fiftyTwoWeekLow),
+      fiftyTwoWeekHigh: convert(original.fiftyTwoWeekHigh),
+      dayLow: convert(original.dayLow),
+      dayHigh: convert(original.dayHigh),
+    };
+  });
 }

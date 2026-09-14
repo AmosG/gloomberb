@@ -92,6 +92,8 @@ export function PortfolioHistorySection({
             width={Math.max(10, width - 2)}
             height={height}
             mode="line"
+            calendarSpaced
+            showTimeAxis
             colors={palette}
             yAxisLabel={axisLabel}
             yAxisColor={colors.textDim}
@@ -121,7 +123,7 @@ export function PortfolioHistorySection({
   if (points.length > 0) {
     return (
       <Box paddingX={1} flexDirection="column" flexShrink={0}>
-        <Notice tone="muted">{`${points.length >= 2 ? "Enlarge this pane to view account history." : "Account history needs at least two observations for a chart."}${note ? ` ${note}` : ""}`}</Notice>
+        <Notice tone="muted">{`${points.filter((point) => Number.isFinite(point.close)).length >= 2 ? "Enlarge this pane to view account history." : "Account history needs at least two observations for a chart."}${note ? ` ${note}` : ""}`}</Notice>
       </Box>
     );
   }

@@ -119,7 +119,10 @@ export function createAppRemoteController({
           normalizedOptionalExchange(request.exchange),
         );
         return {
+          financialCurrency: financials.financialCurrency,
+          statementHistory: financials.statementHistory,
           quote: financials.quote,
+          quoteMetadata: financials.quoteMetadata,
           fundamentals: financials.fundamentals,
           profile: financials.profile,
           annualStatements: financials.annualStatements.slice(0, 5),
