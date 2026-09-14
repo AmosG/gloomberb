@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { AppPersistence } from "../../data/app-persistence";
 import type { DataProvider } from "../../types/data-provider";
 import { AssetDataRouter } from "./index";
@@ -13,6 +13,8 @@ import {
 } from "./test-support";
 
 let clock: ReturnType<typeof spyOn> | undefined;
+// These price-only fixtures describe regular trading; explicit freshness tests override it.
+beforeEach(() => { clock = spyOn(Date, "now").mockReturnValue(Date.parse("2026-09-14T18:00:00Z")); });
 afterEach(() => {
   clock?.mockRestore();
   clock = undefined;

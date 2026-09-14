@@ -1,3 +1,4 @@
+import { useRegularMarketSession } from "../../test-support/market-session";
 import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -8,6 +9,8 @@ import { AssetDataRouter } from "./index";
 import { AppPersistence } from "../../data/app-persistence";
 import { createTestDataProvider } from "../../test-support/data-provider";
 import type { QuoteSubscriptionTarget } from "../../types/data-provider";
+
+useRegularMarketSession();
 
 const originals = { getCloudQuote: apiClient.getCloudQuote, getCloudFinancials: apiClient.getCloudFinancials, getCloudHistory: apiClient.getCloudHistory, getCloudQuotesBatch: apiClient.getCloudQuotesBatch, subscribeQuotes: apiClient.subscribeQuotes, ensureVerifiedSession: apiClient.ensureVerifiedSession };
 afterEach(() => Object.assign(apiClient, originals));

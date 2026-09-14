@@ -5,6 +5,9 @@ import { createTestDataProvider } from "../../../test-support/data-provider";
 import { fetchDividendData } from "./client";
 import { createDividendYieldHeadless, projectDividendYieldHeadless } from "./headless";
 import { fetchProviderDividendData } from "./provider-client";
+import { useRegularMarketSession } from "../../../test-support/market-session";
+
+useRegularMarketSession();
 
 afterEach(() => setHttpFetchTransport(null));
 

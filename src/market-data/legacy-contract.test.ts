@@ -1,3 +1,4 @@
+import { useRegularMarketSession } from "../test-support/market-session";
 import { expect, test } from "bun:test";
 import { AppPersistence } from "../data/app-persistence";
 import { AssetDataRouter } from "../sources/provider-router";
@@ -6,6 +7,8 @@ import { MarketDataCoordinator } from "./coordinator";
 import type { InstrumentRef } from "./request-types";
 import { buildChartKey, buildInstrumentKey, buildOptionsKey, toMarketDataContext } from "./selectors";
 import { getRouterEntityKey } from "../sources/provider-router/cache";
+
+useRegularMarketSession();
 
 const instrument = (strike: number): InstrumentRef => ({ symbol: "ACME", exchange: "NASDAQ", brokerId: "fixture", brokerInstanceId: "feed", instrument: { brokerId: "fixture", brokerInstanceId: "feed", symbol: "ACME", localSymbol: "LEGACY", secType: "OPT", currency: "USD", exchange: "SMART", lastTradeDateOrContractMonth: "20261016", right: "C", strike, multiplier: "100" } });
 const quote = (price: number) => ({ symbol: "ACME", price, currency: "USD", change: 0, changePercent: 0, lastUpdated: Date.now(), stale: false });

@@ -1,3 +1,4 @@
+import { useRegularMarketSession } from "../../test-support/market-session";
 import { afterEach, describe, expect, test } from "bun:test";
 import { CloudApiRequestTransport } from "../../api-client/request";
 import { AppPersistence } from "../../data/app-persistence";
@@ -19,6 +20,8 @@ import {
   makeQuote,
   setBrokerInstances,
 } from "./test-support";
+
+useRegularMarketSession();
 
 const originalConsoleError = console.error;
 

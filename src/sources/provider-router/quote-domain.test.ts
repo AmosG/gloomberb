@@ -1,3 +1,4 @@
+import { useRegularMarketSession } from "../../test-support/market-session";
 import { describe, expect, test } from "bun:test";
 import { AppPersistence } from "../../data/app-persistence";
 import { createTestDataProvider } from "../../test-support/data-provider";
@@ -5,6 +6,8 @@ import type { Quote } from "../../types/financials";
 import { AssetDataRouter } from "./index";
 import { isProviderQuoteUsableForCurrentSession } from "./financials";
 import { makeQuote } from "./test-support";
+
+useRegularMarketSession();
 
 const quote = (symbol: string, overrides: Partial<Quote> = {}) => makeQuote({ symbol, marketState: "CLOSED", ...overrides });
 

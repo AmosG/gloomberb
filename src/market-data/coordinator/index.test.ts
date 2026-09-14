@@ -1,3 +1,4 @@
+import { useRegularMarketSession } from "../../test-support/market-session";
 import { describe, expect, it } from "bun:test";
 import { MarketDataCoordinator } from "./index";
 import type { DataProvider, QuoteSubscriptionTarget } from "../../types/data-provider";
@@ -5,6 +6,8 @@ import type { InstrumentSearchResult } from "../../types/instrument";
 import type { PricePoint, Quote, TickerFinancials } from "../../types/financials";
 import type { NewsArticle } from "../../news/types";
 import { createTestDataProvider } from "../../test-support/data-provider";
+
+useRegularMarketSession();
 
 type CoordinatorTestProviderOverrides = Partial<DataProvider> & {
   getNews?: (query: {
