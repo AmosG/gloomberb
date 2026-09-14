@@ -12,6 +12,7 @@ import type { TickerRecord } from "../types/ticker";
 import type { PaneRuntimeState } from "../core/state/app/state";
 import type { RemoteUiNodeSnapshot } from "../remote/types";
 import type { DatedObservation } from "../plugins/builtin/market-valuation/series";
+import type { DesktopExternalPluginBundle } from "../renderers/electrobun/shared/protocol";
 import {
   electrobunViewPath,
   writeElectrobunViewPage,
@@ -51,6 +52,12 @@ export interface DesktopPaneShotPayload {
   statSeries: Array<[string, DatedObservation[]]>;
   chartModel?: ChartResolutionResult;
   paneState: Record<string, PaneRuntimeState>;
+  /**
+   * Installed plugins compiled for the browser, the same way the desktop view
+   * receives them. Without these a pane from `~/.gloomberb/plugins` resolves in
+   * the CLI but is unknown to the page that renders it.
+   */
+  externalPlugins?: DesktopExternalPluginBundle[];
 }
 
 /** Kept in Bun memory and never serialized into the browser page or CLI result. */
@@ -128,7 +135,13 @@ const SHOT_MODE_CSS = [
   "[data-gloom-role='composite-chart-toolbar']",
   "[data-gloom-role='chart-series-quick-add']",
   "[data-gloom-role='pane-close']",
+  "[data-gloom-role='resize-handle']",
 ].join(", ") + " { display: none !important; }\n"
+  // The pane fills the viewport and has rounded corners. With the page painted
+  // in the theme background, the PNG carried square theme-coloured corners
+  // that showed on any other backdrop; a transparent page keeps only the pane.
+  + "html, body, #root { background: transparent !important; }\n"
+  + "[data-gloom-role='pane-window'][data-floating='true'] { box-shadow: none !important; }\n"
   // Sits where the hidden close button was: one cell high, right-aligned in the title bar.
   + "[data-gloom-role='shot-watermark'] { position: fixed; top: 1px; right: 10px; height: var(--cell-h);"
   + " line-height: var(--cell-h); font-size: 12px; letter-spacing: 0.02em; color: var(--gloom-text-dim, #888);"
@@ -194,6 +207,8 @@ async function buildShotPage(outdir: string, payload: DesktopPaneShotPayload): P
         const style = document.createElement("style");
         style.textContent = ${JSON.stringify(SHOT_MODE_CSS)};
         document.head.appendChild(style);
+        // Same brand mark charts show for in-app pane captures and OS screenshots.
+        document.documentElement.setAttribute("data-gloom-screenshot", "true");
         const watermark = ${JSON.stringify(payload.watermark ?? null)};
         if (watermark) {
           const mark = document.createElement("div");
@@ -435,6 +450,9 @@ async function capturePageScreenshot({
       height: heightPx,
       deviceScaleFactor,
       mobile: false,
+    });
+    await session.send("Emulation.setDefaultBackgroundColorOverride", {
+      color: { r: 0, g: 0, b: 0, a: 0 },
     });
     await waitForShotReady(session);
     const rendered = await readRenderedPaneState(session);

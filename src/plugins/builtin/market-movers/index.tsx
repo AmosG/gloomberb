@@ -8,7 +8,7 @@ import { priceColor } from "../../../theme/colors";
 import { publicTickerKey } from "../../../utils/exchanges";
 import { formatPercentRaw } from "../../../utils/format";
 import { useAppSelector, usePaneSettingValue } from "../../../state/app/context";
-import { useAssetData, usePluginTickerActions } from "../../runtime";
+import { useAssetData, usePluginPaneState, usePluginTickerActions } from "../../runtime";
 import { useLiveQuoteEntries } from "../../../state/hooks/quote-streaming";
 import { useAutoRefresh } from "../shared/auto-refresh";
 import { useQuoteBoard } from "../shared/use-quote-board";
@@ -66,7 +66,9 @@ function MarketMoversPane({ focused, width, height }: PaneProps) {
   // One cadence, the one the user configured, instead of a private 60s timer.
   const refreshIntervalMinutes = useAppSelector((state) => state.config.refreshIntervalMinutes);
   const refreshIntervalMs = Math.max(1, refreshIntervalMinutes || 1) * 60_000;
-  const [activeTab, setActiveTab] = useState<TabId>(tabs[0]!.id);
+  // Pane state rather than local state, so `--list` on the CLI and a restored
+  // layout open on the same tab the user (or the screenshot) asked for.
+  const [activeTab, setActiveTab] = usePluginPaneState<TabId>("activeTab", tabs[0]!.id);
   const [quotes, setQuotes] = useState<ScreenerQuote[]>([]);
   const [loadedTab, setLoadedTab] = useState<TabId | null>(null);
   const visibleQuotes = loadedTab === activeTab ? quotes : NO_QUOTES;
