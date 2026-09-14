@@ -15,7 +15,7 @@ import type { InProcessRemoteControlHandler } from "./undo";
  * everything a delegated tool needs. The casts stay here rather than widening
  * the executor's contract for one renderer.
  */
-function marketContextFromRegistry(registry: PluginRegistry, config: AppConfig): MarketContext {
+export function marketContextFromRegistry(registry: PluginRegistry, config: AppConfig): MarketContext {
   return {
     config,
     dataDir: config.dataDir,

@@ -8,11 +8,23 @@ import { createAppRemoteController } from "./controller";
 import type { RemoteControlSchema, RemoteUiNodeSnapshot } from "./types";
 import type { RemoteUiRegistry } from "./semantic-tree";
 
-function createRegistryHarness(options: { withFloatingPane?: boolean; financials?: TickerFinancials } = {}) {
+function createRegistryHarness(options: { withFloatingPane?: boolean; withCustomView?: boolean; financials?: TickerFinancials } = {}) {
   const config = {
     ...createDefaultConfig("/tmp/gloom-remote-controller"),
     onboardingComplete: true,
   };
+  if (options.withCustomView) {
+    config.layout = {
+      ...config.layout,
+      instances: [...config.layout.instances, {
+        instanceId: "custom-view:test",
+        paneId: "custom-view",
+        binding: { kind: "none" as const },
+        settings: { spec: JSON.stringify({ version: 1, source: { pane: "SCR" }, projection: {} }) },
+      }],
+      floating: [...config.layout.floating, { instanceId: "custom-view:test", x: 1, y: 1, width: 60, height: 20 }],
+    };
+  }
   if (options.withFloatingPane) {
     const instance = {
       instanceId: "help:test",
@@ -25,6 +37,7 @@ function createRegistryHarness(options: { withFloatingPane?: boolean; financials
       floating: [{ instanceId: instance.instanceId, x: 8, y: 4, width: 60, height: 24 }],
     };
   }
+  const createdFromTemplate: Array<{ templateId: string; options: unknown }> = [];
   let state = createInitialState(config);
   const actions: AppAction[] = [];
   const dispatch: Dispatch<AppAction> = (action) => {
@@ -67,7 +80,9 @@ function createRegistryHarness(options: { withFloatingPane?: boolean; financials
     showPane: () => {},
     focusPane: () => {},
     hidePane: () => {},
-    createPaneFromTemplateAsyncFn: async () => {},
+    createPaneFromTemplateAsyncFn: async (templateId: string, options: unknown) => {
+      createdFromTemplate.push({ templateId, options });
+    },
     navigateTicker: () => {},
     pinTicker: () => {},
     selectTicker: () => {},
@@ -99,6 +114,7 @@ function createRegistryHarness(options: { withFloatingPane?: boolean; financials
   return {
     actions,
     controller,
+    createdFromTemplate,
     getState: () => state,
     invokedCapabilities,
     invokedUiActions,
@@ -516,5 +532,54 @@ describe("createAppRemoteController", () => {
       kind: "split",
       axis: "vertical",
     });
+  });
+});
+
+describe("view operations", () => {
+  const spec = {
+    source: { pane: "SCR", argument: "sp500" },
+    projection: { columns: ["symbol", { key: "change", transform: "percent" }], sort: { by: "change", direction: "desc" } },
+    presentation: { title: "Movers" },
+  };
+
+  test("view.create validates the spec and opens the custom view template", async () => {
+    const { controller, createdFromTemplate } = createRegistryHarness();
+    const result = await controller.handle({ type: "call", operation: "view.create", input: { name: "Top movers", spec } });
+    expect(result.ok).toBe(true);
+    expect(createdFromTemplate).toHaveLength(1);
+    expect(createdFromTemplate[0]?.templateId).toBe("custom-view-pane");
+    const options = createdFromTemplate[0]?.options as { values: { spec: string; title: string } };
+    expect(options.values.title).toBe("Top movers");
+    expect(JSON.parse(options.values.spec)).toMatchObject({
+      version: 1,
+      source: { kind: "inline", pane: "SCR", argument: "sp500" },
+      projection: { columns: [{ key: "symbol" }, { key: "change", transform: "percent" }] },
+    });
+
+    const invalid = await controller.handle({ type: "call", operation: "view.create", input: { spec: { source: { pane: "" } } } });
+    expect(invalid.ok).toBe(false);
+    if (!invalid.ok) expect(invalid.error.message).toContain("source.pane");
+    expect(createdFromTemplate).toHaveLength(1);
+  });
+
+  test("view.update rewrites the spec of an existing custom view only", async () => {
+    const { controller, getState } = createRegistryHarness({ withCustomView: true });
+    const result = await controller.handle({
+      type: "call",
+      operation: "view.update",
+      input: { paneId: "custom-view:test", spec: { ...spec, projection: { limit: 5 } }, name: "Five movers" },
+    });
+    expect(result.ok).toBe(true);
+    const instance = getState().config.layout.instances.find((entry) => entry.instanceId === "custom-view:test");
+    expect(instance?.title).toBe("Five movers");
+    expect(JSON.parse(String(instance?.settings?.spec))).toMatchObject({ projection: { limit: 5 } });
+
+    const notAView = await controller.handle({
+      type: "call",
+      operation: "view.update",
+      input: { paneId: getState().config.layout.instances[0]!.instanceId, spec },
+    });
+    expect(notAView.ok).toBe(false);
+    if (!notAView.ok) expect(notAView.error.message).toContain("not a custom view");
   });
 });

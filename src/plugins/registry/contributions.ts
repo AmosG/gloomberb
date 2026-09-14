@@ -85,8 +85,8 @@ export class RegistryContributions {
     this.panesMap.register(pluginId, pane.id, this.options.wrapPaneDef(pluginId, pane));
   }
 
-  registerPaneTemplate(pluginId: string, template: PaneTemplateDef): void {
-    this.paneTemplatesMap.register(pluginId, template.id, template);
+  registerPaneTemplate(pluginId: string, template: PaneTemplateDef, replace = false): () => void {
+    return this.paneTemplatesMap.register(pluginId, template.id, template, replace);
   }
 
   registerCommand(pluginId: string, command: CommandDef): void {

@@ -48,6 +48,7 @@ import { debugLog } from "../../utils/debug-log";
 import { EventBus } from "../event-bus";
 import { isReservedBuiltinPluginId } from "../ownership";
 import { createPluginPersistence } from "../plugin-persistence";
+import { createPluginTeamState } from "../team-state";
 import {
   wrapPaneDefWithRuntime,
   wrapTickerResearchTabDefWithRuntime,
@@ -481,7 +482,7 @@ export class PluginRegistry implements PluginRuntimeAccess {
     const items = contributions.getOrCreatePluginItems(pluginId);
     return {
       registerPane: (pane) => contributions.registerPane(pluginId, pane),
-      registerPaneTemplate: (template) => contributions.registerPaneTemplate(pluginId, template),
+      registerPaneTemplate: (template) => contributions.registerPaneTemplate(pluginId, template, true),
       registerCommand: (command) => contributions.registerCommand(pluginId, command),
       registerCommandBarSearchProvider: (provider) => contributions.registerCommandBarSearchProvider(pluginId, provider),
       registerColumn: (column) => contributions.registerColumn(pluginId, column),
@@ -525,6 +526,7 @@ export class PluginRegistry implements PluginRuntimeAccess {
         getPaneRuntimeState: (paneId) => this.getPaneRuntimeStateFn(paneId),
         updatePaneRuntimeState: (paneId, patch) => this.updatePaneRuntimeStateFn(paneId, patch),
       }),
+      teamState: createPluginTeamState(pluginId),
       paneSettings: createPluginPaneSettingsState({
         getLayout: () => this.getLayoutFn(),
         updateLayout: (layout) => this.updateLayoutFn(layout),

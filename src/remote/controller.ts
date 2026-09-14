@@ -9,7 +9,15 @@ import {
 } from "../plugins/pane-manager";
 import type { PluginRegistry } from "../plugins/registry";
 import type { AppAction, AppState } from "../state/app/context";
-import { PANE_LOCK_SETTING_KEY, setPaneSettings } from "../pane-settings";
+import { PANE_LOCK_SETTING_KEY, setPaneSettings, updatePaneInstance } from "../pane-settings";
+import {
+  CUSTOM_VIEW_PANE_ID,
+  CUSTOM_VIEW_TEMPLATE_ID,
+  customViewCreateOptions,
+  customViewInstanceSettings,
+  parseViewSpecOr,
+} from "../plugins/builtin/custom-view";
+import { findPaneInstance, type PaneInstanceConfig, resolvePaneInstance } from "../types/config";
 import type { DesktopWindowBridge } from "../types/desktop-window";
 import { applyJsonPatch } from "./json-patch";
 import { revisionFor } from "./revision";
@@ -326,6 +334,35 @@ export function createAppRemoteController({
           asRecord(input.options),
         );
         return getAfterMutationSummary();
+      case "view.create": {
+        // ASKG and the local agent both land here, so one validator decides.
+        const parsed = parseViewSpecOr(input.spec);
+        if ("error" in parsed) throw new Error(parsed.error);
+        await pluginRegistry.createPaneFromTemplateAsyncFn(
+          CUSTOM_VIEW_TEMPLATE_ID,
+          customViewCreateOptions(parsed.spec, optionalString(input, "name")),
+        );
+        return getAfterMutationSummary({
+          ...(parsed.result.warnings.length ? { warnings: parsed.result.warnings.map((entry) => entry.message) } : {}),
+        });
+      }
+      case "view.update": {
+        const paneId = stringInput(input, "paneId");
+        const parsed = parseViewSpecOr(input.spec);
+        if ("error" in parsed) throw new Error(parsed.error);
+        const instanceId = resolvePaneInstance(getState().config.layout, paneId)?.instanceId ?? paneId;
+        const instance = findPaneInstance(getState().config.layout, instanceId);
+        if (!instance) throw new Error(`No pane instance "${paneId}".`);
+        if (instance.paneId !== CUSTOM_VIEW_PANE_ID) throw new Error(`Pane "${paneId}" is not a custom view.`);
+        let layout = setPaneSettings(getState().config.layout, instanceId, {
+          ...instance.settings,
+          ...customViewInstanceSettings(parsed.spec),
+        });
+        const name = optionalString(input, "name");
+        if (name) layout = updatePaneInstance(layout, instanceId, (entry: PaneInstanceConfig) => ({ ...entry, title: name }));
+        pluginRegistry.updateLayoutFn(layout);
+        return getAfterMutationSummary({ affectedPaneIds: [instanceId] });
+      }
       case "pane.setState":
         dispatch({
           type: "UPDATE_PANE_STATE",
