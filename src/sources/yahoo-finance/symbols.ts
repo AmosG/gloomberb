@@ -1,4 +1,4 @@
-import { canonicalExchange, parsePublicTickerKey } from "../../utils/exchanges";
+import { CANONICAL_EXCHANGE_ALIASES, canonicalExchange, parsePublicTickerKey } from "../../utils/exchanges";
 
 const EXCHANGE_SUFFIX_MAP: Record<string, string> = {
   NASDAQ: "", NMS: "", NYSE: "", AMEX: "", ARCA: "", NYSEArca: "", BATS: "", BYX: "", IEX: "", PINK: "", OTC: "",
@@ -45,6 +45,13 @@ const KNOWN_SUFFIXES = new Set(
   Object.values(EXCHANGE_SUFFIX_MAP).filter(Boolean)
     .concat(GENERIC_SUFFIX_FALLBACKS.filter(Boolean)),
 );
+
+// Yahoo's PSE entry means the Philippines; the host's PSE means Prague (.PR).
+// Keep that provider spelling out of host venue inference and conflict checks.
+const HOST_SUFFIX_ENTRIES = Object.entries(EXCHANGE_SUFFIX_MAP)
+  .filter(([venue, suffix]) => venue !== "PSE" || suffix !== ".PS")
+  .map(([venue, suffix]) => [canonicalExchange(venue), suffix] as const);
+const KNOWN_HOST_VENUES = new Set(Object.values(CANONICAL_EXCHANGE_ALIASES));
 
 export function getYahooSymbol(ticker: string, exchange: string): string {
   const qualified = parsePublicTickerKey(ticker);
@@ -113,6 +120,27 @@ export function tickerHasYahooSuffix(ticker: string): boolean {
   const dot = ticker.indexOf(".");
   if (dot < 0) return false;
   return KNOWN_SUFFIXES.has(ticker.slice(dot));
+}
+
+/** Unknown venue mappings cannot establish a suffix conflict. */
+export function yahooSuffixConflictsWithExchange(ticker: string, exchange: string): boolean {
+  if (!tickerHasYahooSuffix(ticker)) return false;
+  const canonical = canonicalExchange(exchange);
+  const suffixes = HOST_SUFFIX_ENTRIES
+    .filter(([venue]) => venue === canonical)
+    .map(([, suffix]) => suffix);
+  return suffixes.length > 0 && !suffixes.includes(ticker.slice(ticker.indexOf(".")));
+}
+
+/** Infer a venue only when the suffix names one recognized host exchange. */
+export function yahooSuffixExchange(ticker: string): string | undefined {
+  if (!tickerHasYahooSuffix(ticker)) return undefined;
+  const suffix = ticker.slice(ticker.indexOf("."));
+  const venues = new Set(HOST_SUFFIX_ENTRIES
+    .filter(([, candidate]) => candidate === suffix)
+    .map(([venue]) => venue)
+    .filter((venue) => KNOWN_HOST_VENUES.has(venue)));
+  return venues.size === 1 ? [...venues][0] : undefined;
 }
 
 function normalizeYahooTicker(ticker: string, exchange: string): string {
