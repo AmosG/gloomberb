@@ -8,6 +8,7 @@ import type {
   SessionConfidence,
   TickerFinancials,
 } from "../../types/financials";
+import { mergeQuoteMetadata, quoteMetadataFromQuote } from "./metadata";
 import { resolvePriceBasis } from "../market/price-basis";
 import { hasLikelyQuoteUnitMismatch } from "../../utils/currency-units";
 import { debugLog } from "../../utils/debug-log";
@@ -588,9 +589,16 @@ export function resolveTickerFinancialsQuoteState(
   }
 
   const { quote } = resolveCanonicalQuote(quoteContributions);
+  const metadataQuote = quote ?? incomingQuote ?? baseFinancials.quote;
   return {
     ...baseFinancials,
     quote,
+    // Listing identity remains useful when the price is stale or unavailable.
+    // Keep its source timestamp/stale flag rather than presenting it as a quote.
+    quoteMetadata: mergeQuoteMetadata(
+      metadataQuote ? quoteMetadataFromQuote(metadataQuote) : undefined,
+      baseFinancials.quoteMetadata,
+    ),
     quoteContributions,
   };
 }

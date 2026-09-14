@@ -5,7 +5,7 @@ import { coalesceFinancialPeriodAliases, mergeFinancialStatementRows } from "../
 import { normalizePriceHistory, normalizeTickerFinancialsPriceHistory } from "../../utils/price-history";
 import { redactUnavailableFundamentals, RETRACTABLE_VALUATION_FIELDS } from "../../utils/fundamentals";
 import { isExtendedHoursExchange, isQuoteStaleForCurrentSession } from "../../market-data/quotes/freshness";
-import { quoteMetadataFromQuote, quoteMetadataMatchesTarget } from "../../market-data/quotes/metadata";
+import { mergeQuoteMetadata, quoteMetadataFromQuote, quoteMetadataMatchesTarget } from "../../market-data/quotes/metadata";
 import { parsePublicTickerKey } from "../../utils/exchanges";
 import { activeUsMarketSession } from "../../market-data/market/freshness";
 import {
@@ -34,20 +34,20 @@ export interface CachedQuoteSelection {
   stale: boolean;
 }
 
-function researchInstrumentType(quote: Quote | undefined): string | undefined {
-  return quote?.instrumentType?.toLowerCase().replace(/[\s_-]/g, "");
+function researchInstrumentType(financials: Pick<TickerFinancials, "quote" | "quoteMetadata">): string | undefined {
+  return (financials.quote?.instrumentType || financials.quoteMetadata?.instrumentType)?.toLowerCase().replace(/[\s_-]/g, "");
 }
 
-function isFundQuote(quote: Quote | undefined): boolean {
-  return ["etf", "exchangetradedfund", "mutualfund", "fund"].includes(researchInstrumentType(quote) ?? "");
+function isFundFinancials(financials: Pick<TickerFinancials, "quote" | "quoteMetadata">): boolean {
+  return ["etf", "exchangetradedfund", "mutualfund", "fund"].includes(researchInstrumentType(financials) ?? "");
 }
 
 function excludeNonCompanyFinancials(financials: TickerFinancials): TickerFinancials {
-  const type = researchInstrumentType(financials.quote);
+  const type = researchInstrumentType(financials);
   if (!type || !["etf", "exchangetradedfund", "mutualfund", "fund", "index", "currency", "forex", "fx", "future", "futures", "cryptocurrency", "crypto", "digitalcurrency"].includes(type)) return financials;
   // An empty company response for a confirmed fund or other non-equity must
   // not inherit stale issuer accounts from a former symbol collision.
-  const fund = isFundQuote(financials.quote);
+  const fund = isFundFinancials(financials);
   const statistics = financials.fundamentals;
   return {
     ...financials,
@@ -82,6 +82,7 @@ export function sanitizeCachedFinancials(
   if (options.includeStaleQuotes || !stale) return financials;
   return {
     ...financials,
+    quoteMetadata: mergeQuoteMetadata(quoteMetadataFromQuote(financials.quote!), financials.quoteMetadata),
     quote: undefined,
     quoteContributions: undefined,
   };
@@ -183,6 +184,7 @@ export function dropUnusableProviderQuote(value: TickerFinancials, exchange?: st
 
   return {
     ...value,
+    quoteMetadata: mergeQuoteMetadata(quoteMetadataFromQuote(value.quote), value.quoteMetadata),
     quote: undefined,
     quoteContributions: undefined,
   };
@@ -346,11 +348,19 @@ export function mergeFinancials(primary: TickerFinancials | null, fallback: Tick
     seedQuoteContributions(fallback),
   );
   const resolvedQuote = resolveCanonicalQuote(quoteContributions).quote;
+  const metadata = (value: TickerFinancials) => mergeQuoteMetadata(
+    value.quote ? quoteMetadataFromQuote(value.quote) : undefined, value.quoteMetadata,
+  );
+  const quoteMetadata = mergeQuoteMetadata(
+    resolvedQuote ? quoteMetadataFromQuote(resolvedQuote) : undefined,
+    mergeQuoteMetadata(metadata(primary), metadata(fallback)),
+  );
+  const resolvedIdentity = { quote: resolvedQuote, quoteMetadata };
   // A fund's distribution yield or description must not be borrowed from an
   // old company response for a colliding symbol. Only classified fund sources
   // can contribute those fields when the resolved security is a fund.
-  const primaryResearch = isFundQuote(resolvedQuote) && !isFundQuote(primary.quote) ? undefined : primary;
-  const fallbackResearch = isFundQuote(resolvedQuote) && !isFundQuote(fallback.quote) ? undefined : fallback;
+  const primaryResearch = isFundFinancials(resolvedIdentity) && !isFundFinancials(primary) ? undefined : primary;
+  const fallbackResearch = isFundFinancials(resolvedIdentity) && !isFundFinancials(fallback) ? undefined : fallback;
 
   return excludeNonCompanyFinancials({
     ...fallback,
@@ -358,6 +368,7 @@ export function mergeFinancials(primary: TickerFinancials | null, fallback: Tick
     statementHistory: primary.statementHistory ?? fallback.statementHistory,
     financialCurrency: primary.financialCurrency ?? (hasStatementRows(primary) ? undefined : fallback.financialCurrency),
     quote: resolvedQuote,
+    quoteMetadata,
     quoteContributions,
     profile: mergeDefinedObject(primaryResearch?.profile, fallbackResearch?.profile),
     fundamentals: mergeFundamentals(primaryResearch?.fundamentals, fallbackResearch?.fundamentals),
@@ -379,7 +390,7 @@ export function mergeRefreshedFinancials(cached: TickerFinancials, fresh: Ticker
   for (const field of RETRACTABLE_VALUATION_FIELDS) {
     if (!currencyConflict && typeof statistics[field] === "number" && Number.isFinite(statistics[field])) update[field] = statistics[field];
   }
-  return { ...merged, fundamentals: mergeFundamentals(update, merged.fundamentals) };
+  return excludeNonCompanyFinancials({ ...merged, fundamentals: mergeFundamentals(update, merged.fundamentals) });
 }
 
 export function mergeCachedFinancialRecords(
