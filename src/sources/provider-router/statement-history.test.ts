@@ -5,8 +5,8 @@ import { AssetDataRouter } from "./index";
 import { cleanupProviderRouterTestFiles, createTempDbPath, fallbackProvider, makeFinancials, makeQuote } from "./test-support";
 
 const rows = Array.from({ length: 19 }, (_, index) => ({ date: `${2007 + index}-12-31`, currency: "USD", totalRevenue: 100 + index, operatingIncome: 40, inventory: 5 }));
-const financials = (extended: boolean, status: "available" | "retryable-failure" = "available") => makeFinancials({
- quote: makeQuote(), profile: { description: "Microsoft Corporation" }, annualStatements: extended ? rows : rows.slice(-5),
+const financials = (extended: boolean, status: "available" | "retryable-failure" = "available", symbol = "MSFT", exchange = "NASDAQ") => makeFinancials({
+ quote: makeQuote({ symbol, listingExchangeName: exchange }), profile: { description: "Microsoft Corporation" }, annualStatements: extended ? rows : rows.slice(-5),
  ...(extended ? { statementHistory: { mode: "extended" as const, source: "sec" as const, status, fetchedAt: new Date().toISOString() } } : {}),
 });
 afterEach(cleanupProviderRouterTestFiles);
@@ -14,7 +14,7 @@ afterEach(cleanupProviderRouterTestFiles);
 test("extended requests bypass a default deep cache and reuse the whole extended source for later counts", async () => {
  const persistence = new AppPersistence(createTempDbPath("extended"));
  const calls: Array<MarketDataRequestContext | undefined> = [];
- const provider = { ...fallbackProvider, async getTickerFinancials(_symbol: string, _exchange?: string, context?: MarketDataRequestContext) { calls.push(context); return financials(context?.statementHistory === "extended"); } };
+ const provider = { ...fallbackProvider, async getTickerFinancials(_symbol: string, _exchange?: string, context?: MarketDataRequestContext) { calls.push(context); return financials(context?.statementHistory === "extended", "available", _symbol, _exchange); } };
  const router = new AssetDataRouter(provider, [], persistence.resources);
  try {
   expect((await router.getTickerFinancials("MSFT", "NASDAQ")).annualStatements).toHaveLength(5);
@@ -42,8 +42,8 @@ test("mixed batches retain extended intent through the single route instead of d
  let batches = 0;
  const contexts: Array<MarketDataRequestContext | undefined> = [];
  const router = new AssetDataRouter({ ...fallbackProvider,
-  async getTickerFinancialsBatch(targets) { batches++; return targets.map(target => ({ target, financials: financials(false) })); },
-  async getTickerFinancials(_symbol, _exchange, context) { contexts.push(context); return financials(context?.statementHistory === "extended"); },
+  async getTickerFinancialsBatch(targets) { batches++; return targets.map(target => ({ target, financials: financials(false, "available", target.symbol, target.exchange) })); },
+  async getTickerFinancials(_symbol, _exchange, context) { contexts.push(context); return financials(context?.statementHistory === "extended", "available", _symbol, _exchange); },
  });
  const result = await router.getTickerFinancialsBatch([{ symbol: "MSFT", exchange: "NASDAQ", statementHistory: "extended" }, { symbol: "V", exchange: "NYSE" }]);
  expect(result.map(item => item.financials?.annualStatements.length)).toEqual([19, 5]);

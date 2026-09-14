@@ -12,6 +12,7 @@ import {
   hasDeepStatementHistory,
   hasStatementRows,
   isProviderQuoteUsableForCurrentSession,
+  providerFinancialsMatchTarget,
   mergeMissingStatementArrays,
   mergeFinancials,
 } from "./financials";
@@ -66,7 +67,9 @@ export class ProviderRouterPrimaryRoutes {
     for (const provider of this.options.providersInPriorityOrder()) {
       try {
         const rawValue = await provider.getTickerFinancials(ticker, exchange, context);
+        if (rawValue && !context?.instrument && !providerFinancialsMatchTarget(rawValue, ticker, exchange)) continue;
         const resolvedValue = resolveTickerFinancialsQuoteState(normalizeTickerFinancialsPriceHistory(rawValue));
+        if (resolvedValue && !context?.instrument && !providerFinancialsMatchTarget(resolvedValue, ticker, exchange)) continue;
         let value = resolvedValue ? dropUnusableProviderQuote(resolvedValue, exchange) : null;
         if (!value) continue;
         const sourceKey = this.options.providerSourceKey(provider);

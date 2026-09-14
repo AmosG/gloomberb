@@ -86,7 +86,7 @@ test("legacy cloud ASML valuation is retired and recovers with a marker-bearing 
     { entityKey: "ASML:XNAS", variantKey: "", sourceKey: "provider:gloomberb-cloud", quote: undefined, retract: true },
     { entityKey: "ASML", variantKey: "", sourceKey: "provider:gloomberb-cloud", quote: undefined, retract: true },
     { entityKey: "ASML", variantKey: "exchange=AMS", sourceKey: "provider:gloomberb-cloud", quote: { ...recorded.quote!, listingExchangeName: "EURONEXT", currency: "EUR" }, retract: true },
-    { entityKey: "ASML", variantKey: "exchange=NASDAQ", sourceKey: "provider:gloomberb-cloud", quote: { ...recorded.quote!, listingExchangeName: "AMS", currency: "EUR" }, retract: true },
+    { entityKey: "ASML", variantKey: "exchange=NASDAQ", sourceKey: "provider:gloomberb-cloud", quote: { ...recorded.quote!, listingExchangeName: "AMS", currency: "EUR" }, retract: true, reject: true },
     { entityKey: "ASML", variantKey: "exchange=AMS", sourceKey: "provider:gloomberb-cloud", quote: { ...recorded.quote!, symbol: "ASML:XNAS", listingExchangeName: "AMS", currency: "EUR" }, retract: true },
     { entityKey: "ASML", variantKey: "exchange=AMS", sourceKey: "provider:gloomberb-cloud", quote: { ...recorded.quote!, listingExchangeName: "AMS", currency: "EUR" }, retract: false },
     { entityKey: "ASML.AS", variantKey: "", sourceKey: "provider:gloomberb-cloud", quote: { ...recorded.quote!, symbol: "ASML.AS", listingExchangeName: "XAMS", currency: "EUR" }, retract: false },
@@ -99,6 +99,7 @@ test("legacy cloud ASML valuation is retired and recovers with a marker-bearing 
     const value = { ...recorded, quote: entry.quote };
     persistence.resources.set(key, value, { cachePolicy, schemaVersion: 5 });
     const read = () => listCachedResources(persistence.resources, "financials", key.entityKey, [key.variantKey], [key.sourceKey], true)[0]!;
+    if (entry.reject) { expect(read()).toBeUndefined(); continue; }
     const result = read(); const fundamentals = (result.value as typeof value).fundamentals as Fundamentals;
     expect(result.stale).toBe(entry.retract);
     expect(fundamentals.enterpriseValue).toBe(entry.retract ? undefined : recorded.fundamentals!.enterpriseValue);
@@ -109,7 +110,7 @@ test("legacy cloud ASML valuation is retired and recovers with a marker-bearing 
       expect(fundamentals.unavailableFields).toEqual(fields);
       const corrected = { ...value, fundamentals: { financialCurrency: "EUR", unavailableFields: [...fields] } };
       cacheRouterResource(persistence.resources, "financials", key.entityKey, key.variantKey, key.sourceKey, corrected, cachePolicy);
-      expect(read().schemaVersion).toBe(7);
+      expect(read().schemaVersion).toBe(8);
       expect(read().stale).toBe(false);
       expect(read().value).toEqual(corrected);
     }
