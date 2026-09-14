@@ -13,9 +13,17 @@ export interface SeriesCacheMetadata {
   refreshError?: string;
 }
 
-export interface SeriesCacheLoadResult extends SeriesCacheMetadata {
-  observations: DatedObservation[];
+export interface SeriesProviderMetadata {
+  fetchedAt: string | null;
+  stale: boolean | null;
 }
+
+export interface SeriesCacheInput {
+  observations: DatedObservation[];
+  provider?: SeriesProviderMetadata;
+}
+
+export interface SeriesCacheLoadResult extends SeriesCacheMetadata, SeriesCacheInput {}
 
 export interface SeriesCacheEntry extends SeriesCacheLoadResult {
   fetchedAt: number;
@@ -34,7 +42,7 @@ export interface SeriesCache {
   hydrate(entries: readonly (readonly [string, DatedObservation[]])[]): void;
   get(key: string, options?: { allowExpired?: boolean }): SeriesCacheEntry | null;
   load(key: string, loader: () => Promise<DatedObservation[]>): Promise<DatedObservation[]>;
-  loadEntry(key: string, loader: () => Promise<DatedObservation[]>, options?: SeriesCacheLoadOptions): Promise<SeriesCacheLoadResult>;
+  loadEntry(key: string, loader: () => Promise<DatedObservation[] | SeriesCacheInput>, options?: SeriesCacheLoadOptions): Promise<SeriesCacheLoadResult>;
 }
 
 const CACHE_SOURCE = "gloomberb-cloud";
@@ -47,9 +55,16 @@ const CACHE_SCHEMA_VERSION = 1;
  * rather than an empty pane.
  */
 export function createSeriesCache(kind: string, staleMs: number): SeriesCache {
-  const cache = createPluginCache<DatedObservation[]>({
+  const cache = createPluginCache<SeriesCacheInput, DatedObservation[] | SeriesCacheInput>({
     kind, source: CACHE_SOURCE, schemaVersion: CACHE_SCHEMA_VERSION,
     policy: { staleMs, expireMs: 30 * 24 * 60 * 60 * 1000 },
+    // Existing array entries and callers retain their on-disk contract.
+    encode: (value) => value.provider ? value : value.observations,
+    decode: (value) => {
+      if (Array.isArray(value)) return { observations: value };
+      if (!value || !Array.isArray(value.observations)) throw new Error("Invalid cached series");
+      return value;
+    },
   });
   const hydrated = new Map<string, DatedObservation[]>();
   const failures = new Map<string, string>();
@@ -72,7 +87,7 @@ export function createSeriesCache(kind: string, staleMs: number): SeriesCache {
       try {
         const value = await loader();
         if (owner === generation && requests.get(key) === request) failures.delete(key);
-        return value;
+        return Array.isArray(value) ? { observations: value } : value;
       } catch (error) {
         // A fresh-cache read after a failed forced refresh is not a recovery.
         // Keep the failure until an actual successful request, without changing
@@ -86,7 +101,7 @@ export function createSeriesCache(kind: string, staleMs: number): SeriesCache {
         if (owner === generation && requests.get(key) === request) requests.delete(key);
       }
     }, options);
-    return withFailure(key, { observations: data, fetchedAt, stale, source, ...(refreshError ? { refreshError } : {}) });
+    return withFailure(key, { ...data, fetchedAt, stale, source, ...(refreshError ? { refreshError } : {}) });
   };
   const reset = () => {
     generation += 1;
@@ -113,7 +128,7 @@ export function createSeriesCache(kind: string, staleMs: number): SeriesCache {
     },
     get(key, options) {
       const result = cache.get(key, options);
-      return result ? withFailure(key, { observations: result.data, fetchedAt: result.fetchedAt, stale: result.stale, source: result.source }) : null;
+      return result ? withFailure(key, { ...result.data, fetchedAt: result.fetchedAt, stale: result.stale, source: result.source }) : null;
     },
     async load(key, loader) {
       return (await loadEntry(key, loader)).observations;

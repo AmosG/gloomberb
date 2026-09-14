@@ -36,9 +36,9 @@ export function createValuationSeriesLoader(deps: ValuationSourceDeps): Valuatio
     return {
       seriesId: def.key,
       ...await loadCachedSeriesEntry(def.key, async () => {
-        const { observations } = await cloudLoader(def);
+        const { observations, provider } = await cloudLoader(def);
         validateObservationDates(observations);
-        return observations;
+        return { observations, ...(provider ? { provider } : {}) };
       }, options),
       provenance: provenanceFor(def),
     };
@@ -87,7 +87,7 @@ function buildIndicators(
       builds.push({
         indicator,
         series,
-        sourceStale: indicatorSeries(indicator).some((def) => legs.get(def.key)?.stale === true),
+        sourceStale: indicatorSeries(indicator).some((def) => legs.get(def.key)?.stale === true || legs.get(def.key)?.provider?.stale === true),
         trend: fitIndicatorTrend(indicator, series.points),
       });
     } catch (error) {
@@ -142,6 +142,7 @@ function bundleFor(builds: IndicatorBuild[], legs: ReadonlyMap<string, DatedSeri
       fetchedAt: data.fetchedAt ?? null,
       stale: data.stale ?? null,
       ...(data.source ? { source: data.source } : {}),
+      ...(data.provider ? { provider: data.provider } : {}),
       ...(data.refreshError ? { refreshError: data.refreshError } : {}),
     };
     if (data.refreshError) errors.push(`${key}: ${data.refreshError}`);

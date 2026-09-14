@@ -69,6 +69,7 @@ export async function resolveValuationSeries(
   const built = buildValuationSeries(indicator, legs);
   const warnings = [...legs].flatMap(([key, data]) => data.refreshError
     ? [`${key}: ${data.refreshError}`]
+    : data.provider?.stale ? [`${key}: source data is stale`]
     : data.stale ? [`${key}: cached data is stale`] : []);
   if (built.points.at(-1)?.ratio == null) {
     warnings.push(`${indicator.label}: latest observation unavailable (${built.points.at(-1)!.date})`);

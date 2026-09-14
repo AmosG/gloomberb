@@ -1,4 +1,4 @@
-import type { SeriesCacheMetadata } from "../shared/series-cache";
+import type { SeriesCacheMetadata, SeriesProviderMetadata } from "../shared/series-cache";
 
 export type SeriesProvenance = "fred" | "market" | "shiller";
 
@@ -7,11 +7,12 @@ export interface DatedObservation {
   value: number | null;
 }
 
-export type ValuationSourceMetadata = Partial<SeriesCacheMetadata> & { provenance: SeriesProvenance };
+export type ValuationSourceMetadata = Partial<SeriesCacheMetadata> & { provenance: SeriesProvenance; provider?: SeriesProviderMetadata };
 
 export interface DatedSeries extends Partial<SeriesCacheMetadata> {
   seriesId: string;
   observations: DatedObservation[];
+  provider?: SeriesProviderMetadata;
   provenance: SeriesProvenance;
 }
 

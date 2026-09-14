@@ -6,7 +6,7 @@ import { BUFFETT_INDICATOR, INDICATORS, EXCESS_CAPE_YIELD, SHILLER_CAPE, TOBINS_
 import type { DatedObservation, DatedSeries } from "./series";
 import { buildValuationSeries } from "./align";
 import { resolveValuationSeries } from "./chart-series";
-import { createSourceLoader, shillerObservations } from "./sources";
+import { createCloudSourceDeps, createSourceLoader, shillerObservations } from "./sources";
 
 function obs(values: Array<[string, number]>): DatedObservation[] {
   return values.map(([date, value]) => ({ date, value }));
@@ -246,4 +246,31 @@ test("refresh bypasses fresh caches, shares pending Shiller work and retains fai
   } finally {
     clock.mockRestore();
   }
+});
+
+
+test("cloud-declared stale legs remain usable and stale after a cache restart", async () => {
+  const persistence = new MemoryPluginPersistence();
+  attachValuationPersistence(persistence);
+  let calls = 0;
+  const loader = createValuationSeriesLoader(createCloudSourceDeps({
+    getCloudFredSeries: async (id) => {
+      calls += 1;
+      return { info: null, observations: [{ date: "2026-07-01", value: id === "NCBEILQ027S" ? 100 : 50 }],
+        fetchedAt: "2026-09-10T12:00:00Z", stale: id === "TNWMVBSNNCB" };
+    },
+    getCloudShiller: async () => { throw new Error("unexpected Shiller"); },
+    getCloudHistory: async () => { throw new Error("unexpected history"); },
+  }));
+  const bundle = await loadValuationBundle({ loader, indicators: [TOBINS_Q] });
+  expect(bundle.builds[0]!.sourceStale).toBe(true);
+  expect(bundle.builds[0]!.series.points.at(-1)!.ratio).toBe(2);
+  expect(bundle.sources!.TNWMVBSNNCB!.provider).toEqual({ fetchedAt: "2026-09-10T12:00:00Z", stale: true });
+  resetValuationPersistence();
+  attachValuationPersistence(persistence);
+  const cached = await loadValuationBundle({ loader, indicators: [TOBINS_Q] });
+  expect(calls).toBe(2);
+  expect(cached.builds[0]!.sourceStale).toBe(true);
+  expect(cached.sources!.TNWMVBSNNCB!.provider).toEqual(bundle.sources!.TNWMVBSNNCB!.provider);
+  expect((await resolveValuationSeries("tobins-q", loader)).warning).toContain("source data is stale");
 });

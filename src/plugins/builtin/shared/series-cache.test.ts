@@ -80,3 +80,27 @@ test("failure status survives distinct retrieval and persistence timestamps with
   expect(cached).toMatchObject({ fetchedAt: initial.fetchedAt, stale: true, refreshError: "outage" });
   expect(cache.get("key")).toMatchObject({ stale: true, refreshError: "outage" });
 });
+
+
+test("provider provenance survives restart and failed refresh alongside legacy array entries", async () => {
+  clock = spyOn(Date, "now").mockReturnValue(Date.parse("2026-09-14T12:00:00Z"));
+  const cache = createSeriesCache("provider-test", 60_000);
+  const store = new MemoryPluginPersistence();
+  cache.attach(store);
+  const provider = { fetchedAt: "2026-09-10T12:00:00Z", stale: true };
+  await cache.loadEntry("rich", async () => ({ observations, provider }));
+  await cache.load("legacy", async () => observations);
+  cache.reset();
+  cache.attach(store);
+  const unexpected = async () => { throw new Error("no request for fresh local cache"); };
+  const cached = await cache.loadEntry("rich", unexpected);
+  expect(cached).toMatchObject({ observations, provider, fetchedAt: Date.now(), stale: false });
+  expect(cache.get("rich")?.provider).toEqual(provider);
+  expect(await cache.load("legacy", unexpected)).toEqual(observations);
+  expect(cache.get("legacy")?.provider).toBeUndefined();
+  const failed = await cache.loadEntry("rich", async () => { throw new Error("source outage"); }, { force: true });
+  expect(failed).toMatchObject({ provider, stale: true, fetchedAt: cached.fetchedAt, refreshError: "source outage" });
+  const freshProvider = { fetchedAt: "2026-09-14T12:00:00Z", stale: false };
+  await cache.loadEntry("rich", async () => ({ observations, provider: freshProvider }), { force: true });
+  expect(cache.get("rich")).toMatchObject({ provider: freshProvider, stale: false });
+});
