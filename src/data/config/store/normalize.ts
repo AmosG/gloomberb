@@ -4,6 +4,7 @@ import type {
   ChartPreferences,
   LayoutConfig,
   OnboardingProgress,
+  LayoutOrigin,
   SavedLayout,
 } from "../../../types/config";
 import {
@@ -294,6 +295,27 @@ function sanitizeBrokerInstances(value: unknown): BrokerInstanceConfig[] {
     }));
 }
 
+function sanitizeLayoutOrigin(value: unknown): LayoutOrigin | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const origin = value as Partial<LayoutOrigin>;
+  if (
+    origin.kind !== "team"
+    || typeof origin.teamId !== "string" || !origin.teamId
+    || typeof origin.layoutId !== "string" || !origin.layoutId
+    || typeof origin.revision !== "number" || !Number.isInteger(origin.revision) || origin.revision < 1
+    || typeof origin.contentHash !== "string"
+    || typeof origin.syncedAt !== "string"
+  ) return undefined;
+  return {
+    kind: "team",
+    teamId: origin.teamId,
+    layoutId: origin.layoutId,
+    revision: origin.revision,
+    contentHash: origin.contentHash,
+    syncedAt: origin.syncedAt,
+  };
+}
+
 function sanitizeSavedLayouts(
   value: unknown,
   fallbackLayout: LayoutConfig,
@@ -323,6 +345,7 @@ function sanitizeSavedLayouts(
         activePanel: entry.activePanel === "right" || entry.activePanel === "left"
           ? entry.activePanel
           : undefined,
+        ...(sanitizeLayoutOrigin(entry.origin) ? { origin: sanitizeLayoutOrigin(entry.origin) } : {}),
       };
     });
 

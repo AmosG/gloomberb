@@ -14,6 +14,7 @@ import {
   summarizeLayoutPanes,
   type GalleryEntry,
 } from "./model";
+import { linkedLayoutMarker } from "./linked";
 
 const DETAILS_WIDTH = 42;
 
@@ -84,9 +85,14 @@ export function LayoutGalleryTerminal({
     newLayout,
     owned,
     publishCurrent,
+    publishToTeam,
+    pullTeamUpdates,
     publishing,
     renameLayout,
     select,
+    teamSections,
+    teamLayouts,
+    unlink,
   } = controller;
   const discoverStatus = discoverStatusRow(controller);
 
@@ -100,11 +106,34 @@ export function LayoutGalleryTerminal({
       },
       ...owned.map((entry): GalleryRow => ({
         id: entry.id,
-        label: entry.active ? `${entry.name} ●` : entry.name,
-        right: describeArrangement(entry.layout),
+        label: `${entry.team ? `${entry.team.shortName}· ` : ""}${entry.name}${linkedLayoutMarker(entry.linked ?? null)}${entry.active ? " ●" : ""}`,
+        right: entry.linked
+          ? `r${entry.revision ?? "?"}${entry.linked.updateAvailable ? ` → r${entry.linked.updateAvailable}` : ""}`
+          : describeArrangement(entry.layout),
         current: entry.active,
         entry,
       })),
+      ...teamSections.flatMap(({ team, entries }): GalleryRow[] => [
+        {
+          id: `heading:team:${team.id}`,
+          label: tf("{team} ({count})", { team: `${team.shortName}· ${team.name.toUpperCase()}`, count: String(entries.length) }),
+          disabled: true,
+          entry: null,
+        },
+        ...(teamLayouts.state.status === "error" && entries.length === 0
+          ? [{ id: `team:${team.id}:retry`, label: "Retry", detail: teamLayouts.state.error, entry: null, action: teamLayouts.refresh }]
+          : teamLayouts.state.status === "loading" && entries.length === 0
+            ? [{ id: `team:${team.id}:loading`, label: "Loading team layouts…", disabled: true, entry: null }]
+            : entries.length === 0
+              ? [{ id: `team:${team.id}:empty`, label: "No team layouts yet. Publish one with t.", disabled: true, entry: null }]
+              : entries.map((entry): GalleryRow => ({
+                  id: entry.id,
+                  label: `${entry.name}${entry.index !== null ? " (open)" : ""}`,
+                  detail: entry.author ?? "",
+                  right: `r${entry.revision ?? 1} · ${formatPublishedAt(entry.publishedAt ?? "")}`,
+                  entry,
+                }))),
+      ]),
       {
         id: "heading:discover",
         label: tf("DISCOVER ({count})", { count: String(community.length) }),
@@ -123,7 +152,7 @@ export function LayoutGalleryTerminal({
       });
     }
     return built;
-  }, [community, discoverStatus, owned]);
+  }, [community, discoverStatus, owned, teamLayouts.refresh, teamLayouts.state, teamSections]);
 
   const selectableIndexes = useMemo(
     () => rows.map((row, index) => (row.entry || row.action ? index : -1)).filter((index) => index >= 0),
@@ -167,7 +196,7 @@ export function LayoutGalleryTerminal({
       return;
     }
     if (!row.entry) return;
-    if (row.entry.kind === "community") installLayout(row.entry);
+    if (row.entry.kind === "community" || row.entry.kind === "team") installLayout(row.entry);
     else activateLayout(row.entry);
   }, [activateLayout, installLayout]);
 
@@ -187,6 +216,19 @@ export function LayoutGalleryTerminal({
     const entry = selectedRowRef.current?.entry;
     if (entry?.kind === "owned") deleteLayout(entry);
   }, [deleteLayout]);
+  const publishTeamSelected = useCallback(() => {
+    const entry = selectedRowRef.current?.entry;
+    if (entry?.kind === "owned") publishToTeam(entry);
+  }, [publishToTeam]);
+  const pullSelected = useCallback(() => {
+    const entry = selectedRowRef.current?.entry;
+    if (entry?.kind === "owned" && entry.linked) pullTeamUpdates(entry);
+  }, [pullTeamUpdates]);
+  const unlinkSelected = useCallback(() => {
+    const entry = selectedRowRef.current?.entry;
+    if (entry?.kind === "owned" && entry.linked) unlink(entry);
+  }, [unlink]);
+  const teamsAvailable = teamSections.length > 0;
 
   usePaneFooter("layout-marketplace", () => ({
     info: publishing
@@ -201,7 +243,20 @@ export function LayoutGalleryTerminal({
             { id: "rename", key: "r", label: "ename", onPress: renameSelected },
             { id: "copy", key: "c", label: "opy", onPress: copySelected },
             { id: "delete", key: "d", label: "elete", onPress: deleteSelected, disabled: !canDelete },
+            ...(teamsAvailable
+              ? [{ id: "team", key: "t", label: selectedEntry.linked ? "eam publish" : "eam", onPress: publishTeamSelected, disabled: publishing }]
+              : []),
+            ...(selectedEntry.linked
+              ? [
+                  { id: "pull", key: "u", label: "pdate", onPress: pullSelected, disabled: publishing || !selectedEntry.linked.updateAvailable },
+                  { id: "unlink", key: "x", label: " unlink", onPress: unlinkSelected },
+                ]
+              : []),
           ]
+        : selectedEntry?.kind === "team"
+          ? [
+              { id: "open-team", key: "a", label: selectedEntry.index !== null ? " open" : "dd linked tab", onPress: activateSelected },
+            ]
         : selectedEntry?.kind === "community"
           ? [
               { id: "add", key: "a", label: "dd layout", onPress: activateSelected },
@@ -222,11 +277,17 @@ export function LayoutGalleryTerminal({
     focusSearch,
     newLayout,
     publishCurrent,
+    publishTeamSelected,
     publishing,
+    pullSelected,
     renameSelected,
+    selectedEntry?.index,
     selectedEntry?.kind,
+    selectedEntry?.linked,
     selectedRow?.action,
     selectedRow?.id,
+    teamsAvailable,
+    unlinkSelected,
   ]);
 
   useShortcut((event) => {
@@ -256,7 +317,10 @@ export function LayoutGalleryTerminal({
     else if (isPlainKey(event, "n")) run(newLayout);
     else if (isPlainKey(event, "p")) run(publishCurrent);
     else if (isPlainKey(event, "o") && (selectedEntry?.kind === "owned" || selectedRow?.action)) run(activateSelected);
-    else if (isPlainKey(event, "a") && selectedEntry?.kind === "community") run(activateSelected);
+    else if (isPlainKey(event, "a") && (selectedEntry?.kind === "community" || selectedEntry?.kind === "team")) run(activateSelected);
+    else if (isPlainKey(event, "t") && selectedEntry?.kind === "owned" && teamsAvailable && !publishing) run(publishTeamSelected);
+    else if (isPlainKey(event, "u") && selectedEntry?.kind === "owned" && selectedEntry.linked?.updateAvailable && !publishing) run(pullSelected);
+    else if (isPlainKey(event, "x") && selectedEntry?.kind === "owned" && selectedEntry.linked) run(unlinkSelected);
     else if (isPlainKey(event, "r") && selectedRow?.id === "discover:retry") run(activateSelected);
     else if (isPlainKey(event, "r") && selectedEntry?.kind === "owned") run(renameSelected);
     else if (isPlainKey(event, "c") && selectedEntry) run(copySelected);
@@ -365,11 +429,25 @@ function LayoutDetails({
   return (
     <Box flexDirection="column">
       <Text fg={colors.textBright} attributes={TextAttributes.BOLD}>{entry.name}</Text>
+      {entry.team && (
+        <Text fg={colors.textMuted}>
+          {`${entry.team.shortName}· ${entry.team.name}${entry.revision ? ` · r${entry.revision}` : ""}`}
+        </Text>
+      )}
       {entry.author && (
         <Text fg={colors.textMuted}>
           {entry.publishedAt
             ? `${entry.author} · ${formatPublishedAt(entry.publishedAt)}`
             : entry.author}
+        </Text>
+      )}
+      {entry.linked && (
+        <Text fg={entry.linked.updateAvailable ? colors.warning : entry.linked.dirty ? colors.text : colors.textDim}>
+          {entry.linked.updateAvailable
+            ? tf("Team has r{revision}. u to pull.", { revision: String(entry.linked.updateAvailable) })
+            : entry.linked.dirty
+              ? t("Edited since the last publish. t to publish.")
+              : t("In sync with the team.")}
         </Text>
       )}
       <Text fg={colors.textDim}>{describeArrangement(entry.layout)}</Text>

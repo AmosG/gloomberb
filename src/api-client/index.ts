@@ -5,6 +5,16 @@ import {
   type LayoutMarketplaceEntry,
   type LayoutMarketplacePayload,
 } from "../layout-marketplace/payload";
+import {
+  type CloudLayoutEntry,
+  type CloudLayoutRevisionSummary,
+  type CloudLayoutVisibility,
+  type LayoutRequirement,
+  LayoutRevisionConflictError,
+  parseCloudLayoutEntry,
+  parseCloudLayoutList,
+  parseCloudLayoutRevisions,
+} from "../layout-marketplace/cloud";
 import type { SyncSettings, SyncSnapshot } from "../sync/types";
 import { withDeadline } from "../utils/async-deadline";
 import { CloudASKGApi } from "./askg";
@@ -385,6 +395,114 @@ class GloomApiClient {
     }));
     if (!item) throw new Error("The layout marketplace returned invalid data.");
     return item;
+  }
+
+  // Cloud layouts: the full, revisioned shape behind ?v=2 and the new routes.
+
+  async getCloudLayout(id: string, options?: { signal?: AbortSignal }): Promise<CloudLayoutEntry | null> {
+    if (!isMarketplaceLayoutId(id)) return null;
+    try {
+      return parseCloudLayoutEntry(await this.request<unknown>(`/layouts/${encodeURIComponent(id)}?v=2`, {
+        method: "GET",
+        signal: options?.signal,
+      }));
+    } catch (error) {
+      if (error instanceof ApiRequestError && error.status === 404) return null;
+      throw error;
+    }
+  }
+
+  async listMyCloudLayouts(options?: { signal?: AbortSignal }): Promise<CloudLayoutEntry[]> {
+    const items = parseCloudLayoutList(await this.request<unknown>("/layouts/mine", {
+      method: "GET",
+      signal: options?.signal,
+    }));
+    if (!items) throw new Error("The layout service returned invalid data.");
+    return items;
+  }
+
+  async listTeamLayouts(teamId: string, options?: { signal?: AbortSignal }): Promise<CloudLayoutEntry[]> {
+    const items = parseCloudLayoutList(await this.request<unknown>(`/teams/${encodeURIComponent(teamId)}/layouts`, {
+      method: "GET",
+      signal: options?.signal,
+    }));
+    if (!items) throw new Error("The layout service returned invalid data.");
+    return items;
+  }
+
+  async publishTeamLayout(
+    teamId: string,
+    name: string,
+    payload: LayoutMarketplacePayload,
+    options: { requires?: LayoutRequirement[]; note?: string | null; visibility?: "team" | "public" } = {},
+  ): Promise<CloudLayoutEntry> {
+    const item = parseCloudLayoutEntry(await this.request<unknown>(`/teams/${encodeURIComponent(teamId)}/layouts`, {
+      method: "POST",
+      body: JSON.stringify({
+        name: name.trim(),
+        ...payload,
+        requires: options.requires ?? [],
+        ...(options.note ? { note: options.note } : {}),
+        ...(options.visibility ? { visibility: options.visibility } : {}),
+      }),
+    }));
+    if (!item) throw new Error("The layout service returned invalid data.");
+    return item;
+  }
+
+  /**
+   * Appends a revision. `expectedRevision` is sent as If-Match; a 412 becomes
+   * a LayoutRevisionConflictError carrying the revision the server holds now.
+   */
+  async publishLayoutRevision(
+    id: string,
+    payload: LayoutMarketplacePayload,
+    options: { expectedRevision?: number; requires?: LayoutRequirement[]; note?: string | null; name?: string } = {},
+  ): Promise<CloudLayoutEntry> {
+    try {
+      const item = parseCloudLayoutEntry(await this.request<unknown>(`/layouts/${encodeURIComponent(id)}`, {
+        method: "PUT",
+        headers: options.expectedRevision ? { "if-match": String(options.expectedRevision) } : {},
+        body: JSON.stringify({
+          ...payload,
+          requires: options.requires ?? [],
+          ...(options.note ? { note: options.note } : {}),
+          ...(options.name ? { name: options.name } : {}),
+        }),
+      }));
+      if (!item) throw new Error("The layout service returned invalid data.");
+      return item;
+    } catch (error) {
+      if (error instanceof ApiRequestError && error.status === 412) {
+        const current = await this.getCloudLayout(id).catch(() => null);
+        throw new LayoutRevisionConflictError(error.message, current?.revision ?? (options.expectedRevision ?? 0) + 1);
+      }
+      throw error;
+    }
+  }
+
+  async updateCloudLayout(
+    id: string,
+    patch: { name?: string; visibility?: CloudLayoutVisibility },
+  ): Promise<CloudLayoutEntry> {
+    const item = parseCloudLayoutEntry(await this.request<unknown>(`/layouts/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }));
+    if (!item) throw new Error("The layout service returned invalid data.");
+    return item;
+  }
+
+  async deleteCloudLayout(id: string): Promise<void> {
+    await this.request<unknown>(`/layouts/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
+  async listCloudLayoutRevisions(id: string): Promise<CloudLayoutRevisionSummary[]> {
+    const items = parseCloudLayoutRevisions(await this.request<unknown>(`/layouts/${encodeURIComponent(id)}/revisions`, {
+      method: "GET",
+    }));
+    if (!items) throw new Error("The layout service returned invalid data.");
+    return items;
   }
 
   async updateSyncSettings(update: Partial<SyncSettings>): Promise<SyncSettings> {

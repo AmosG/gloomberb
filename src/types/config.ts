@@ -110,6 +110,22 @@ export interface LayoutConfig {
   detached: DetachedPaneEntry[];
 }
 
+/**
+ * Where a tab's content came from when it is linked to a team layout. The
+ * revision and fingerprint say whether the local copy drifted and whether the
+ * team has something newer; the arrangement on screen is never part of it.
+ */
+export interface LayoutOrigin {
+  kind: "team";
+  teamId: string;
+  layoutId: string;
+  /** The team revision this tab last matched. */
+  revision: number;
+  /** Fingerprint of the content at `revision`, so edits can be detected offline. */
+  contentHash: string;
+  syncedAt: string;
+}
+
 export interface SavedLayout {
   id?: string;
   name: string;
@@ -117,6 +133,7 @@ export interface SavedLayout {
   paneState?: Record<string, Record<string, unknown>>;
   focusedPaneId?: string | null;
   activePanel?: "left" | "right";
+  origin?: LayoutOrigin;
 }
 
 export type OnboardingStage =

@@ -211,6 +211,31 @@ describe("layout marketplace payloads", () => {
     expect(JSON.stringify(payload)).not.toContain("placementMemory");
   });
 
+  test("keeps the config of a pane whose plugin is not installed here", () => {
+    const payload = publishableMarketplaceLayout({
+      dockRoot: { kind: "pane", instanceId: "tv:1" },
+      instances: [{
+        instanceId: "tv:1",
+        paneId: "gloomberb-tv:screener",
+        title: "Movers",
+        params: { universe: "sp500" },
+        settings: { dense: true, apiKey: "leak" },
+      }],
+      floating: [],
+      detached: [],
+    }, { "tv:1": { cursorSymbol: "NVDA", password: "no" } }, panes);
+    expect(payload.layout.instances[0]).toEqual({
+      instanceId: "p1",
+      paneId: "gloomberb-tv:screener",
+      title: "Movers",
+      params: { universe: "sp500" },
+      settings: { dense: true },
+    });
+    expect(payload.paneState.p1).toEqual({ cursorSymbol: "NVDA" });
+    expect(JSON.stringify(payload)).not.toContain("leak");
+    expect(JSON.stringify(payload)).not.toContain("password");
+  });
+
   test("materializes independent pane ids and rewrites state and follow bindings", () => {
     const entry = validEntry();
     const materialized = materializeMarketplaceLayout(
