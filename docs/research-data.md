@@ -227,3 +227,7 @@ Analyst price targets retain their declared denomination. A missing denomination
 The analyst recommendation summary selects an explicitly current-month row when provided, otherwise preserving the source's first row and period label. A complete analyst count requires all five reported nonnegative integer buckets. Missing categories and unavailable totals remain unknown, while reported zero counts remain zero. The combined sell count requires both sell buckets. Relative periods remain relative; the app does not invent a dated consensus snapshot. Headless analyst research resolves the same remembered venue as ticker-bound research before loading a symbol.
 
 Yahoo keeps an explicitly dated but unavailable metric in its reporting period. A null, omitted, or nonfinite value does not promote an older observation to the latest period, and does not become zero. Malformed or impossible calendar dates are excluded from dated Yahoo statements and latest-metric selection. Values in different source metric series are selected independently; this does not establish common publication dates or a complete current filing.
+
+## Financial growth display
+
+Financial tables abbreviate large growth percentages (for example, `+163k%`) so the sign and percent unit fit beside the reported value. Extreme finite values that cannot fit use an explicit bound; an unrepresentable growth rate is unavailable. Structured JSON retains finite numeric growth; formatted text and CSV use the compact display.
