@@ -4,6 +4,8 @@ import { getRangeStartDate, toHistoryRequest } from "./normalizers";
 import type { NewsCapability } from "../../capabilities";
 import { apiClient, type AuthUser, type CloudNewsPayload } from "../../api-client";
 import { cloudNewsParams } from "./news";
+import type { QuoteSubscriptionTarget } from "../../types/data-provider";
+import { ProviderMissError } from "../provider-errors";
 
 const verifiedUser: AuthUser = {
   id: "user-1",
@@ -120,6 +122,136 @@ afterEach(() => {
 });
 
 describe("GloomberbCloudProvider", () => {
+  test("discovers an unqualified venue without merging unresolved suffixes or ambiguous listings", async () => {
+    const provider = new GloomberbCloudProvider();
+    const quote = { symbol: "SPY", price: 1, currency: "USD", change: 0, changePercent: 0, lastUpdated: 1 };
+    const spy = { symbol: "SPY" };
+    let items = [{ symbol: "SPY", exchange: "ARCA", status: "success" as const, data: quote }];
+    apiClient.getCloudQuotesBatch = async () => ({ status: "success", data: { items } });
+    apiClient.ensureVerifiedSession = async () => null;
+    apiClient.subscribeQuotes = (_targets, onQuote) => {
+      for (const item of items) onQuote(item, item.data);
+      return () => {};
+    };
+    expect((await provider.getQuotesBatch([spy]))[0]).toMatchObject({ target: spy, quote: { symbol: "SPY" } });
+    const seen: QuoteSubscriptionTarget[] = [];
+    provider.subscribeQuotes([spy], (target) => seen.push(target))();
+    expect(seen).toEqual([spy]);
+    items = [...items, { ...items[0]!, exchange: "NYSE" }];
+    expect((await provider.getQuotesBatch([spy]))[0]?.quote).toBeNull();
+    for (const targets of [[spy, { symbol: "SPY:XNAS" }], [{ symbol: "AIR.NZ" }, { symbol: "AIR.VI" }]]) {
+      items = [{ symbol: targets[0]!.symbol === "SPY" ? "SPY" : "AIR", exchange: "ARCA", status: "success", data: quote }];
+      const results = await provider.getQuotesBatch(targets);
+      expect(results).toHaveLength(2);
+      expect(results.every((result) => result.quote === null && result.error instanceof ProviderMissError)).toBe(true);
+      provider.subscribeQuotes(targets, () => { throw new Error("ambiguous listing delivered"); })();
+    }
+  });
+
+  test("uses host venue aliases at the cloud boundary without losing suffix or non-equity identity", async () => {
+    const requests: Array<[string, string | undefined]> = [];
+    apiClient.getCloudQuote = async (symbol, exchange) => {
+      requests.push([symbol, exchange]);
+      return { status: "success", data: { symbol, price: 1, currency: "USD", change: 0, changePercent: 0, lastUpdated: 1 } };
+    };
+    const cases = [
+      ["RY", "TSE", "RY", "TSX"], ["RY:TSE", "", "RY", "TSX"],
+      ["7203", "TSEJ", "7203", "JPX"], ["7203.T:JPX", "NASDAQ", "7203.T", "JPX"],
+      ["7203.T:TSEJ", "", "7203.T", "JPX"], ["RY.TO:XTSE", "", "RY.TO", "TSX"],
+      ["NVDA", "XNAS", "NVDA", "NASDAQ"], ["SPY:ARCX", "", "SPY", "ARCA"],
+      ["VOD.L:XLON", "", "VOD.L", "LSE"], ["AIR.NZ:XNZE", "", "AIR.NZ", "NZX"],
+      ["OMV.VI:XWBO", "", "OMV.VI", "VIE"], ["WALMEX.MX:XMEX", "", "WALMEX.MX", "BMV"],
+      ["ABC.V:XTSX", "", "ABC.V", "TSXV"], ["EQNR.OL:XOSL", "", "EQNR.OL", "OSL"],
+      ["CEZ.PR:XPRA", "", "CEZ.PR", "PSE"], ["AC.PS", "", "AC.PS", ""],
+      ["BRK.B:XNYS", "", "BRK.B", "NYSE"], ["BTC-USD", "CCC", "BTC-USD", "CCC"],
+      ["EURUSD=X", "CCY", "EURUSD=X", "CCY"], ["ES=F", "CME", "ES=F", "CME"],
+      // A bare suffix remains authoritative over generic/stale exchange metadata.
+      ["7203.T", "NASDAQ", "7203.T", "JPX"], ["AIR.NZ:UNKNOWN", "", "AIR.NZ", "UNKNOWN"],
+    ];
+    const provider = new GloomberbCloudProvider();
+    for (const [symbol, exchange, requestSymbol, requestExchange] of cases) {
+      expect((await provider.getQuote(symbol!, exchange)).symbol).toBe(symbol!);
+      expect(requests.at(-1)).toEqual([requestSymbol, requestExchange]);
+    }
+  });
+
+  test("rejects contradictory qualified listings before quote, research, history or auth transport", async () => {
+    let calls = 0;
+    apiClient.ensureVerifiedSession = async () => { calls++; return verifiedUser; };
+    const forbidden = async () => { calls++; throw new Error("unexpected transport"); };
+    apiClient.getCloudQuote = forbidden;
+    apiClient.getCloudFinancials = forbidden;
+    apiClient.getCloudHistory = forbidden;
+    apiClient.getCloudOptionsChain = forbidden;
+    const provider = new GloomberbCloudProvider();
+    for (const symbol of ["7203.T:TSE", "RY.TO:JPX", "VOD.L:XNAS"]) {
+      for (const run of [
+        () => provider.getQuote(symbol), () => provider.getQuoteMetadata(symbol),
+        () => provider.getTickerFinancials(symbol), () => provider.getHolders(symbol),
+        () => provider.getAnalystResearch(symbol), () => provider.getCorporateActions(symbol),
+        () => provider.getPriceHistory(symbol, "", "1M"),
+        () => provider.getPriceHistoryForResolution(symbol, "", "1M", "1d"),
+        () => provider.getDetailedPriceHistory(symbol, "", new Date("2026-01-01"), new Date("2026-09-01"), "1d"),
+        () => provider.getOptionsChain(symbol),
+      ]) await expect(run()).rejects.toBeInstanceOf(ProviderMissError);
+    }
+    expect(calls).toBe(0);
+  });
+
+  test("isolates a conflicting listing in reordered batches and preserves valid stream target context", async () => {
+    const targets: QuoteSubscriptionTarget[] = [
+      { symbol: "7203.T:TSE", exchange: "JPX" },
+      { symbol: "RY", exchange: "TSE", route: "broker", surface: "portfolio", visible: true,
+        context: { brokerId: "ibkr", instrument: { brokerId: "ibkr", symbol: "RY", conId: 123, primaryExchange: "TSE", currency: "CAD" } } },
+      { symbol: "7203.T", exchange: "TSE", surface: "detail", selected: true, weight: 9 },
+    ];
+    const requests = [{ symbol: "RY", exchange: "TSX" }, { symbol: "7203.T", exchange: "JPX" }];
+    const quote = { symbol: "RY", price: 1, currency: "CAD", change: 0, changePercent: 0, lastUpdated: 1 };
+    const items = [
+      { symbol: "7203", exchange: "JPX", status: "success" as const, data: { ...quote, symbol: "7203", currency: "JPY" } },
+      { symbol: "RY", exchange: "TSX", status: "success" as const, data: quote },
+    ];
+    let batchCalls = 0, streamCalls = 0, authCalls = 0;
+    apiClient.getCloudQuotesBatch = async (submitted, mode) => {
+      batchCalls++; expect(submitted).toEqual(requests); expect(mode).toBe("refresh");
+      return { status: "success", data: { items } };
+    };
+    apiClient.getCloudFinancialsBatch = async (submitted, mode) => {
+      batchCalls++; expect(submitted).toEqual(requests); expect(mode).toBe("refresh");
+      return { status: "success", data: { items: items.map((item) => ({ ...item,
+        data: { quote: item.data, annualStatements: [], quarterlyStatements: [], priceHistory: [] } })) } };
+    };
+    apiClient.ensureVerifiedSession = async () => { authCalls++; return verifiedUser; };
+    apiClient.subscribeQuotes = (submitted, onQuote) => {
+      streamCalls++;
+      expect(submitted).toEqual(requests.map((request, i) => ({ ...request,
+        surface: targets[i + 1]!.surface, visible: targets[i + 1]!.visible,
+        selected: targets[i + 1]!.selected, weight: targets[i + 1]!.weight })));
+      for (const item of items) onQuote(item, item.data);
+      return () => {};
+    };
+    const provider = new GloomberbCloudProvider();
+    for (const batch of [await provider.getQuotesBatch(targets, { forceRefresh: true }),
+      await provider.getTickerFinancialsBatch(targets, { forceRefresh: true })]) {
+      expect(batch[0]!.target).toBe(targets[0]!);
+      expect(batch[0]!.error).toBeInstanceOf(ProviderMissError);
+      expect(batch[1]!.target).toBe(targets[2]!);
+      expect(batch[2]!.target).toBe(targets[1]!);
+    }
+    const seen: QuoteSubscriptionTarget[] = [];
+    provider.subscribeQuotes(targets, (target, value) => {
+      seen.push(target); expect(value.symbol).toBe(target.symbol);
+    })();
+    expect(seen[0]).toBe(targets[2]!);
+    expect(seen[1]).toBe(targets[1]!);
+    for (const batch of [await provider.getQuotesBatch([targets[0]!]),
+      await provider.getTickerFinancialsBatch([targets[0]!])]) {
+      expect(batch).toHaveLength(1); expect(batch[0]!.error).toBeInstanceOf(ProviderMissError);
+    }
+    provider.subscribeQuotes([targets[0]!], () => { throw new Error("invalid target delivered"); })();
+    expect([batchCalls, streamCalls, authCalls]).toEqual([2, 1, 1]);
+  });
+
   test("stale items in a successful quote batch cannot bypass single-quote freshness checks", async () => {
     const targets = [{ symbol: "VOD", exchange: "NASDAQ" }, { symbol: "VOD:XLON", exchange: "LSE" }];
     const quote = { symbol: "VOD", price: 118, currency: "GBp", change: 1, changePercent: 0.85, lastUpdated: 1, stale: false };

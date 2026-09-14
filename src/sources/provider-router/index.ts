@@ -26,6 +26,7 @@ import type { TimeRange } from "../../time-series/range";
 import type { ChartResolutionSupport, ManualChartResolution } from "../../time-series/resolution";
 import { debugLog } from "../../utils/debug-log";
 import { ProviderRouterBatchRoutes } from "./batches";
+import { mapListingTargets, publicListingExchange } from "../listing-target";
 import { ProviderRouterCachedRoutes } from "./cached-routes";
 import { ProviderRouterFinancialRoutes } from "./financial-routes";
 import { ProviderRouterHistoryRoutes } from "./history";
@@ -169,7 +170,8 @@ export class AssetDataRouter implements DataProvider {
     targets: CachedFinancialsTarget[],
     options: { allowExpired?: boolean; includeStaleQuotes?: boolean } = {},
   ): Map<string, TickerFinancials> {
-    return this.financialRoutes.getCachedFinancialsForTargets(targets, options);
+    const { valid } = mapListingTargets(targets, (target) => this.resolvePublicExchange(target.symbol, target.exchange, contextFromCachedTarget(target)));
+    return this.financialRoutes.getCachedFinancialsForTargets(valid, options);
   }
 
   getCachedExchangeRates(currencies: string[], options: { allowExpired?: boolean } = {}): Map<string, number> {
@@ -180,25 +182,42 @@ export class AssetDataRouter implements DataProvider {
     targets: QuoteSubscriptionTarget[],
     options: { forceRefresh?: boolean } = {},
   ): Promise<QuoteBatchResult[]> {
-    return this.batchRoutes.getQuotesBatch(targets, options);
+    const mapped = mapListingTargets(targets, (target) => this.resolvePublicExchange(target.symbol, target.exchange, target.context));
+    const results = await this.batchRoutes.getQuotesBatch(mapped.valid, options);
+    const restored = new Map(results.map((result) => {
+      const target = mapped.original(result.target);
+      return [target, { ...result, target }] as const;
+    }));
+    for (const failure of mapped.invalid) restored.set(failure.target, { ...failure, quote: null });
+    return targets.map((target) => restored.get(target) ?? { target, quote: null });
   }
 
   async getTickerFinancialsBatch(
     targets: CachedFinancialsTarget[],
     options: { forceRefresh?: boolean } = {},
   ): Promise<TickerFinancialsBatchResult[]> {
-    return this.batchRoutes.getTickerFinancialsBatch(targets, options);
+    const mapped = mapListingTargets(targets, (target) => this.resolvePublicExchange(target.symbol, target.exchange, contextFromCachedTarget(target)));
+    const results = await this.batchRoutes.getTickerFinancialsBatch(mapped.valid, options);
+    const restored = new Map(results.map((result) => {
+      const target = mapped.original(result.target);
+      return [target, { ...result, target }] as const;
+    }));
+    for (const failure of mapped.invalid) restored.set(failure.target, { ...failure, financials: null });
+    return targets.map((target) => restored.get(target) ?? { target, financials: null });
   }
 
   async getTickerFinancials(ticker: string, exchange?: string, context?: MarketDataRequestContext): Promise<TickerFinancials> {
+    exchange = this.resolvePublicExchange(ticker, exchange, context);
     return this.financialRoutes.getTickerFinancials(ticker, exchange, context);
   }
 
   async getQuote(ticker: string, exchange?: string, context?: MarketDataRequestContext): Promise<Quote> {
+    exchange = this.resolvePublicExchange(ticker, exchange, context);
     return this.financialRoutes.getQuote(ticker, exchange, context);
   }
 
   async getQuoteMetadata(ticker: string, exchange?: string, context?: MarketDataRequestContext): Promise<QuoteMetadata | null> {
+    exchange = this.resolvePublicExchange(ticker, exchange, context);
     const cached = this.getCachedFinancialsForTargets([{ ...context, symbol: ticker, exchange }], { allowExpired: true, includeStaleQuotes: true })
       .get(ticker.trim().toUpperCase());
     const stored = cached?.quote ? quoteMetadataFromQuote(cached.quote) : cached?.quoteMetadata;
@@ -263,6 +282,7 @@ export class AssetDataRouter implements DataProvider {
   }
 
   async getPriceHistory(ticker: string, exchange: string, range: TimeRange, context?: MarketDataRequestContext): Promise<PricePoint[]> {
+    exchange = this.resolvePublicExchange(ticker, exchange, context) ?? "";
     return this.historyRoutes.getPriceHistory(ticker, exchange, range, context);
   }
 
@@ -273,6 +293,7 @@ export class AssetDataRouter implements DataProvider {
     resolution: ManualChartResolution,
     context?: MarketDataRequestContext,
   ): Promise<PricePoint[]> {
+    exchange = this.resolvePublicExchange(ticker, exchange, context) ?? "";
     return this.historyRoutes.getPriceHistoryForResolution(ticker, exchange, bufferRange, resolution, context);
   }
 
@@ -281,6 +302,7 @@ export class AssetDataRouter implements DataProvider {
     exchange?: string,
     context?: MarketDataRequestContext,
   ): Promise<ChartResolutionSupport[]> {
+    exchange = this.resolvePublicExchange(ticker, exchange, context) ?? "";
     return this.historyRoutes.getChartResolutionSupport(ticker, exchange, context);
   }
 
@@ -289,6 +311,7 @@ export class AssetDataRouter implements DataProvider {
     exchange?: string,
     context?: MarketDataRequestContext,
   ): Promise<ManualChartResolution[]> {
+    exchange = this.resolvePublicExchange(ticker, exchange, context) ?? "";
     return this.historyRoutes.getChartResolutionCapabilities(ticker, exchange, context);
   }
 
@@ -300,6 +323,7 @@ export class AssetDataRouter implements DataProvider {
     barSize: string,
     context?: MarketDataRequestContext,
   ): Promise<PricePoint[]> {
+    exchange = this.resolvePublicExchange(ticker, exchange, context) ?? "";
     return this.historyRoutes.getDetailedPriceHistory(ticker, exchange, startDate, endDate, barSize, context);
   }
 
@@ -309,6 +333,10 @@ export class AssetDataRouter implements DataProvider {
 
   getCachedQuery<K extends CachedAssetMethod>(method: K, args: CachedAssetArgs<K>) {
     return this.cachedRoutes.get(method, args);
+  }
+
+  private resolvePublicExchange(ticker: string, exchange?: string, context?: MarketDataRequestContext): string | undefined {
+    return hasBrokerContext(context) || context?.instrument ? exchange : publicListingExchange(ticker, exchange);
   }
 
   private getEntityKey(ticker: string, instrument?: BrokerContractRef | null): string {
@@ -430,6 +458,7 @@ export class AssetDataRouter implements DataProvider {
     targets: QuoteSubscriptionTarget[],
     onQuote: (target: QuoteSubscriptionTarget, quote: Quote) => void,
   ): () => void {
-    return this.streamingRoutes.subscribeQuotes(targets, onQuote);
+    const mapped = mapListingTargets(targets, (target) => this.resolvePublicExchange(target.symbol, target.exchange, target.context));
+    return this.streamingRoutes.subscribeQuotes(mapped.valid, (target, quote) => onQuote(mapped.original(target), quote));
   }
 }
