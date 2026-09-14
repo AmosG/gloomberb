@@ -173,7 +173,7 @@ describe("MarketValuationPane", () => {
 
   test("a direct indicator shows no dollar levels row", async () => {
     const frame = await renderPane({ indicator: "shiller-cape" });
-    expect(frame).toContain("ten-year mean real earnings");
+    expect(frame).toContain("ATL");
     expect(frame).not.toContain("Mkt cap");
     expect(frame).not.toContain("Equities");
   });
@@ -235,7 +235,7 @@ test("unavailable rows remain selectable alongside usable indicators", async () 
   await act(async () => { await setup!.mockMouse.click(3, y); });
   await settle();
   expect(setup!.captureCharFrame()).not.toContain("Buffett Indicator unavailable");
-  expect(setup!.captureCharFrame()).toContain("ten-year mean real earnings");
+  expect(setup!.captureCharFrame()).toContain("ATL");
   await act(async () => {
     await setup!.mockInput.pressArrow("up");
     await new Promise((resolve) => setTimeout(resolve, 250));
@@ -244,7 +244,7 @@ test("unavailable rows remain selectable alongside usable indicators", async () 
   expect(setup!.captureCharFrame()).toContain("Buffett Indicator unavailable");
 });
 
-test("a short stacked pane scrolls to monetary basis, extrema dates and source", async () => {
+test("a short stacked pane scrolls to monetary basis and extrema dates", async () => {
   await renderPane({ indicator: "tobins-q" }, 48, 25);
   for (let i = 0; i < 10; i += 1) {
     await act(async () => { await setup!.mockMouse.scroll(47, 20, "down"); });
@@ -256,5 +256,4 @@ test("a short stacked pane scrolls to monetary basis, extrema dates and source",
   expect(frame).toContain("Net worth as of 2026Q1");
   expect(frame).toContain("2024-01-01");
   expect(frame).toContain("2026-01-01");
-  expect(frame).toContain("Tobin's q, Wikipedia");
 });

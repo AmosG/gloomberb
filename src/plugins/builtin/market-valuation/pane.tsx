@@ -1,8 +1,8 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   DataTableView,
-  EmptyState, ExternalLinkText,
-  InputSearchBar, Notice, PaneStatusBody, SegmentedControl, type DataTableCell,
+  EmptyState,
+  InputSearchBar, PaneStatusBody, SegmentedControl, type DataTableCell,
   type DataTableColumn,
   type DataTableKeyEvent,
   type DataTableSelectionChangeReason,
@@ -13,7 +13,7 @@ import { useShortcut } from "../../../react/input";
 import { usePaneSettingValue } from "../../../state/app/context";
 import { colors } from "../../../theme/colors";
 import type { PaneProps } from "../../../types/plugin";
-import { Box, ScrollBox, Text, type InputRenderable } from "../../../ui";
+import { Box, ScrollBox, type InputRenderable } from "../../../ui";
 import { formatNumber } from "../../../utils/format";
 import { isPlainKey } from "../../../utils/keyboard";
 import { stopSearchFocusNavigation } from "../../../utils/search-focus-navigation";
@@ -217,7 +217,7 @@ export function MarketValuationPane({ focused, width, height }: PaneProps) {
   usePaneStatusFooter({
     registrationId: "market-valuation",
     loading: resource.loading,
-    error,
+    error: error && !selectedView ? "Unavailable" : error,
     info: footerInfo,
   });
 
@@ -244,7 +244,7 @@ export function MarketValuationPane({ focused, width, height }: PaneProps) {
     ? Math.max(3, height - 2)
     : Math.min(visible.length + 2, Math.max(3, height - 12));
   // The stacked table consumes rows outside the detail scroll viewport.
-  const bodyHeight = Math.max(1, height - (bodyError ? 1 : 0));
+  const bodyHeight = Math.max(1, height);
   const detailHeight = split ? bodyHeight : Math.max(1, bodyHeight - tableHeight - 1);
 
   const list = (
@@ -306,12 +306,6 @@ export function MarketValuationPane({ focused, width, height }: PaneProps) {
           /> : (
             <Box flexDirection="column" padding={1} gap={1}>
               <EmptyState status="error" title={`${selected.indicator.label} unavailable`} message={selected.error ?? undefined} />
-              <Text fg={colors.textDim} wrapMode="word" wrapText>{selected.indicator.description}</Text>
-              {selected.indicator.link ? <ExternalLinkText
-                url={selected.indicator.link.url}
-                label={selected.indicator.link.label}
-                color={colors.textDim}
-              /> : null}
             </Box>
           )}
         </Box>
@@ -325,11 +319,6 @@ export function MarketValuationPane({ focused, width, height }: PaneProps) {
         {list}
         {detail}
       </Box>
-      {bodyError ? (
-        <Box height={1} paddingX={1} overflow="hidden">
-          <Notice>{bodyError}</Notice>
-        </Box>
-      ) : null}
     </Box>
   );
 }

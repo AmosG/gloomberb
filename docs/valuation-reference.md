@@ -1,6 +1,6 @@
 # Market valuation reference
 
-`VAL` compares broad valuation and allocation measures with their loaded histories. Each detail retains its formula or input basis, available dollar levels, comparison dates, source link and current data status. The table's valuation zones are fixed application thresholds, not investment recommendations or forecasts.
+`VAL` compares broad valuation and allocation measures with their loaded histories. Each detail shows available dollar levels and comparison dates, with current data status in the pane footer. Formulas, source references and methodology are documented here. The table's valuation zones are fixed application thresholds, not investment recommendations or forecasts.
 
 ## Source coverage and units
 

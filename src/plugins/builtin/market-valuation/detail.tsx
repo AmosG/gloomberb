@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
 import { CompositeChart } from "../../../components/chart/composite";
-import { ExternalLinkText } from "../../../components/ui";
 import { blendHex, colors } from "../../../theme/colors";
 import { Box, Text } from "../../../ui";
 import { formatNumber } from "../../../utils/format";
@@ -107,8 +106,6 @@ export function IndicatorDetail({
         </Box>
       )}
 
-      <Text fg={colors.textDim} wrapMode="word" wrapText>{indicator.description}</Text>
-
       <Box flexDirection="column" gap={0} width={Math.max(1, width - 2)}>
         {levels && view.current.numeratorBillions != null
           && view.current.denominatorBillions != null ? (
@@ -139,9 +136,6 @@ export function IndicatorDetail({
         </Box>
       </Box>
 
-      {indicator.link ? (
-        <ExternalLinkText url={indicator.link.url} label={indicator.link.label} color={colors.text} />
-      ) : null}
     </Box>
   );
 }
