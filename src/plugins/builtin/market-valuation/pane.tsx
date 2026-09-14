@@ -20,7 +20,7 @@ import { stopSearchFocusNavigation } from "../../../utils/search-focus-navigatio
 import { useAutoRefresh } from "../shared/auto-refresh";
 import { usePaneStatusFooter } from "../shared/pane-footer";
 import { getCachedValuationBundle, loadValuationBundle } from "./client";
-import { indicatorUnavailableReason, shortZoneLabel, type IndicatorDef, type ValuationRangeId } from "./defs";
+import { indicatorSeries, indicatorUnavailableReason, shortZoneLabel, type IndicatorDef, type ValuationRangeId } from "./defs";
 import { IndicatorDetail } from "./detail";
 import { INDICATORS } from "./indicators";
 import { RANGE_OPTIONS, VALUATION_DEFAULTS } from "./settings";
@@ -31,7 +31,7 @@ import {
 } from "./view";
 
 /** Below this the detail sits under the table instead of beside it. */
-const loadBundle = () => loadValuationBundle();
+const loadBundle = (force: boolean) => loadValuationBundle({ force });
 
 const SPLIT_MIN_WIDTH = 108;
 const LIST_WIDTH = 46;
@@ -51,7 +51,7 @@ function matchesQuery(row: IndicatorRow, query: string): boolean {
     row.indicator.label,
     row.indicator.shortLabel,
     row.indicator.description,
-    row.view?.zone.label,
+    row.view?.zone?.label,
   ].join(" ").toLowerCase();
   return query.split(/\s+/).every((token) => haystack.includes(token));
 }
@@ -75,7 +75,7 @@ function buildColumns(width: number, stacked: boolean): Column[] {
 
 function cellsFor(row: IndicatorRow): Record<ColumnId, DataTableCell> {
   const view = row.view;
-  if (!view) {
+  if (!view || view.current.ratio == null || !view.zone) {
     return {
       name: { text: row.indicator.shortLabel, color: colors.textBright },
       value: { text: "--", color: colors.textDim },
@@ -90,7 +90,7 @@ function cellsFor(row: IndicatorRow): Record<ColumnId, DataTableCell> {
     zone: { text: shortZoneLabel(view.zone.id), color: view.zone.color },
     // Restated so a high number always means expensive, whichever way the
     // underlying measure runs, otherwise the column cannot be read down.
-    percentile: { text: formatNumber(view.richPercentile, 0), color: colors.text },
+    percentile: { text: view.richPercentile == null ? "--" : formatNumber(view.richPercentile, 0), color: colors.text },
     sigma: { text: formatSigma(view.richSigma), color: colors.textMuted },
   };
 }
@@ -123,12 +123,12 @@ export function MarketValuationPane({ focused, width, height }: PaneProps) {
   );
   const [range, setRange] = usePaneSettingValue<ValuationRangeId>("range", VALUATION_DEFAULTS.range);
   const resource = useAsyncResource(loadBundle, { initialData: () => getCachedValuationBundle() });
-  const { data: bundle, load: refresh, updatedAt: lastUpdated } = resource;
+  const { data: bundle, load, reload: refresh, updatedAt: lastUpdated } = resource;
   const [query, setQuery] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
   const [searchFocusToken, setSearchFocusToken] = useState(0);
   const searchInputRef = useRef<InputRenderable | null>(null);
-  useAutoRefresh(lastUpdated, refresh);
+  useAutoRefresh(lastUpdated, load);
 
   const focusSearch = useCallback(() => {
     setSearchFocused(true);
@@ -163,7 +163,9 @@ export function MarketValuationPane({ focused, width, height }: PaneProps) {
   );
   const rows = useMemo<IndicatorRow[]>(() => bundle ? INDICATORS.flatMap((indicator) => {
     const view = views.find((entry) => entry.indicator.id === indicator.id) ?? null;
-    const error = indicatorUnavailableReason(indicator);
+    const error = indicatorUnavailableReason(indicator)
+      ?? bundle.errors.find((entry) => [indicator.label, ...indicatorSeries(indicator).map((def) => def.key)]
+        .some((prefix) => entry.startsWith(`${prefix}:`))) ?? null;
     return view || error ? [{ indicator, view, error }] : [];
   }) : [], [bundle, views]);
   const normalizedQuery = query.trim().toLowerCase();

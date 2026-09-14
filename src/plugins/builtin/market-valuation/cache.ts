@@ -1,4 +1,4 @@
-import { createSeriesCache } from "../shared/series-cache";
+import { createSeriesCache, type SeriesCacheLoadOptions } from "../shared/series-cache";
 import type { DatedObservation } from "./series";
 import type { PluginPersistence } from "../../../types/plugin";
 
@@ -29,4 +29,12 @@ export function loadCachedSeries(
   loader: () => Promise<DatedObservation[]>,
 ): Promise<DatedObservation[]> {
   return cache.load(key, loader);
+}
+
+export function loadCachedSeriesEntry(
+  key: string,
+  loader: () => Promise<DatedObservation[]>,
+  options?: SeriesCacheLoadOptions,
+) {
+  return cache.loadEntry(key, loader, options);
 }

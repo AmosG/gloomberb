@@ -1,17 +1,21 @@
 import { indicatorUnavailableReason, type IndicatorDef, type SeriesDef } from "./defs";
-import type { DatedSeries } from "./series";
+import { validateObservationDates, type DatedSeries } from "./series";
 
 export interface ScaledObs {
   date: string;
-  value: number;
+  value: number | null;
 }
 
 export interface RatioPoint {
   date: string;
-  ratio: number;
+  ratio: number | null;
   /** Present only when both legs are dollar amounts worth showing. */
   numeratorBillions?: number;
   denominatorBillions?: number;
+}
+
+export function isUsableRatio(point: RatioPoint): point is RatioPoint & { ratio: number } {
+  return point.ratio != null && Number.isFinite(point.ratio);
 }
 
 export interface ValuationSeries {
@@ -34,10 +38,11 @@ export function vintageLabel(prefix: string, vintageDate: string): string {
 
 export function scaleObservations(def: SeriesDef, data: DatedSeries): ScaledObs[] {
   if (def.unavailableReason) throw new Error(def.unavailableReason);
+  validateObservationDates(data.observations);
   const points: ScaledObs[] = [];
   for (const obs of data.observations) {
-    if (obs.value == null || !Number.isFinite(obs.value)) continue;
-    points.push({ date: obs.date, value: obs.value * def.scaleToBillions });
+    const scaled = typeof obs.value === "number" ? obs.value * def.scaleToBillions : null;
+    points.push({ date: obs.date, value: scaled != null && Number.isFinite(scaled) ? scaled : null });
   }
   points.sort((a, b) => a.date.localeCompare(b.date));
   return points;
@@ -63,7 +68,7 @@ export function alignToDenominator(
     const t = parseDateMs(point.date);
     if (t < firstMs) continue;
 
-    let value: number;
+    let value: number | null;
     if (t >= lastMs) {
       value = last.value;
     } else {
@@ -76,14 +81,17 @@ export function alignToDenominator(
       } else {
         const t0 = parseDateMs(left.date);
         const t1 = parseDateMs(right.date);
-        value = left.value + ((t - t0) / (t1 - t0)) * (right.value - left.value);
+        value = left.value == null || right.value == null || left.value <= 0 || right.value <= 0 ? null
+          : left.value + ((t - t0) / (t1 - t0)) * (right.value - left.value);
       }
     }
-    if (!(value > 0)) continue;
+    const ratio = point.value != null && value != null && value > 0
+      ? (point.value / value) * indicator.ratioScale : null;
+    const usable = ratio != null && Number.isFinite(ratio);
     out.push({
       date: point.date,
-      ratio: (point.value / value) * indicator.ratioScale,
-      ...(withLevels
+      ratio: usable ? ratio : null,
+      ...(withLevels && usable && point.value != null && value != null
         ? { numeratorBillions: point.value, denominatorBillions: value }
         : {}),
     });
@@ -101,11 +109,11 @@ export function buildValuationSeries(
     const def = indicator.input.series;
     const data = legs.get(def.key);
     if (!data) throw new Error(`missing ${def.key}`);
-    const points = scaleObservations(def, data).map((obs) => ({
-      date: obs.date,
-      ratio: obs.value * indicator.ratioScale,
-    }));
-    if (points.length === 0) throw new Error("no observations");
+    const points = scaleObservations(def, data).map((obs) => {
+      const ratio = obs.value == null ? null : obs.value * indicator.ratioScale;
+      return { date: obs.date, ratio: ratio != null && Number.isFinite(ratio) ? ratio : null };
+    });
+    if (!points.some(isUsableRatio)) throw new Error("no observations");
     return { indicatorId: indicator.id, points, vintageDate: points.at(-1)!.date };
   }
 
@@ -116,7 +124,7 @@ export function buildValuationSeries(
   const scaledTop = scaleObservations(numerator, top);
   const scaledBottom = scaleObservations(denominator, bottom);
   const points = alignToDenominator(indicator, scaledTop, scaledBottom, levels != null);
-  if (points.length === 0) throw new Error("no overlapping observations");
+  if (!points.some(isUsableRatio)) throw new Error("no overlapping observations");
   return {
     indicatorId: indicator.id,
     points,

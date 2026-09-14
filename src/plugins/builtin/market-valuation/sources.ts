@@ -67,10 +67,14 @@ export function provenanceFor(def: SeriesDef): DatedSeries["provenance"] {
 export function createSourceLoader(deps: ValuationSourceDeps) {
   // One Shiller fetch serves every column the registry asks for.
   let shillerRequest: Promise<CloudShillerPayload> | null = null;
-  const shiller = () => (shillerRequest ??= deps.loadShiller().catch((error) => {
-    shillerRequest = null;
-    throw error;
-  }));
+  const shiller = () => {
+    if (shillerRequest) return shillerRequest;
+    const request = deps.loadShiller().finally(() => {
+      if (shillerRequest === request) shillerRequest = null;
+    });
+    shillerRequest = request;
+    return request;
+  };
 
   return async (def: SeriesDef): Promise<DatedSeries> => {
     const source = def.source;

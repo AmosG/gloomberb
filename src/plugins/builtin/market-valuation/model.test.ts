@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { alignToDenominator, buildValuationSeries, type RatioPoint, type ScaledObs } from "./align";
-import { chartYearLabels, meanRatio, niceDomain, projectChart } from "./chart-projection";
+import { chartYearLabels, meanRatio, niceDomain, projectChart, zoneSeriesFor } from "./chart-projection";
 import { classifyZone, zoneScaleBands, zoneScaleFraction, zoneScaleValueAt } from "./defs";
 import { BUFFETT_INDICATOR, EXCESS_CAPE_YIELD, INDICATORS, SHILLER_CAPE, SP500_DIVIDEND_YIELD, TOBINS_Q, resolveIndicatorArg } from "./indicators";
 import { type DatedSeries } from "./series";
@@ -312,9 +312,12 @@ describe("richness normalisation", () => {
 });
 
 describe("sliceByRange", () => {
-  test("falls back to the whole series when a window leaves under two points", () => {
-    expect(sliceByRange([ratioPoint("1990-01-01", 60), ratioPoint("1991-01-01", 62)], "10Y"))
-      .toHaveLength(2);
+  test("keeps a sparse selected window, including a missing latest observation", () => {
+    const points = [ratioPoint("1990-01-01", 60), ratioPoint("2026-01-01", 62), { date: "2026-02-01", ratio: null }];
+    expect(sliceByRange(points, "10Y")).toEqual(points.slice(1));
+    expect(sliceByRange(points.slice(0, 2), "10Y")).toEqual(points.slice(1, 2));
+    expect(sliceByRange(points, "10Y", Date.parse("2038-01-01"))).toEqual([]);
+    expect(sliceByRange([], "10Y")).toEqual([]);
   });
 });
 
@@ -326,4 +329,56 @@ describe("resolveIndicatorArg", () => {
     expect(resolveIndicatorArg("")).toBeNull();
     expect(resolveIndicatorArg("nonsense")).toBeNull();
   });
+});
+
+
+describe("valuation observation gaps", () => {
+  test("missing and nonpositive denominator prints interrupt interpolation and carry until recovery", () => {
+    for (const missing of [null, 0, -5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const legs = new Map<string, DatedSeries>([
+        ["NCBEILQ027S", series([
+          { date: "2026-01-01", value: 200 }, { date: "2026-02-01", value: 200 },
+          { date: "2026-04-01", value: 200 }, { date: "2026-05-01", value: 200 },
+          { date: "2026-07-01", value: 200 }, { date: "2026-08-01", value: 0 },
+        ])],
+        ["TNWMVBSNNCB", series([
+          { date: "2026-01-01", value: 100 }, { date: "2026-04-01", value: missing },
+          { date: "2026-07-01", value: 100 },
+        ])],
+      ]);
+      const built = buildValuationSeries(TOBINS_Q, legs);
+      expect(built.points.map((point) => point.ratio)).toEqual([2, null, null, null, 2, 0]);
+      expect(built.points[1]!.denominatorBillions).toBeUndefined();
+      legs.set("TNWMVBSNNCB", series(legs.get("TNWMVBSNNCB")!.observations.slice(0, 2)));
+      expect(buildValuationSeries(TOBINS_Q, legs).points.at(-1)!.ratio).toBeNull();
+    }
+  });
+
+  test("direct signed values remain usable while dated gaps cannot become headlines, ranks or joined chart segments", () => {
+    const legs = new Map<string, DatedSeries>([["SHILLER_ECY", series([
+      { date: "2023-01-01", value: -0.02 }, { date: "2024-01-01", value: null },
+      { date: "2025-01-01", value: 0 }, { date: "2026-01-01", value: Number.POSITIVE_INFINITY },
+    ])]]);
+    const built = buildValuationSeries(EXCESS_CAPE_YIELD, legs);
+    expect(built.points.map((point) => point.ratio)).toEqual([-2, null, 0, null]);
+    const view = projectView({ indicator: EXCESS_CAPE_YIELD, series: built, trend: fitTrend(built.points, "linear") }, "ALL");
+    expect([view.current.ratio, view.zone, view.richPercentile, view.richSigma, view.ratioOneYearAgo]).toEqual([null, null, null, null, 0]);
+    expect(view.mean).toBe(-1);
+    expect(view.allTimeHigh.ratio).toBe(0);
+    expect(view.allTimeLow.ratio).toBe(-2);
+    for (const zone of zoneSeriesFor(EXCESS_CAPE_YIELD, view.chart.sourcePoints)) {
+      expect(zone.interpolation).toBe("none");
+      expect(zone.points[1]!.value).toBeNull();
+      expect(zone.points[3]!.value).toBeNull();
+    }
+  });
+});
+
+
+test("valuation histories reject calendar rollover rather than establish a fabricated observation date", () => {
+  const make = (date: string) => new Map<string, DatedSeries>([["SHILLER_CAPE", series([
+    { date: "2024-01-01", value: 30 }, { date, value: 40 },
+  ])]]);
+  expect(() => buildValuationSeries(SHILLER_CAPE, make("2024-02-30"))).toThrow("Invalid observation date");
+  expect(buildValuationSeries(SHILLER_CAPE, make("2024-02-29")).points.at(-1)).toEqual({ date: "2024-02-29", ratio: 40 });
 });

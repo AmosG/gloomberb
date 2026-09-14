@@ -1,6 +1,6 @@
 import type { ProjectedChartPoint } from "../../../components/chart/core/data";
 import { blendHex, colors } from "../../../theme/colors";
-import type { RatioPoint } from "./align";
+import { isUsableRatio, type RatioPoint } from "./align";
 import type { ResolvedSeries, TimeSeriesPoint } from "../../../time-series/types";
 import {
   classifyZone,
@@ -48,10 +48,11 @@ export function niceDomain(
 }
 
 export function meanRatio(points: readonly RatioPoint[]): number {
-  if (points.length === 0) return 0;
+  const usable = points.filter(isUsableRatio);
+  if (usable.length === 0) return 0;
   let total = 0;
-  for (const point of points) total += point.ratio;
-  return total / points.length;
+  for (const point of usable) total += point.ratio;
+  return total / usable.length;
 }
 
 /**
@@ -63,7 +64,8 @@ export function projectChart(
   visible: readonly RatioPoint[],
   mean: number,
 ): ValuationChartProjection {
-  const points: ProjectedChartPoint[] = visible.map((p) => ({
+  const usable = visible.filter(isUsableRatio);
+  const points: ProjectedChartPoint[] = usable.map((p) => ({
     date: new Date(p.date),
     open: p.ratio,
     high: p.ratio,
@@ -74,7 +76,7 @@ export function projectChart(
 
   let yMax = -Infinity;
   let yMin = Infinity;
-  for (const point of visible) {
+  for (const point of usable) {
     yMax = Math.max(yMax, point.ratio);
     yMin = Math.min(yMin, point.ratio);
   }
@@ -104,7 +106,7 @@ export function projectChart(
     referenceLines,
     yDomain: niceDomain(yMin, yMax, indicator.chartGridStep),
     yearLabels: chartYearLabels(points),
-    lineColors: visible.map((point) => classifyZone(indicator, point.ratio).color),
+    lineColors: usable.map((point) => classifyZone(indicator, point.ratio).color),
     markers,
   };
 }
@@ -146,14 +148,14 @@ export function zoneSeriesFor(
   points: readonly RatioPoint[],
 ): ResolvedSeries[] {
   const byZone = new Map<ValuationZoneId, TimeSeriesPoint[]>();
-  const zones = points.map((point) => classifyZone(indicator, point.ratio));
+  const zones = points.map((point) => isUsableRatio(point) ? classifyZone(indicator, point.ratio) : null);
   for (const band of indicator.zones) {
     if (!byZone.has(band.id)) byZone.set(band.id, []);
   }
 
   points.forEach((point, index) => {
     const date = new Date(point.date);
-    const here = zones[index]!.id;
+    const here = zones[index]?.id;
     const before = zones[index - 1]?.id;
     const after = zones[index + 1]?.id;
     for (const [zoneId, series] of byZone) {

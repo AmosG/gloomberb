@@ -74,7 +74,7 @@ export function IndicatorDetail({
     <Box flexDirection="column" width={width} paddingX={1} gap={1}>
       {view.chart.points.length >= 2 ? (
         <Box flexDirection="column" gap={0}>
-          <Box flexDirection="row" width={chartWidth} overflow="hidden">
+          {view.current.ratio != null && view.zone && <Box flexDirection="row" width={chartWidth} overflow="hidden">
             <Text>{" ".repeat(AXIS_WIDTH)}</Text>
             <ZoneColorScale
               indicator={indicator}
@@ -82,7 +82,7 @@ export function IndicatorDetail({
               width={Math.max(1, chartWidth - AXIS_WIDTH)}
               markerColor={view.zone.color}
             />
-          </Box>
+          </Box>}
           <CompositeChart
             series={series}
             legendSeries={legendSeries}

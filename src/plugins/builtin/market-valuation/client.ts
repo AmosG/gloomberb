@@ -1,8 +1,8 @@
 import { buildValuationSeries } from "./align";
-import { getCachedSeries, loadCachedSeries } from "./cache";
+import { getCachedSeries, loadCachedSeriesEntry } from "./cache";
 import { indicatorUnavailableReason, indicatorSeries, type IndicatorDef, type SeriesDef } from "./defs";
 import { INDICATORS } from "./indicators";
-import type { DatedSeries } from "./series";
+import { validateObservationDates, type DatedSeries, type ValuationSourceMetadata } from "./series";
 import {
   cloudSourceDeps,
   createSourceLoader,
@@ -12,7 +12,7 @@ import {
 import { fitIndicatorTrend } from "./trend";
 import type { IndicatorBuild, ValuationBundle } from "./view";
 
-export type ValuationSeriesLoader = (def: SeriesDef) => Promise<DatedSeries>;
+export type ValuationSeriesLoader = (def: SeriesDef, options?: { force?: boolean }) => Promise<DatedSeries>;
 
 /** Every distinct leg the registry needs, so shared series are fetched once. */
 export function requiredSeries(
@@ -31,11 +31,15 @@ export function requiredSeries(
 /** Cache-first around the cloud sources; exported so Bun-side tooling can reuse it. */
 export function createValuationSeriesLoader(deps: ValuationSourceDeps): ValuationSeriesLoader {
   const cloudLoader = createSourceLoader(deps);
-  return async (def) => {
+  return async (def, options) => {
     if (def.unavailableReason) throw new Error(def.unavailableReason);
     return {
       seriesId: def.key,
-      observations: await loadCachedSeries(def.key, async () => (await cloudLoader(def)).observations),
+      ...await loadCachedSeriesEntry(def.key, async () => {
+        const { observations } = await cloudLoader(def);
+        validateObservationDates(observations);
+        return observations;
+      }, options),
       provenance: provenanceFor(def),
     };
   };
@@ -53,13 +57,13 @@ export function getCachedValuationBundle(
     if (!cached) continue;
     legs.set(def.key, {
       seriesId: def.key,
-      observations: cached.observations,
+      ...cached,
       provenance: provenanceFor(def),
     });
   }
   const errors: string[] = [];
   const builds = buildIndicators(legs, errors, indicators);
-  return builds.length > 0 || errors.length > 0 ? { builds, errors, fetchedAt: Date.now() } : null;
+  return builds.length > 0 || errors.length > 0 ? bundleFor(builds, legs, errors) : null;
 }
 
 function buildIndicators(
@@ -77,9 +81,13 @@ function buildIndicators(
     if (indicatorSeries(indicator).some((def) => !legs.has(def.key))) continue;
     try {
       const series = buildValuationSeries(indicator, legs);
+      if (series.points.at(-1)?.ratio == null) {
+        errors.push(`${indicator.label}: latest observation unavailable (${series.points.at(-1)!.date})`);
+      }
       builds.push({
         indicator,
         series,
+        sourceStale: indicatorSeries(indicator).some((def) => legs.get(def.key)?.stale === true),
         trend: fitIndicatorTrend(indicator, series.points),
       });
     } catch (error) {
@@ -99,6 +107,7 @@ function summarizeErrors(errors: readonly string[]): string {
 export async function loadValuationBundle(options?: {
   loader?: ValuationSeriesLoader;
   indicators?: readonly IndicatorDef[];
+  force?: boolean;
 }): Promise<ValuationBundle> {
   const loader = options?.loader ?? defaultValuationSeriesLoader;
   const indicators = options?.indicators ?? INDICATORS;
@@ -107,7 +116,7 @@ export async function loadValuationBundle(options?: {
 
   const settled = await Promise.all(requiredSeries(indicators).map(async (def) => {
     try {
-      return { def, data: await loader(def) };
+      return { def, data: await loader(def, { force: options?.force }) };
     } catch (error) {
       return {
         def,
@@ -122,5 +131,23 @@ export async function loadValuationBundle(options?: {
 
   const builds = buildIndicators(legs, errors, indicators);
   if (builds.length === 0) throw new Error(summarizeErrors(errors));
-  return { builds, errors, fetchedAt: Date.now() };
+  return bundleFor(builds, legs, errors);
+}
+
+function bundleFor(builds: IndicatorBuild[], legs: ReadonlyMap<string, DatedSeries>, errors: string[]): ValuationBundle {
+  const sources: Record<string, ValuationSourceMetadata> = {};
+  for (const [key, data] of legs) {
+    sources[key] = {
+      provenance: data.provenance,
+      fetchedAt: data.fetchedAt ?? null,
+      stale: data.stale ?? null,
+      ...(data.source ? { source: data.source } : {}),
+      ...(data.refreshError ? { refreshError: data.refreshError } : {}),
+    };
+    if (data.refreshError) errors.push(`${key}: ${data.refreshError}`);
+  }
+  const timestamps = Object.values(sources).map((source) => source.fetchedAt);
+  const fetchedAt = timestamps.length > 0 && timestamps.every((time): time is number => time != null)
+    ? Math.min(...timestamps) : null;
+  return { builds, errors: [...new Set(errors)], fetchedAt, sources };
 }
