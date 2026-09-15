@@ -2,7 +2,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import {
   DataTableView,
   EmptyState,
-  InputSearchBar, Notice, PaneStatusBody, SegmentedControl, type DataTableCell,
+  InputSearchBar, PaneStatusBody, SegmentedControl, type DataTableCell,
   type DataTableColumn,
   type DataTableKeyEvent,
   type DataTableSelectionChangeReason,
@@ -300,11 +300,6 @@ export function EconStatisticsPane({ focused, width, height }: PaneProps) {
           </ScrollBox>
         </Box>
       </Box>
-      {error ? (
-        <Box height={1} paddingX={1} overflow="hidden">
-          <Notice>{error}</Notice>
-        </Box>
-      ) : null}
     </Box>
   );
 }

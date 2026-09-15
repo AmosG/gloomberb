@@ -60,7 +60,6 @@ export function PortfolioHistorySection({
   axisLabel,
   period,
   stale,
-  note,
   formatAxisValue,
 }: {
   show: boolean;
@@ -73,7 +72,6 @@ export function PortfolioHistorySection({
   axisLabel: string;
   period: string | undefined;
   stale: boolean | undefined;
-  note: string | null;
   formatAxisValue: (value: number) => string;
 }) {
   if (show) {
@@ -85,7 +83,6 @@ export function PortfolioHistorySection({
             {`  Flex ${period ?? ""}${stale ? " - cached" : ""}`}
           </Text>
         </Box>
-        {note ? <Box paddingX={1} flexDirection="column" flexShrink={0}><Notice tone="muted">{note}</Notice></Box> : null}
         <Box paddingX={1} height={height}>
           <StaticChartSurface
             points={points}
@@ -123,7 +120,7 @@ export function PortfolioHistorySection({
   if (points.length > 0) {
     return (
       <Box paddingX={1} flexDirection="column" flexShrink={0}>
-        <Notice tone="muted">{`${points.filter((point) => Number.isFinite(point.close)).length >= 2 ? "Enlarge this pane to view account history." : "Account history needs at least two observations for a chart."}${note ? ` ${note}` : ""}`}</Notice>
+        <Notice tone="muted">{`${points.filter((point) => Number.isFinite(point.close)).length >= 2 ? "Enlarge this pane to view account history." : "Account history needs at least two observations for a chart."}`}</Notice>
       </Box>
     );
   }
