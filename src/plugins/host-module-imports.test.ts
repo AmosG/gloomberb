@@ -79,7 +79,9 @@ describe("plugin host module imports", () => {
         hasHostRegistry: boolean;
       };
 
-      expect(result.importMetaDir.replaceAll("\\", "/")).toMatch(/\/~BUN\/root$/i);
+      // Bun's embedded filesystem is `B:/~BUN/root` on Windows and `/$bunfs/root`
+      // elsewhere; either one proves the code ran from inside the executable.
+      expect(result.importMetaDir.replaceAll("\\", "/")).toMatch(/\/(~BUN|\$bunfs)\/root$/i);
       expect(result.hostModuleCount).toBe(SHARED_SPECIFIERS.length);
       expect(result.names).toContain("Box");
       expect(result.shared).toEqual(["gloomberb/ui"]);
