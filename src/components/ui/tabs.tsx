@@ -20,6 +20,8 @@ interface TabItem {
   label: string;
   value: string;
   disabled?: boolean;
+  /** Text color while inactive; used for group markers such as a team accent. */
+  fg?: string;
   reorderable?: boolean;
   onClose?: (value: string) => void;
   onDoubleClick?: (value: string) => void;
@@ -433,7 +435,7 @@ function OpenTuiTabs({
             onDoubleClick={tab.disabled || !tab.onDoubleClick ? undefined : () => tab.onDoubleClick?.(tab.value)}
           >
             <Text
-              fg={tab.disabled ? palette.disabledFg : active && variant === "pill" ? palette.activePillFg : active ? palette.activeFg : hovered ? palette.hoverFg : palette.inactiveFg}
+              fg={tab.disabled ? palette.disabledFg : active && variant === "pill" ? palette.activePillFg : active ? palette.activeFg : hovered ? palette.hoverFg : tab.fg ?? palette.inactiveFg}
               attributes={attributes}
               onMouseDown={selectTab}
               selectable={onReorder ? false : undefined}

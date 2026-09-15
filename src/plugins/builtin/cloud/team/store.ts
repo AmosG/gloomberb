@@ -19,6 +19,8 @@ export interface TeamStoreSnapshot {
   error: string | null;
   /** The FOCUS lens: everything, one team, or personal only. Per device. */
   focus: "all" | "personal" | { teamId: string };
+  /** Tab groups the person folded or unfolded by hand since the last FOCUS change. */
+  toggledGroups: ReadonlySet<string>;
 }
 
 type Listener = (snapshot: TeamStoreSnapshot) => void
@@ -41,6 +43,7 @@ const EMPTY: TeamStoreSnapshot = {
   loading: false,
   error: null,
   focus: "all",
+  toggledGroups: new Set(),
 };
 
 /**
@@ -143,8 +146,17 @@ export class TeamStore {
   }
 
   setFocus(focus: TeamStoreSnapshot["focus"]): void {
-    this.update({ focus });
+    // A new lens resets hand-folded groups so the lens is what you see.
+    this.update({ focus, toggledGroups: new Set() });
     this.persistence?.setState(FOCUS_STATE_KEY, focus);
+  }
+
+  /** Folds or unfolds one tab group by hand until FOCUS changes. */
+  toggleGroup(groupId: string): void {
+    const next = new Set(this.snapshot.toggledGroups);
+    if (next.has(groupId)) next.delete(groupId);
+    else next.add(groupId);
+    this.update({ toggledGroups: next });
   }
 
   async refresh(): Promise<void> {

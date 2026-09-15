@@ -35,6 +35,9 @@ import { ConfirmDialog } from "../ui/confirm-dialog";
 import { Tabs } from "../ui/tabs";
 import { useTransientLayout } from "./transient-layout";
 import { linkedLayoutMarker, linkedLayoutStatus, linkedLayoutUpdates } from "../../layout-marketplace/linked";
+import { teamAccentHex } from "../../plugins/builtin/cloud/team/model";
+import { teamStore } from "../../plugins/builtin/cloud/team/store";
+import { buildStatusBarTabGroups, groupIdFromMarkerValue, groupMarkerValue } from "./status-bar-groups";
 
 type StatusBarEvent = { stopPropagation?: () => void; preventDefault?: () => void };
 type HoveredControl = string | null;
@@ -103,7 +106,16 @@ export function StatusBar({ onOpenChangelog }: { onOpenChangelog?: (version: str
     (onChange) => linkedLayoutUpdates.subscribe(onChange),
     () => linkedLayoutUpdates.snapshot(),
   );
-  const savedLayoutTabs = layouts.map((layout, index) => {
+  const teamSnapshot = useSyncExternalStore(
+    (onChange) => teamStore.subscribe(onChange),
+    () => teamStore.getSnapshot(),
+  );
+  const tabGroups = useMemo(
+    () => buildStatusBarTabGroups(layouts, activeLayoutIdx, teamSnapshot.teams, teamSnapshot.focus, teamSnapshot.toggledGroups),
+    [activeLayoutIdx, layouts, teamSnapshot.focus, teamSnapshot.teams, teamSnapshot.toggledGroups],
+  );
+  const layoutTab = (index: number) => {
+    const layout = layouts[index]!;
     // Linked tabs show `*` when edited locally and `↓` when the team is ahead.
     const marker = layout.origin && registry
       ? linkedLayoutMarker(linkedLayoutStatus(layout, registry.panes, remoteRevisions.get(layout.origin.layoutId)))
@@ -113,7 +125,28 @@ export function StatusBar({ onOpenChangelog }: { onOpenChangelog?: (version: str
       value: String(index),
       reorderable: true,
     };
-  });
+  };
+  // Tabs grouped by owner: personal first, then one marker per team in its
+  // accent followed by that team's tabs. A collapsed group keeps its marker
+  // with the tab count. Ctrl+1-9 stays positional through the index labels.
+  const savedLayoutTabs = tabGroups.length <= 1
+    ? layouts.map((_, index) => layoutTab(index))
+    : tabGroups.flatMap((group) => {
+      const marker = group.team
+        ? {
+          label: `${group.team.shortName}·${group.collapsed ? `(${group.indexes.length})` : ""}`,
+          value: groupMarkerValue(group.id),
+          reorderable: false,
+          fg: teamAccentHex(group.team.accentColor),
+        }
+        : group.collapsed
+          ? { label: `me·(${group.indexes.length})`, value: groupMarkerValue(group.id), reorderable: false }
+          : null;
+      return [
+        ...(marker ? [marker] : []),
+        ...(group.collapsed ? [] : group.indexes.map(layoutTab)),
+      ];
+    });
   const layoutTabs = transientLayout
     ? [
       ...savedLayoutTabs,
@@ -127,6 +160,11 @@ export function StatusBar({ onOpenChangelog }: { onOpenChangelog?: (version: str
   const layoutTabsWidth = layoutTabs.reduce((sum, tab) => sum + tab.label.length + 2, 0);
   const activeLayoutValue = transientLayout?.active ? transientLayout.id : String(activeLayoutIdx);
   const handleLayoutSelect = (value: string) => {
+    const groupId = groupIdFromMarkerValue(value);
+    if (groupId) {
+      teamStore.toggleGroup(groupId);
+      return;
+    }
     if (value === transientLayout?.id) {
       if (transientLayout.active) {
         transientLayout.onExit?.();
@@ -143,6 +181,7 @@ export function StatusBar({ onOpenChangelog }: { onOpenChangelog?: (version: str
     dispatch({ type: "SWITCH_LAYOUT", index });
   };
   const handleLayoutReorder = (fromValue: string, toValue: string) => {
+    if (groupIdFromMarkerValue(fromValue) || groupIdFromMarkerValue(toValue)) return;
     const fromIndex = Number(fromValue);
     const toIndex = Number(toValue);
     if (
