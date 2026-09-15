@@ -27,6 +27,7 @@ import { CloudApiSocket } from "./socket";
 import { CloudCollectionsApi } from "./collections";
 import { CloudNotesApi } from "./notes";
 import { CloudTeamsApi } from "./teams";
+import { CloudViewsApi } from "./views";
 import type {
   AssistCommandDescriptor,
   AssistCommandResponse,
@@ -41,6 +42,7 @@ export { ASKGTransportError } from "./askg";
 export type { ASKGToolResultOutcome, ASKGTransport } from "./askg";
 export { setCloudApiFetchTransport } from "./request";
 export { NoteConflictError } from "./notes";
+export { TeamRevisionConflictError } from "./views";
 export { TEAM_ACCENT_COLORS } from "./types";
 export type * from "./types";
 
@@ -106,6 +108,7 @@ class GloomApiClient {
   private readonly data: CloudDataApi = new CloudDataApi((path, options) => this.request(path, options));
   private readonly notes: CloudNotesApi = new CloudNotesApi((path, options) => this.request(path, options));
   private readonly collections: CloudCollectionsApi = new CloudCollectionsApi((path, options) => this.request(path, options));
+  private readonly views: CloudViewsApi = new CloudViewsApi((path, options) => this.request(path, options));
   readonly askg: CloudASKGApi = new CloudASKGApi({
     request: (path, options) => this.request(path, options),
     openStream: (path, options) => this.transport.openStream(path, options),
@@ -628,6 +631,16 @@ class GloomApiClient {
   deleteTeamCollection = this.collections.deleteTeamCollection.bind(this.collections);
   putTeamCollectionItem = this.collections.putTeamCollectionItem.bind(this.collections);
   removeTeamCollectionItem = this.collections.removeTeamCollectionItem.bind(this.collections);
+  listTeamViews = this.views.listTeamViews.bind(this.views);
+  getTeamView = this.views.getTeamView.bind(this.views);
+  createTeamView = this.views.createTeamView.bind(this.views);
+  publishTeamViewRevision = this.views.publishTeamViewRevision.bind(this.views);
+  renameTeamView = this.views.renameTeamView.bind(this.views);
+  deleteTeamView = this.views.deleteTeamView.bind(this.views);
+  listTeamPluginState = this.views.listTeamPluginState.bind(this.views);
+  getTeamPluginState = this.views.getTeamPluginState.bind(this.views);
+  putTeamPluginState = this.views.putTeamPluginState.bind(this.views);
+  deleteTeamPluginState = this.views.deleteTeamPluginState.bind(this.views);
 
   /** Subscribes to a shared scanner feed; all panes of one kind share one upstream subscription. */
   subscribeScanner = this.socket.subscribeScanner.bind(this.socket);

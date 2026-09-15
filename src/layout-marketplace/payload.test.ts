@@ -279,6 +279,28 @@ describe("layout marketplace payloads", () => {
     expect(personal.paneState.p1).toBeUndefined();
   });
 
+  test("round-trips a custom view spec through publish and materialize unchanged", () => {
+    const spec = JSON.stringify({
+      version: 1,
+      source: { kind: "inline", pane: "SCR", argument: "sp500", options: { limit: 50 } },
+      projection: { columns: [{ key: "symbol" }, { key: "change", transform: "percent" }], filters: [{ key: "change", op: "gt", value: 0.02 }], sort: { by: "change", direction: "desc" } },
+      presentation: { title: "Movers", symbolKey: "symbol" },
+    });
+    const viewPanes = new Map<string, PaneDef>([["custom-view", { id: "custom-view", name: "View", component, defaultPosition: "right" }]]);
+    const layout = {
+      dockRoot: { kind: "pane" as const, instanceId: "view:1" },
+      instances: [{ instanceId: "view:1", paneId: "custom-view", title: "Movers", settings: { spec } }],
+      floating: [],
+      detached: [],
+    };
+    const payload = publishableMarketplaceLayout(layout, {}, viewPanes);
+    expect(payload.layout.instances[0]?.settings).toEqual({ spec });
+    const materialized = materializeMarketplaceLayout(payload);
+    expect(materialized.layout.instances[0]?.settings).toEqual({ spec });
+    const shared = publishableMarketplacePane(layout.instances[0]!, {}, viewPanes);
+    expect(shared.layout.instances[0]?.settings).toEqual({ spec });
+  });
+
   test("materializes independent pane ids and rewrites state and follow bindings", () => {
     const entry = validEntry();
     const materialized = materializeMarketplaceLayout(

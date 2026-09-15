@@ -10,6 +10,7 @@ import type {
   PaneTemplateDef,
   PluginPersistence,
 } from "../../types/plugin";
+import { createPluginTeamState } from "../../plugins/team-state";
 import type { MarketContext } from "../types";
 import type { PaneFunctionCatalog } from "./catalog";
 
@@ -74,7 +75,12 @@ function buildDiscoveryContext({
   const fakePersistence = createDiscoveryPluginPersistence();
   const discoveryContext: GloomPluginContext = {
     registerPane: (pane: PaneDef) => panes.set(pane.id, pane),
-    registerPaneTemplate: (template: PaneTemplateDef) => paneTemplates.set(template.id, template),
+    registerPaneTemplate: (template: PaneTemplateDef) => {
+      paneTemplates.set(template.id, template);
+      return () => {
+        if (paneTemplates.get(template.id) === template) paneTemplates.delete(template.id);
+      };
+    },
     registerCommand: () => {},
     registerCommandBarSearchProvider: () => () => {},
     registerColumn: () => {},
@@ -120,6 +126,7 @@ function buildDiscoveryContext({
       set: async () => {},
       delete: async () => {},
     },
+    teamState: createPluginTeamState("discovery"),
     createBrokerInstance: async () => {
       throw new Error("Broker creation is unavailable during CLI pane discovery.");
     },

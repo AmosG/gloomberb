@@ -112,6 +112,21 @@ export const REMOTE_OPERATIONS: RemoteOperationSchema[] = [
     objectSchema({ templateId: requiredStringSchema, options: openObjectSchema }, ["templateId"]),
   ),
   op(
+    "view.create",
+    "Create a custom view pane: a table from a data function with columns, a filter, and a sort. "
+      + "spec = { source: { pane: <tool name or pane id>, argument?, options? }, projection: { columns?: [{ key, label?, transform? }], filters?: [{ key, op, value }], sort?: { by, direction }, limit? }, presentation?: { title?, symbolKey? } }.",
+    "{ name?: string, spec: object }",
+    "local-write",
+    objectSchema({ name: stringSchema, spec: openObjectSchema }, ["spec"]),
+  ),
+  op(
+    "view.update",
+    "Replace the spec of an existing custom view pane. Same spec shape as view.create.",
+    "{ paneId: string, spec: object, name?: string }",
+    "local-write",
+    objectSchema({ paneId: requiredStringSchema, spec: openObjectSchema, name: stringSchema }, ["paneId", "spec"]),
+  ),
+  op(
     "pane.setState",
     "Patch pane runtime state.",
     "{ paneId: string, patch: object }",

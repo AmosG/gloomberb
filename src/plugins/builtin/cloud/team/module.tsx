@@ -5,6 +5,8 @@ import { registerTeamCommands } from "./command";
 import { teamChannelId } from "./model";
 import { TeamStatusWidget } from "./status-widget";
 import { teamStore } from "./store";
+import { installTeamStateHost } from "./team-state-host";
+import { createCloudViewsCapability, teamViewsStore } from "./views";
 
 export { TeamFlowHost } from "./flow-host";
 export { TeamsAccountTab } from "./acm-tab";
@@ -15,8 +17,10 @@ export { teamStore } from "./store";
  * and `FOCUS` commands, the `cloud.team` capability for other plugins, and
  * the accent chips in the status bar.
  */
+let disposeTeamState: (() => void) | null = null;
+
 export const teamModule: PluginModule = {
-  capabilities: [createCloudTeamCapability()],
+  capabilities: [createCloudTeamCapability(), createCloudViewsCapability()],
   slots: {
     "status:widget": () => <TeamStatusWidget />,
   },
@@ -34,8 +38,14 @@ export const teamModule: PluginModule = {
     });
     teamStore.start();
     registerTeamCommands(ctx);
+    teamViewsStore.attach(ctx);
+    teamViewsStore.start();
+    disposeTeamState = installTeamStateHost();
   },
   dispose() {
+    teamViewsStore.dispose();
+    disposeTeamState?.();
+    disposeTeamState = null;
     teamStore.dispose();
   },
 };
