@@ -52,6 +52,7 @@ const EDITORIAL: Record<
   notes: { categories: ["productivity"] },
   portfolio: { categories: ["portfolio"] },
   "research-search": { categories: ["research", "news"] },
+  "custom-view": { categories: ["data", "productivity"] },
   "ticker-research": { categories: ["research"] },
   yahoo: { categories: ["data"] },
 };
