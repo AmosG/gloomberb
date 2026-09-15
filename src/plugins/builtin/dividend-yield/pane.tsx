@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DataTableView,
   KeyValueRow,
-  Notice,
   StaticChartSurface,
   usePaneFooter,
+  usePaneNoticeFooter,
   usePaneTicker,
   type DataTableCell,
   type DataTableKeyEvent,
@@ -96,15 +96,11 @@ function DividendSummary({
   currency,
   width,
   chartPoints,
-  hasHistory,
-  warnings,
 }: {
   metrics: DividendMetrics;
   currency: string;
   width: number;
   chartPoints: ProjectedChartPoint[];
-  hasHistory: boolean;
-  warnings: string[];
 }) {
   const metricRows = buildMetricRows(metrics, currency);
   const minColumnWidth = Math.max(...metricRows.map((row) => row.label.length + 2 + Math.max(6, row.value.length)));
@@ -128,10 +124,6 @@ function DividendSummary({
           );
         })}
       </Box>
-      {hasHistory && metrics.trailingRate === 0 ? (
-        <Box paddingX={1}><Notice>No cash distributions reported in the past 12 months.</Notice></Box>
-      ) : null}
-      {warnings.map((warning) => <Box key={warning} paddingX={1}><Notice>{warning}</Notice></Box>)}
       {chartPoints.length >= 2 && (
         <Box flexDirection="column" paddingX={1} height={chartHeight}>
           <StaticChartSurface
@@ -228,6 +220,12 @@ export function DividendYieldPane({ focused, width, height, loadData = fetchDivi
   const sourceWarnings = [
     ...(data?.stale ? ["Stale cash history; recent distributions may be missing."] : []),
   ];
+  usePaneNoticeFooter({
+    registrationId: "dividend-yield-notices",
+    notices: sourceWarnings,
+    focused,
+    enabled: !authWall,
+  });
   const metrics = data?.metrics ? repriceDividendMetrics(data.metrics, currentPrice) : undefined;
   const rows = useMemo(() => toDividendRows(payments), [payments]);
   const sortedRows = useMemo(() => sortRows(rows, sortPreference), [rows, sortPreference]);
@@ -271,8 +269,6 @@ export function DividendYieldPane({ focused, width, height, loadData = fetchDivi
           currency={currency}
           width={width}
           chartPoints={chartPoints}
-          hasHistory={payments.length > 0}
-          warnings={sourceWarnings}
         />
       ) : undefined}
       columns={columns}

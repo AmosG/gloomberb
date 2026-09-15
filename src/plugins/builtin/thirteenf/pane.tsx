@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DataTableStackView,
   DataTableView,
-  EmptyState, Notice, InputSearchBar, KeyValueRow, PaneStatusBody, Tabs, useTableLoadMore, type DataTableKeyEvent,
+  EmptyState, InputSearchBar, KeyValueRow, PaneStatusBody, Tabs, usePaneNoticeFooter, useTableLoadMore, type DataTableKeyEvent,
   type DataTableRootKeyContext, type PaneFooterSegment
 } from "../../../components";
 import { useShortcut } from "../../../react/input";
@@ -31,7 +31,6 @@ import {
   DEFAULT_TIMELINE_SORT,
   FUND_DETAIL_TABS,
   THIRTEENF_PANE_ID,
-  THIRTEENF_OPTIONS_NOTE,
   hasComparable13FQuarter,
   buildBrowserColumns,
   buildFilingPositionColumns,
@@ -522,6 +521,13 @@ function FundDetailView({
     }
   });
 
+  usePaneNoticeFooter({
+    registrationId: "thirteenf-holdings-notices",
+    notices: data?.warnings ?? [],
+    focused,
+    enabled: activeTab === "holdings" && !openFiling,
+  });
+
   const detailStatusInfo = useMemo<PaneFooterSegment[]>(() => (
     statusFiling?.isAmendment
       ? [{ id: "amended", parts: [{ text: "amended", tone: "warning" }] }]
@@ -626,10 +632,6 @@ function FundDetailView({
               <KeyValueRow label="Compared with" value={data && hasComparable13FQuarter(data) ? data.previousForm!.periodOfReport : "Prior quarter unavailable"} width={Math.max(1, width - 2)} />
               {data?.latestReport && data.latestReport.filings.length > 1 ? (
                 <KeyValueRow label="Public report" value={`${data.latestReport.filings.length} filings combined`} width={Math.max(1, width - 2)} />
-              ) : null}
-              {data?.warnings?.map((warning) => <Notice key={warning} tone="warning">{warning}</Notice>)}
-              {visibleHoldingRows.some((row) => !!row.putCall) ? (
-                <Text fg={colors.textMuted}>{THIRTEENF_OPTIONS_NOTE}</Text>
               ) : null}
             </Box>
           )}
@@ -789,7 +791,6 @@ function FilingDetailView({
           <Text fg={colors.text}>{value}</Text>
         </Box>
       ))}
-      {holdings.some((row) => !!row.putCall) ? <Text fg={colors.textMuted}>{THIRTEENF_OPTIONS_NOTE}</Text> : null}
     </Box>
   );
   const emptyTitle = status === "loading" || status === "idle"

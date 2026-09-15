@@ -27,9 +27,8 @@ import {
   useRemoteUiRegistry,
 } from "../../../remote/semantic-tree";
 import type { RemoteUiNodeSnapshot } from "../../../remote/types";
-import { FloatingPaneWrapper } from "../../../components/layout/floating-pane";
+import { PaneShotFrame } from "./cli-pane-shot-frame";
 import { PaneContent } from "../../../components/layout/pane/content";
-import { resolvePaneBodyFrame } from "../../../components/layout/pane/sizing";
 import { getPaneDisplayTitle } from "../../../components/layout/pane/title";
 import type {
   DataProvider,
@@ -475,35 +474,17 @@ function ShotPane({ payload, registry }: { payload: DesktopPaneShotPayload; regi
   const title = getPaneDisplayTitle(titleState, instance, pane, registry.panes);
   const width = payload.widthCells;
   const height = payload.heightCells;
-  const bodyFrame = resolvePaneBodyFrame({
-    width,
-    height,
-    nativePaneChrome: true,
-    reserveFooter: false,
-  });
-
   return (
-    <FloatingPaneWrapper
-      paneId={instance.instanceId}
-      title={title}
-      x={0}
-      y={0}
-      width={width}
-      height={height}
-      zIndex={1}
-      focused
-      showActions={false}
-      footer={null}
-    >
-      <PaneContent
+    <PaneShotFrame paneId={instance.instanceId} title={title} width={width} height={height}>
+      {(bodyFrame) => <PaneContent
         component={pane.component}
         paneId={instance.instanceId}
         paneType={instance.paneId}
         focused
         width={bodyFrame.width ?? 1}
         height={bodyFrame.height ?? 1}
-      />
-    </FloatingPaneWrapper>
+      />}
+    </PaneShotFrame>
   );
 }
 

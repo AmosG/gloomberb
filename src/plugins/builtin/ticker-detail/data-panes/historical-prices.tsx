@@ -2,7 +2,7 @@ import { useCallback, useMemo } from "react";
 import { TextAttributes } from "../../../../ui";
 import {
   DataTableView,
-  Notice,
+  usePaneNoticeFooter,
   loadingText,
   unavailableText,
   usePaneFooter,
@@ -173,6 +173,13 @@ export function HistoricalPricesPane({ focused, width, height }: PaneProps) {
     ],
   }), [cycleRange, error, loading, range]);
 
+  usePaneNoticeFooter({
+    registrationId: "historical-prices:integrity",
+    notices: integrityNotice ? [integrityNotice] : [],
+    focused,
+    title: "Price history data",
+  });
+
   return (
     <DataTableView<HistoricalPriceRow, HistoryColumn>
       focused={focused}
@@ -184,7 +191,6 @@ export function HistoricalPricesPane({ focused, width, height }: PaneProps) {
       onRootKeyDown={handleKeyDown}
       rootWidth={width}
       rootHeight={height}
-      rootBefore={integrityNotice ? <Notice>{integrityNotice}</Notice> : undefined}
       columns={columns}
       items={rows}
       sortColumnId={null}

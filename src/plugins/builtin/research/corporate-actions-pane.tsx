@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Box, ScrollBox, Text, TextAttributes, type ScrollBoxRenderable } from "../../../ui";
 import {
   DataTableStackView,
-  Prose,
+  usePaneNoticeFooter,
   usePaneFooter,
   type DataTableCell,
   type DataTableColumn,
@@ -542,6 +542,14 @@ export function CorporateActionsView({
     info: loadingErrorFooterInfo(loading, error ?? (sourceNotice?.failed ? sourceNotice.text : null)),
   }), [error, footerPaneId, loading, sourceNotice]);
 
+  usePaneNoticeFooter({
+    registrationId: `${footerPaneId}:source-notices`,
+    notices: sourceNotice && !sourceNotice.failed ? [sourceNotice.text] : [],
+    focused: focused && !openRow,
+    enabled: !authWall && rows.length > 0 && !openRow,
+    title: "Event data",
+  });
+
   if (authWall) return <SignInWall
     action={variant === "earnings-estimates" ? "view earnings estimates" : "view corporate actions"}
     needsVerification={cloudSession.needsVerification}
@@ -561,13 +569,6 @@ export function CorporateActionsView({
       }}
       onActivate={(row) => setOpenRowId(row.id)}
       onDetailKeyDown={handleDetailKeyDown}
-      rootBefore={rows.length > 0 ? (
-        <Box flexDirection="column" paddingX={1} {...(sourceNotice?.failed ? { "data-gloom-status": "error" } : {})}>
-          {sourceNotice && !sourceNotice.failed && <Box>
-            <Prose width={width - 2} color={colors.textDim} text={sourceNotice.text} />
-          </Box>}
-        </Box>
-      ) : undefined}
       rootWidth={width}
       rootHeight={height}
       onRootKeyDown={handleKeyDown}

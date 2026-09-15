@@ -1,12 +1,11 @@
 import { Box, Text } from "../../../ui";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { TextAttributes } from "../../../ui";
-import { EmptyState, Notice, Tabs } from "../../../components";
+import { EmptyState, Tabs, usePaneNoticeFooter } from "../../../components";
 import type { PaneProps } from "../../../types/plugin";
 import type { PluginModule } from "../plugin-module";
 import { colors } from "../../../theme/colors";
 import { convertCurrency } from "../../../utils/format";
-import { wrapTextLines } from "../../../utils/text-wrap";
 import {
   getFocusedCollectionId,
   useAppSelector,
@@ -255,11 +254,14 @@ function PortfolioAnalyticsPane({ focused, width, height }: PaneProps) {
   );
   const metricsHeight = summaryRows.length + riskRows.length + 5;
   const historyNote = performanceHistoryNote(brokerPerformance.performance);
-  const noticeWidth = Math.max(1, width - 2);
-  const noticeHeight = allocationNotices.reduce((total, notice) => total + wrapTextLines(notice.text, noticeWidth).length, 0)
-    + (historyNote ? wrapTextLines(historyNote, noticeWidth).length : 0);
-  // Keep table rows available after active data warnings wrap.
-  const availableHistoryChartHeight = height - metricsHeight - 7 - noticeHeight;
+  usePaneNoticeFooter({
+    registrationId: "analytics:data-notices",
+    notices: [...allocationNotices.map((notice) => notice.text), ...(historyNote ? [historyNote] : [])],
+    focused,
+    enabled: hasPositions,
+    title: "Portfolio data",
+  });
+  const availableHistoryChartHeight = height - metricsHeight - 7;
   const historyChartHeight = performanceChartPoints.filter((point) => Number.isFinite(point.close)).length >= 2 && availableHistoryChartHeight >= 5
     ? Math.min(8, availableHistoryChartHeight)
     : 0;
@@ -334,7 +336,6 @@ function PortfolioAnalyticsPane({ focused, width, height }: PaneProps) {
                 axisLabel={historyAxisLabel}
                 period={brokerPerformance.performance?.period}
                 stale={brokerPerformance.performance?.stale}
-                note={historyNote}
                 formatAxisValue={formatHistoryAxis}
               />
 
@@ -342,9 +343,6 @@ function PortfolioAnalyticsPane({ focused, width, height }: PaneProps) {
                 <Text fg={colors.textDim} attributes={TextAttributes.BOLD}>
                   Holdings by sector
                 </Text>
-              </Box>
-              <Box paddingX={1} flexDirection="column">
-                {allocationNotices.map((notice) => <Notice key={notice.text} tone={notice.tone}>{notice.text}</Notice>)}
               </Box>
 
               <SectorAllocationTable

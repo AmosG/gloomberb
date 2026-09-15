@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { act, useReducer, type ReactElement } from "react";
-import { testRender } from "../../../renderers/opentui/test-utils";
+import { PaneFooterProvider } from "../../../components/layout/pane/footer";
+import { emitKeypress, testRender } from "../../../renderers/opentui/test-utils";
 import { appReducer, createInitialState } from "../../../state/app/context";
 import { MarketDataCoordinator, setSharedMarketDataCoordinator } from "../../../market-data/coordinator";
 import { createTestDataProvider } from "../../../test-support/data-provider";
@@ -170,13 +171,13 @@ function AnalyticsHarness({
 
   return (
     <TestPaneProvider state={state} dispatch={dispatch} paneId={TEST_PANE_ID} pluginId="portfolio" runtime={runtime}>
-      <AnalyticsPane
+      <PaneFooterProvider>{() => <AnalyticsPane
         paneId={TEST_PANE_ID}
         paneType="analytics"
         focused
         width={width}
         height={height}
-      />
+      />}</PaneFooterProvider>
     </TestPaneProvider>
   );
 }
@@ -521,7 +522,15 @@ for (const scenario of ["unknown currency", "dated correction", "empty observati
       expect(frame).toContain("Sep 10 2026");
       expect(frame).toContain(scenario === "unknown currency" ? "Value (unknown currency)" : "Value (USD)");
       expect(frame).not.toContain("Value (JPY)");
-      if (scenario === "dated correction") expect(frame).toContain("1 missing value observation.");
+      if (scenario === "dated correction") {
+        expect(frame).not.toContain("1 missing value observation.");
+        await emitKeypress(testSetup!, { name: "!", sequence: "!", shift: true }, { trackPropagation: true });
+        await flushFrame();
+        expect(testSetup!.captureCharFrame()).toContain("1 missing value observation.");
+        await emitKeypress(testSetup!, { name: "escape" }, { trackPropagation: true });
+        await flushFrame();
+        expect(testSetup!.captureCharFrame()).toContain("Technology");
+      }
     }
   });
 }

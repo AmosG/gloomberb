@@ -45,6 +45,7 @@ const EDITORIAL: Record<
   alerts: { categories: ["alerts"] },
   application: { categories: ["core"] },
   broker: { categories: ["broker"] },
+  "custom-view": { categories: ["data", "productivity"] },
   debug: { categories: ["developer"] },
   macro: { categories: ["macro"] },
   "market-overview": { categories: ["markets"] },

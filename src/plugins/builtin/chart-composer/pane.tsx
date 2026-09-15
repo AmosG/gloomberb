@@ -1,12 +1,11 @@
 import { FINANCIAL_VINTAGE_NOTICE, SEC_EPS_BASIS_NOTICE } from "../../../utils/financial-statements";
-import { wrapTextLines } from "../../../utils/text-wrap";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Box, ScrollBox, Text, useUiCapabilities, useUiHost } from "../../../ui";
+import { Box, Text, useUiCapabilities, useUiHost } from "../../../ui";
 import {
   ChoiceDialog,
-  Prose,
   Tabs,
   usePaneFooter,
+  usePaneNoticeFooter,
   type PaneFooterPressEvent,
 } from "../../../components";
 import {
@@ -542,12 +541,12 @@ function ChartComposerSurface({
     ))
   ));
   const statusNotices = [...new Set([...(statusErrorNotice ? [statusErrorNotice] : []), ...(comparisonUnavailable ? [comparisonUnavailable] : []), ...statusWarnings])];
-  // Leave one cell for a scrollbar when a short pane cannot show the full notice.
-  const statusNoticeWidth = Math.max(8, width - 3);
-  const statusNoticeHeight = statusNotices.length > 0
-    ? Math.min(statusNotices.reduce((lines, notice) => lines + wrapTextLines(notice, statusNoticeWidth).length, 0),
-      Math.max(1, height - 1 - 4))
-    : 0;
+  usePaneNoticeFooter({
+    registrationId: `${footerId}:notices`,
+    notices: statusNotices,
+    focused: shortcutActive,
+    title: "Chart data",
+  });
 
   // Footer registrations compare presentation, so their callbacks must read current actions.
   const currentActionsRef = useRef({ openSeriesEditor, shareChart });
@@ -577,7 +576,7 @@ function ChartComposerSurface({
     ? "Add a series to start the chart"
     : resolution.loading
       ? "Loading chart data"
-      : "No observations in this range";
+      : statusErrorNotice ?? comparisonUnavailable ?? "No observations in this range";
 
   return (
     <Box flexDirection="column" width={width} height={height} backgroundColor={colors.panel}>
@@ -653,13 +652,6 @@ function ChartComposerSurface({
         onOpenChange={setFormulasOpen}
         renderTrigger={() => null}
       />
-      {statusNotices.length > 0 && <ScrollBox key={statusNotices.join("\n")} height={statusNoticeHeight} flexShrink={0} scrollY focusable={false}>
-        <Box flexDirection="column" paddingX={1} flexShrink={0}>
-          {statusNotices.map((notice) => (
-            <Prose key={notice} text={notice} width={statusNoticeWidth} color={colors.warning} />
-          ))}
-        </Box>
-      </ScrollBox>}
       <Box flexGrow={1} minHeight={4}>
         <CompositeChart
           series={plottedSeries}
@@ -670,7 +662,7 @@ function ChartComposerSurface({
           clipToViewport={!!spec.viewport.dateWindow}
           viewportResetKey={authoredViewportKey}
           width={Math.max(1, width)}
-          height={Math.max(4, height - 1 - statusNoticeHeight)}
+          height={Math.max(4, height - 1)}
           focused={focused}
           interactive={surfacePointerInteractive}
           allowHistoricalBackfill

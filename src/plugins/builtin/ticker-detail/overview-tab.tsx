@@ -1,4 +1,4 @@
-import { EmptyState, Notice, Prose, SectionHeading } from "../../../components";
+import { EmptyState, SectionHeading, usePaneNoticeFooter } from "../../../components";
 import { CompositeChart, pricePointsToResolvedSeries } from "../../../components/chart/composite";
 import { CompanyLogo } from "../../../components/company-logo";
 import { PriceReturnStrip } from "../../../components/price-performance";
@@ -21,21 +21,23 @@ import { CompactRangeBar, PositionTable, QuoteBook, StatGrid } from "./overview/
 import { buildOverviewStats, buildPositionRows } from "./overview/model";
 import { describeFundamentalMarketCap, selectMarketCapitalization } from "../../../utils/market-capitalization";
 
-export function OverviewTab({
-  width,
-  ticker,
-  financials,
-}: {
+interface OverviewTabProps {
   width?: number;
+  focused?: boolean;
   ticker: TickerRecord | null;
   financials: TickerFinancials | null;
-}) {
+}
+
+export function OverviewTab(props: OverviewTabProps) {
+  if (!props.ticker) return <EmptyState title={t("No ticker selected.")} />;
+  return <ResolvedOverviewTab {...props} ticker={props.ticker} />;
+}
+
+function ResolvedOverviewTab({ width, focused = false, ticker, financials }: OverviewTabProps & { ticker: TickerRecord }) {
   const baseCurrency = useAppSelector((state) => state.config.baseCurrency);
   const exchangeRatesState = useAppSelector((state) => state.exchangeRates);
   const { width: termWidth } = useViewport();
   const { fractionalViewport = false, nativePaneChrome } = useUiCapabilities();
-
-  if (!ticker) return <EmptyState title={t("No ticker selected.")} />;
 
   const quote = financials?.quote;
   const fundamentals = financials?.fundamentals;
@@ -86,6 +88,16 @@ export function OverviewTab({
     axis: "right",
     panelId: "price",
     timeBasis: chartTimeZone ? { kind: "market", timeZone: chartTimeZone } : undefined,
+  });
+  usePaneNoticeFooter({
+    registrationId: "overview-notices",
+    notices: [
+      ...(!quote && financials ? [t("Current quote unavailable. Other research data is still available.")] : []),
+      ...(priceSeries.warning ? [priceSeries.warning] : []),
+      ...(capitalization?.provenance.kind === "fundamentals"
+        ? [`Market cap: ${describeFundamentalMarketCap(capitalization.provenance)}.`] : []),
+    ],
+    focused,
   });
   const hasBidAsk = quote?.bid != null || quote?.ask != null;
   const quoteBookInline = hasBidAsk && contentWidth >= 68;
@@ -204,10 +216,6 @@ export function OverviewTab({
           )}
         </Box>
 
-        {!quote && financials && (
-          <Notice>{t("Current quote unavailable. Other research data is still available.")}</Notice>
-        )}
-
         {(hasDayRange || hasYearRange) && quote && (
           <Box flexDirection={rangeInline ? "row" : "column"} gap={rangeInline ? 2 : 0} width={contentWidth}>
             {hasDayRange && (
@@ -239,8 +247,6 @@ export function OverviewTab({
           </Box>
         )}
 
-        {priceSeries.warning && <Notice>{priceSeries.warning}</Notice>}
-
         {hasHistory && (
           <CompositeChart
             width={chartWidth}
@@ -265,7 +271,6 @@ export function OverviewTab({
           <Box flexDirection="column">
             <SectionHeading title={t("Fundamentals")} />
             <StatGrid fields={stats} width={contentWidth} />
-            {capitalization?.provenance.kind === "fundamentals" ? <Prose text={`Market cap: ${describeFundamentalMarketCap(capitalization.provenance)}.`} width={contentWidth} color={colors.textDim} /> : null}
           </Box>
         )}
 

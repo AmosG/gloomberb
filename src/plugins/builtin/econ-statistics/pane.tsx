@@ -2,7 +2,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import {
   DataTableView,
   EmptyState,
-  InputSearchBar, Notice, PaneStatusBody, SegmentedControl, type DataTableCell,
+  InputSearchBar, PaneStatusBody, usePaneNoticeFooter, SegmentedControl, type DataTableCell,
   type DataTableColumn,
   type DataTableKeyEvent,
   type DataTableSelectionChangeReason,
@@ -202,8 +202,15 @@ export function EconStatisticsPane({ focused, width, height }: PaneProps) {
   usePaneStatusFooter({
     registrationId: "econ-statistics",
     loading: resource.loading,
-    error,
+    error: selected ? null : error,
     info: footerInfo,
+  });
+  usePaneNoticeFooter({
+    registrationId: "econ-statistics:notices",
+    notices: error ? [error] : [],
+    focused: focused && !searchFocused,
+    enabled: !!selected,
+    title: "Economic data",
   });
 
   if (!bundle && resource.error === null) {
@@ -300,11 +307,6 @@ export function EconStatisticsPane({ focused, width, height }: PaneProps) {
           </ScrollBox>
         </Box>
       </Box>
-      {error ? (
-        <Box height={1} paddingX={1} overflow="hidden">
-          <Notice>{error}</Notice>
-        </Box>
-      ) : null}
     </Box>
   );
 }

@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { act } from "react";
-import { testRender } from "../../../renderers/opentui/test-utils";
+import { PaneFooterProvider } from "../../../components/layout/pane/footer";
+import { emitKeypress, testRender } from "../../../renderers/opentui/test-utils";
 import { createInitialState } from "../../../state/app/context";
 import { createTestPaneConfig, TestPaneProvider } from "../../../test-support/pane";
 import { createTestPluginRuntime } from "../../../test-support/plugin-runtime";
@@ -33,9 +34,9 @@ test.each([
   await act(async () => {
     setup = await testRender(
       <TestPaneProvider state={state} paneId="ecst:test" pluginId="market-overview" runtime={createTestPluginRuntime()}>
-        <Box width={width} height={36}>
+        <PaneFooterProvider>{() => <Box width={width} height={36}>
           <EconStatisticsPane paneId="ecst:test" paneType="econ-statistics" width={width} height={36} focused />
-        </Box>
+        </Box>}</PaneFooterProvider>
       </TestPaneProvider>,
       { width, height: 36 },
     );
@@ -56,5 +57,13 @@ test.each([
   expect(scrolled).toContain("Low 100.00% 2019-01-01");
   expect(scrolled).toContain("20Y");
   expect(scrolled).toContain("All");
-  if (partial) expect(scrolled).toContain("CPIAUCNS");
+  if (partial) {
+    expect(scrolled).not.toContain("CPIAUCNS");
+    await emitKeypress(setup!, { name: "!", sequence: "!", shift: true }, { trackPropagation: true });
+    await act(async () => { await setup!.renderOnce(); });
+    expect(setup!.captureCharFrame()).toContain("CPIAUCNS");
+    await emitKeypress(setup!, { name: "escape" }, { trackPropagation: true });
+    await act(async () => { await setup!.renderOnce(); });
+    expect(setup!.captureCharFrame()).toContain("FRED T10Y2Y");
+  }
 });

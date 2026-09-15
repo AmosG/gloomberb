@@ -52,15 +52,17 @@ function stopMouseEvent(event?: { stopPropagation?: () => void; preventDefault?:
 }
 
 function SegmentView({ segment }: { segment: PaneFooterSegment }) {
+  const { nativePaneChrome } = useUiCapabilities();
   const interactive = !!segment.onPress && !segment.disabled;
+  const label = segment.label ?? segment.parts.map((part) => part.text).join(" ");
   useRemoteUiNode(interactive ? {
     role: "pane-footer-segment",
-    label: segment.parts.map((part) => part.text).join(" "),
+    label,
     disabled: segment.disabled,
     actions: {
       press: () => segment.onPress?.(),
     },
-    metadata: { id: segment.id },
+    metadata: { id: segment.id, title: segment.title, shortcut: segment.shortcut },
   } : null);
   const attributes = segment.parts.some((part) => part.bold) || interactive ? TextAttributes.BOLD : 0;
   const triggerMouseDownRef = useRef(false);
@@ -75,10 +77,48 @@ function SegmentView({ segment }: { segment: PaneFooterSegment }) {
     else stopMouseEvent(event);
   };
 
+  if (nativePaneChrome && segment.icon) {
+    return (
+      <button
+        type="button"
+        aria-label={label}
+        aria-keyshortcuts={segment.shortcut}
+        aria-haspopup={interactive ? "dialog" : undefined}
+        title={segment.title ?? label}
+        disabled={!interactive}
+        data-gloom-interactive={interactive ? "true" : undefined}
+        onMouseDown={(event) => event.stopPropagation()}
+        onMouseUp={(event) => event.stopPropagation()}
+        onClick={(event) => { event.stopPropagation(); segment.onPress?.(); }}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          event.stopPropagation();
+          if (interactive) segment.onPress?.();
+        }}
+        style={{
+          display: "inline-flex", alignItems: "center", justifyContent: "center",
+          minWidth: 20, padding: "0 3px", border: 0, borderRadius: 3,
+          color: segment.disabled ? colors.textMuted : footerToneColor(segment.parts[0] ?? { text: "" }),
+          backgroundColor: "transparent", cursor: interactive ? "pointer" : "default",
+        }}
+      >
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true">
+          <path d="M7.1 2.3a1 1 0 0 1 1.8 0l5.4 10a1 1 0 0 1-.9 1.5H2.6a1 1 0 0 1-.9-1.5l5.4-10Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+          <path d="M8 5.8v3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+          <circle cx="8" cy="11.4" r=".8" fill="currentColor" />
+        </svg>
+      </button>
+    );
+  }
+
   return (
     <Text
       fg={segment.disabled ? colors.textMuted : colors.textDim}
       attributes={attributes}
+      aria-label={segment.label}
+      title={segment.title}
+      cursor={interactive ? "pointer" : undefined}
       onMouseDown={interactive ? startSegmentPress : undefined}
       onMouseUp={interactive ? finishSegmentPress : undefined}
       {...(interactive ? { "data-gloom-interactive": "true" } : {})}
@@ -147,8 +187,9 @@ function FooterContent({
   const dividerColor = focused ? colors.borderFocused : colors.border;
   const backgroundColor = showBackground ? blendHex(colors.bg, dividerColor, focused ? 0.12 : 0.06) : undefined;
   const availableWidth = width && width > 0 ? Math.floor(width) : null;
+  const iconReserve = footer.info.filter((segment) => segment.icon).length * 3;
   const hintsWidth = hasHints
-    ? Math.min(availableWidth ?? totalHintsWidth(visibleHints), totalHintsWidth(visibleHints))
+    ? Math.min(availableWidth === null ? totalHintsWidth(visibleHints) : Math.max(0, availableWidth - iconReserve), totalHintsWidth(visibleHints))
     : 0;
   const infoWidth = availableWidth !== null && hasInfo
     ? Math.max(0, availableWidth - hintsWidth)
