@@ -173,6 +173,7 @@ export function reduceLayoutAction(state: AppState, action: AppAction): AppState
         name: availableLayoutName(action.name, currentConfig.layouts),
         layout: cloneLayout(action.layout),
         paneState: clonePaneStateMap(action.paneState),
+        ...(action.origin ? { origin: action.origin } : {}),
       };
       const layouts = [...currentConfig.layouts, installed];
       return withFocusedPane({
@@ -214,6 +215,65 @@ export function reduceLayoutAction(state: AppState, action: AppAction): AppState
         paneState: nextLayout.paneState ? clonePaneStateMap(nextLayout.paneState) : {},
         focusedPaneId: nextLayout.focusedPaneId ?? null,
         activePanel: nextLayout.activePanel ?? state.activePanel,
+      });
+    }
+
+    case "SET_LAYOUT_ORIGIN": {
+      if (action.index < 0 || action.index >= state.config.layouts.length) return state;
+      const currentConfig = syncConfigActiveLayoutState(
+        state.config,
+        state.paneState,
+        state.focusedPaneId,
+        state.activePanel,
+      );
+      return {
+        ...state,
+        config: {
+          ...currentConfig,
+          layouts: currentConfig.layouts.map((savedLayout, index) => {
+            if (index !== action.index) return savedLayout;
+            const { origin: _origin, ...rest } = savedLayout;
+            return action.origin ? { ...rest, origin: action.origin } : rest;
+          }),
+        },
+      };
+    }
+
+    case "REPLACE_LAYOUT_CONTENT": {
+      if (action.index < 0 || action.index >= state.config.layouts.length) return state;
+      const currentConfig = syncConfigActiveLayoutState(
+        state.config,
+        state.paneState,
+        state.focusedPaneId,
+        state.activePanel,
+      );
+      const replaced: SavedLayout = {
+        ...currentConfig.layouts[action.index]!,
+        ...(action.name ? { name: action.name } : {}),
+        layout: cloneLayout(action.layout),
+        paneState: clonePaneStateMap(action.paneState),
+        focusedPaneId: null,
+        origin: action.origin,
+      };
+      const layouts = currentConfig.layouts.map((savedLayout, index) => (
+        index === action.index ? replaced : savedLayout
+      ));
+      // Pulled content replaces what the tab shows, so its undo history is
+      // no longer about this content.
+      const nextState = {
+        ...state,
+        layoutHistory: setHistoryForIndex(state.layoutHistory, action.index, { past: [], future: [] }),
+      };
+      if (action.index !== currentConfig.activeLayoutIndex) {
+        return { ...nextState, config: { ...currentConfig, layouts } };
+      }
+      return withFocusedPane(nextState, {
+        ...currentConfig,
+        layout: cloneLayout(replaced.layout),
+        layouts,
+      }, {
+        paneState: clonePaneStateMap(replaced.paneState ?? {}),
+        focusedPaneId: null,
       });
     }
 

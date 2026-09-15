@@ -2,12 +2,16 @@ import {
   findPaneInstance,
   removePaneInstances,
   type LayoutConfig,
+  type LayoutOrigin,
   type PaneInstanceConfig,
 } from "../types/config";
 import { getDockedPaneIds } from "../plugins/pane-manager";
 import type { PaneDef } from "../types/plugin";
 import type { PaneRuntimeState } from "../core/state/app/types";
 import { fuzzyFilter } from "../utils/fuzzy-search";
+import type { TeamAccentColor, TeamSummary } from "../api-client";
+import type { CloudLayoutEntry } from "./cloud";
+import { linkedLayoutStatus, type LinkedLayoutStatus } from "./linked";
 import type { LayoutMarketplaceEntry } from "./payload";
 import { paneImagery, type PaneImagery } from "./pane-imagery";
 
@@ -30,15 +34,20 @@ export interface GalleryPaneSummary {
 export interface GalleryEntry {
   id: string;
   marketplaceId: string | null;
-  kind: "owned" | "community";
+  kind: "owned" | "community" | "team";
   name: string;
   layout: LayoutConfig;
   paneState: Record<string, PaneRuntimeState>;
-  /** Index into config.layouts; community entries have none. */
+  /** Index into config.layouts; community entries have none, team entries have one when linked locally. */
   index: number | null;
   active: boolean;
   author: string | null;
   publishedAt: string | null;
+  /** Team entries and linked owned entries. */
+  team?: { id: string; name: string; shortName: string; accentColor: TeamAccentColor };
+  revision?: number;
+  /** Owned entries linked to a team layout. */
+  linked?: LinkedLayoutStatus | null;
 }
 
 /**
@@ -133,26 +142,69 @@ export function buildOwnedEntries(
     name: string;
     layout: LayoutConfig;
     paneState?: Record<string, PaneRuntimeState>;
+    origin?: LayoutOrigin;
   }[],
   activeIndex: number,
+  options: {
+    panes?: ReadonlyMap<string, PaneDef>;
+    teams?: readonly TeamSummary[];
+    remoteRevisions?: ReadonlyMap<string, number>;
+  } = {},
 ): GalleryEntry[] {
-  return layouts.map((saved, index) => ({
-    id: `owned:${index}`,
-    marketplaceId: null,
-    kind: "owned" as const,
-    name: saved.name,
-    layout: removePaneInstances(
-      saved.layout,
-      saved.layout.instances
-        .filter((instance) => instance.paneId === "layout-marketplace")
-        .map((instance) => instance.instanceId),
-    ),
-    paneState: saved.paneState ?? {},
-    index,
-    active: index === activeIndex,
-    author: null,
-    publishedAt: null,
-  }));
+  return layouts.map((saved, index) => {
+    const team = saved.origin ? options.teams?.find((entry) => entry.id === saved.origin?.teamId) : undefined;
+    const linked = saved.origin && options.panes
+      ? linkedLayoutStatus(saved, options.panes, options.remoteRevisions?.get(saved.origin.layoutId))
+      : null;
+    return {
+      id: `owned:${index}`,
+      marketplaceId: saved.origin?.layoutId ?? null,
+      kind: "owned" as const,
+      name: saved.name,
+      layout: removePaneInstances(
+        saved.layout,
+        saved.layout.instances
+          .filter((instance) => instance.paneId === "layout-marketplace")
+          .map((instance) => instance.instanceId),
+      ),
+      paneState: saved.paneState ?? {},
+      index,
+      active: index === activeIndex,
+      author: null,
+      publishedAt: null,
+      ...(team ? { team: { id: team.id, name: team.name, shortName: team.shortName, accentColor: team.accentColor } } : {}),
+      ...(saved.origin ? { revision: saved.origin.revision } : {}),
+      linked,
+    };
+  });
+}
+
+/** Team layouts from the server; a local tab linked to one carries its index. */
+export function buildTeamEntries(
+  items: readonly CloudLayoutEntry[],
+  teams: readonly TeamSummary[],
+  layouts: readonly { origin?: LayoutOrigin }[],
+): GalleryEntry[] {
+  const teamById = new Map(teams.map((team) => [team.id, team]));
+  return items.flatMap((item) => {
+    const team = teamById.get(item.owner.id);
+    if (item.owner.kind !== "team" || !team) return [];
+    const index = layouts.findIndex((saved) => saved.origin?.layoutId === item.id);
+    return [{
+      id: `team:${item.id}`,
+      marketplaceId: item.id,
+      kind: "team" as const,
+      name: item.name,
+      layout: item.layout,
+      paneState: item.paneState,
+      index: index >= 0 ? index : null,
+      active: false,
+      author: marketplaceAuthorLabel(item.author),
+      publishedAt: item.publishedAt,
+      team: { id: team.id, name: team.name, shortName: team.shortName, accentColor: team.accentColor },
+      revision: item.revision,
+    }];
+  });
 }
 
 export function buildCommunityEntries(items: readonly LayoutMarketplaceEntry[]): GalleryEntry[] {

@@ -213,6 +213,62 @@ describe("appReducer command bar state", () => {
     expect(installed.config.layout.dockRoot).toMatchObject({ kind: "split", ratio: 0.72 });
   });
 
+  test("links, replaces, and unlinks a tab that follows a team layout", () => {
+    const config = createDefaultConfig("/tmp/gloomberb-linked-layout-test");
+    const origin = {
+      kind: "team" as const,
+      teamId: "org-1",
+      layoutId: "a".repeat(32),
+      revision: 1,
+      contentHash: "1-deadbeef",
+      syncedAt: "2026-09-14T12:00:00.000Z",
+    };
+    let state = appReducer(createInitialState(config), {
+      type: "INSTALL_LAYOUT_COPY",
+      name: "Morning",
+      layout: cloneLayout(config.layout),
+      paneState: {},
+      origin,
+    });
+    const index = state.config.layouts.length - 1;
+    expect(state.config.layouts[index]?.origin).toEqual(origin);
+    expect(state.config.activeLayoutIndex).toBe(index);
+
+    // A pulled revision replaces content and bumps the origin, even for the active tab.
+    const pulled = cloneLayout(config.layout);
+    if (!pulled.dockRoot || pulled.dockRoot.kind !== "split") throw new Error("expected split dock root");
+    pulled.dockRoot.ratio = 0.31;
+    state = appReducer(state, {
+      type: "REPLACE_LAYOUT_CONTENT",
+      index,
+      layout: pulled,
+      paneState: { "ticker-detail:main": { activeTabId: "news" } },
+      origin: { ...origin, revision: 2, contentHash: "1-cafebabe" },
+      name: "Morning v2",
+    });
+    expect(state.config.layouts[index]).toMatchObject({ name: "Morning v2", origin: { revision: 2 } });
+    expect(state.config.layout.dockRoot).toMatchObject({ ratio: 0.31 });
+    expect(state.paneState["ticker-detail:main"]).toEqual({ activeTabId: "news" });
+    expect(state.layoutHistory[index]).toEqual({ past: [], future: [] });
+
+    // Replacing an inactive tab leaves the live layout alone.
+    state = appReducer(state, { type: "SWITCH_LAYOUT", index: 0 });
+    state = appReducer(state, {
+      type: "REPLACE_LAYOUT_CONTENT",
+      index,
+      layout: cloneLayout(config.layout),
+      paneState: {},
+      origin: { ...origin, revision: 3, contentHash: "x" },
+    });
+    expect(state.config.layouts[index]?.origin?.revision).toBe(3);
+    expect(state.config.activeLayoutIndex).toBe(0);
+
+    state = appReducer(state, { type: "SET_LAYOUT_ORIGIN", index, origin: null });
+    expect(state.config.layouts[index]?.origin).toBeUndefined();
+    expect(state.config.layouts[index]?.name).toBe("Morning v2");
+    expect(appReducer(state, { type: "SET_LAYOUT_ORIGIN", index: 99, origin })).toBe(state);
+  });
+
   test("restores an explicit focus target after a layout removes the focused pane", () => {
     const config = createDefaultConfig("/tmp/gloomberb-test-focus-restore");
     const nextLayout = removePane(config.layout, "ticker-detail:main");

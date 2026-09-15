@@ -464,11 +464,14 @@ function publishableLayout(
     const instanceId = ids.get(instance.instanceId)!;
     const def = panes.get(instance.paneId);
     const privacy = def?.portableShare?.private;
-    const params = def ? sanitizeRecord(instance.params, privacy?.params) : undefined;
-    const settings = def ? sanitizeRecord(instance.settings, privacy?.settings) : undefined;
-    const state = def ? sanitizeRecord(paneState[instance.instanceId], privacy?.state) : undefined;
+    // A pane from a plugin this terminal lacks arrived already scrubbed by
+    // whoever published it; keep its config through the generic filter so
+    // publishing from here never drops a teammate's pane.
+    const params = sanitizeRecord(instance.params, privacy?.params);
+    const settings = sanitizeRecord(instance.settings, privacy?.settings);
+    const state = sanitizeRecord(paneState[instance.instanceId], privacy?.state);
     if (state) projectedState[instanceId] = state as PaneRuntimeState;
-    const title = def && !privacy?.title ? instance.title?.trim() : undefined;
+    const title = !privacy?.title ? instance.title?.trim() : undefined;
     return {
       instanceId,
       paneId: instance.paneId,

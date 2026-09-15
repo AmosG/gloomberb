@@ -12,6 +12,7 @@ import {
 import { bindAppActivity, useAppActive } from "./state/app/activity";
 import { Header } from "./components/layout/header";
 import { StatusBar } from "./components/layout/status-bar";
+import { useLinkedLayoutSync } from "./layout-marketplace/linked-sync";
 import { Shell } from "./components/layout/shell";
 import { DetachedPaneShell } from "./components/layout/detached-pane-shell";
 import { TransientLayoutProvider } from "./components/layout/transient-layout";
@@ -115,6 +116,7 @@ function AppInner({
   const dispatch = useAppDispatch();
   const stateRef = useAppStateRef();
   const getRemoteState = useCallback(() => stateRef.current, [stateRef]);
+  useLinkedLayoutSync(pluginRegistry);
   const config = useAppSelector((state) => state.config);
   const tickers = useAppSelector((state) => state.tickers);
   const paneState = useAppSelector((state) => state.paneState);

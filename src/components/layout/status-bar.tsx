@@ -8,7 +8,7 @@ import {
   useUiCapabilities,
 } from "../../ui";
 import { useDialog, type PromptContext } from "../../ui/dialog";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import { blendHex, hoverBg } from "../../theme/colors";
 import { t, tf } from "../../i18n";
 import { useThemeColors } from "../../theme/theme-context";
@@ -34,6 +34,7 @@ import { VERSION } from "../../version";
 import { ConfirmDialog } from "../ui/confirm-dialog";
 import { Tabs } from "../ui/tabs";
 import { useTransientLayout } from "./transient-layout";
+import { linkedLayoutMarker, linkedLayoutStatus, linkedLayoutUpdates } from "../../layout-marketplace/linked";
 
 type StatusBarEvent = { stopPropagation?: () => void; preventDefault?: () => void };
 type HoveredControl = string | null;
@@ -98,11 +99,21 @@ export function StatusBar({ onOpenChangelog }: { onOpenChangelog?: (version: str
   const showTidyWindows = useMemo(() => shouldShowTidyWindows(layout), [layout])
     && !transientLayout?.active
     && !!registry;
-  const savedLayoutTabs = layouts.map((layout, index) => ({
-    label: `^${index + 1} ${truncate(layout.name, 14)}`,
-    value: String(index),
-    reorderable: true,
-  }));
+  const remoteRevisions = useSyncExternalStore(
+    (onChange) => linkedLayoutUpdates.subscribe(onChange),
+    () => linkedLayoutUpdates.snapshot(),
+  );
+  const savedLayoutTabs = layouts.map((layout, index) => {
+    // Linked tabs show `*` when edited locally and `↓` when the team is ahead.
+    const marker = layout.origin && registry
+      ? linkedLayoutMarker(linkedLayoutStatus(layout, registry.panes, remoteRevisions.get(layout.origin.layoutId)))
+      : "";
+    return {
+      label: `^${index + 1} ${truncate(layout.name, 14)}${marker}`,
+      value: String(index),
+      reorderable: true,
+    };
+  });
   const layoutTabs = transientLayout
     ? [
       ...savedLayoutTabs,

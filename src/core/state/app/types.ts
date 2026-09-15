@@ -1,5 +1,5 @@
 import type { BrokerAccount } from "../../../types/trading";
-import type { AppConfig, LayoutConfig, OnboardingProgress } from "../../../types/config";
+import type { AppConfig, LayoutConfig, LayoutOrigin, OnboardingProgress } from "../../../types/config";
 import type { DesktopSharedStateSnapshot } from "../../../types/desktop-window";
 import type { Quote, TickerFinancials } from "../../../types/financials";
 import type { TickerRecord } from "../../../types/ticker";
@@ -115,6 +115,19 @@ export type AppAction =
       name: string;
       layout: LayoutConfig;
       paneState: Record<string, PaneRuntimeState>;
+      /** Set when the tab is linked to a team layout. */
+      origin?: LayoutOrigin;
+    }
+  /** Links, relinks, or unlinks a saved tab. Null drops the link and keeps the content. */
+  | { type: "SET_LAYOUT_ORIGIN"; index: number; origin: LayoutOrigin | null }
+  /** Replaces a saved tab's content with a pulled revision. */
+  | {
+      type: "REPLACE_LAYOUT_CONTENT";
+      index: number;
+      layout: LayoutConfig;
+      paneState: Record<string, PaneRuntimeState>;
+      origin: LayoutOrigin;
+      name?: string;
     }
   | { type: "DELETE_LAYOUT"; index: number }
   | { type: "RENAME_LAYOUT"; index: number; name: string }

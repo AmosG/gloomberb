@@ -84,7 +84,7 @@ function EntryRow({
   const panes = summarizeLayoutPanes(entry.layout, controller.panes);
   const missing = panes.filter((pane) => pane.missing).length;
   const select = () => controller.select(entry.id);
-  const activate = () => (entry.kind === "community" ? controller.install(entry) : controller.activate(entry));
+  const activate = () => (entry.kind === "owned" ? controller.activate(entry) : controller.install(entry));
 
   return (
     <PaneSidebarRow
@@ -197,9 +197,20 @@ function PreviewEmpty({ controller }: { controller: LayoutGalleryController }) {
 function PreviewPane({ controller, entry }: { controller: LayoutGalleryController; entry: GalleryEntry }) {
   const colors = useThemeColors();
   const community = entry.kind === "community";
+  const teamEntry = entry.kind === "team";
+  const linked = entry.kind === "owned" ? entry.linked ?? null : null;
   const metadata = [
+    entry.team ? `${entry.team.shortName}· ${entry.team.name}` : null,
+    entry.revision ? `r${entry.revision}` : null,
     entry.author,
     entry.publishedAt ? formatPublishedAt(entry.publishedAt) : null,
+    linked
+      ? linked.updateAvailable
+        ? tf("team has r{revision}", { revision: String(linked.updateAvailable) })
+        : linked.dirty
+          ? t("edited since the last publish")
+          : t("in sync with the team")
+      : null,
     describeArrangement(entry.layout),
   ].filter(Boolean).join(" · ");
 
@@ -254,9 +265,9 @@ function PreviewPane({ controller, entry }: { controller: LayoutGalleryControlle
         style={{ borderTop: `1px solid ${colors.border}` }}
       >
         <Button
-          label={community ? "Add Layout" : "Use Layout"}
+          label={community ? "Add Layout" : teamEntry ? (entry.index !== null ? "Open Tab" : "Open as Linked Tab") : "Use Layout"}
           variant="primary"
-          onPress={() => (community ? controller.install(entry) : controller.activate(entry))}
+          onPress={() => (entry.kind === "owned" ? controller.activate(entry) : controller.install(entry))}
         />
         {community && (
           <>
@@ -277,12 +288,41 @@ function PreviewPane({ controller, entry }: { controller: LayoutGalleryControlle
               disabled={!controller.canDelete}
               onPress={() => controller.deleteLayout(entry)}
             />
+            {controller.teams.length > 0 && (
+              <>
+                <Box width={1} />
+                <Button
+                  label={linked ? "Publish to Team" : "Publish to Team…"}
+                  variant="secondary"
+                  disabled={controller.publishing}
+                  onPress={() => controller.publishToTeam(entry)}
+                />
+              </>
+            )}
+            {linked && (
+              <>
+                <Box width={1} />
+                <Button
+                  label={linked.updateAvailable ? `Pull r${linked.updateAvailable}` : "Pull"}
+                  variant="secondary"
+                  disabled={controller.publishing || !linked.updateAvailable}
+                  onPress={() => controller.pullTeamUpdates(entry)}
+                />
+                <Box width={1} />
+                <Button label="Unlink" variant="secondary" onPress={() => controller.unlink(entry)} />
+              </>
+            )}
           </>
         )}
         <Box flexGrow={1} minWidth={0} />
         {community && (
           <Text fg={colors.textMuted} style={{ ...ELLIPSIS, minWidth: 0 }}>
             {t("Adds an editable copy")}
+          </Text>
+        )}
+        {teamEntry && entry.index === null && (
+          <Text fg={colors.textMuted} style={{ ...ELLIPSIS, minWidth: 0 }}>
+            {t("Opens a tab that follows the team layout")}
           </Text>
         )}
       </Box>
@@ -348,6 +388,28 @@ export function LayoutGalleryDesktop({
                   controller={controller}
                   selected={entry.id === selected?.id}
                 />
+              ))}
+
+              {controller.teamSections.map(({ team, entries }) => (
+                <Box key={team.id} flexDirection="column">
+                  <SidebarSection title={`${team.shortName}· ${team.name}`} count={entries.length} />
+                  {entries.length === 0 ? (
+                    <SidebarNote>
+                      {controller.teamLayouts.state.status === "loading"
+                        ? t("Loading team layouts…")
+                        : controller.teamLayouts.state.status === "error"
+                          ? controller.teamLayouts.state.error
+                          : t("No team layouts yet.")}
+                    </SidebarNote>
+                  ) : entries.map((entry) => (
+                    <EntryRow
+                      key={entry.id}
+                      entry={entry}
+                      controller={controller}
+                      selected={entry.id === selected?.id}
+                    />
+                  ))}
+                </Box>
               ))}
 
               <SidebarSection title="Discover" count={controller.community.length} />
