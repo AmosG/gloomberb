@@ -7,6 +7,11 @@ export interface PaneFooterRegistration {
 export interface PaneFooterSegment {
   id: string;
   parts: PaneFooterPart[];
+  /** Desktop affordance; parts retain the terminal representation. */
+  icon?: "warning";
+  label?: string;
+  title?: string;
+  shortcut?: string;
   onPress?: () => void;
   disabled?: boolean;
 }
@@ -92,6 +97,10 @@ export function samePaneFooterRegistration(
       const other = rightInfo[index];
       return !!other
         && segment.id === other.id
+        && segment.icon === other.icon
+        && segment.label === other.label
+        && segment.title === other.title
+        && segment.shortcut === other.shortcut
         && !!segment.onPress === !!other.onPress
         && segment.disabled === other.disabled
         && sameFooterParts(segment.parts, other.parts);

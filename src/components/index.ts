@@ -57,6 +57,7 @@ export { PaneFooterScope, usePaneFooter } from "./layout/pane/footer";
 // The common footer shapes on top of `usePaneFooter`: a status segment that
 // changes with loading/error state, and one that also carries a link.
 export { usePaneStatusFooter, usePaneStatusLinkFooter } from "../plugins/builtin/shared/pane-footer";
+export { usePaneNoticeFooter, type UsePaneNoticeFooterOptions } from "./use-pane-notice-footer";
 export { loadingErrorFooterInfo } from "../plugins/builtin/shared/table-pane";
 export type { PaneFooterPressEvent, PaneFooterSegment, PaneHint } from "./layout/pane/footer";
 export {
