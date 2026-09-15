@@ -211,9 +211,31 @@ Headless chart text includes a Unit column when a series supplies one; values ke
 | `gloomberb shot [...]` | Capture a pane-backed screenshot |
 | `gloomberb predictions [...]` | Launch Prediction Markets ([Prediction Markets plugin](https://github.com/gloom-sh/gloom-prediction-markets)) |
 | `gloomberb plugins` | List installed plugins |
-| `gloomberb install <user/repo>` | Install a plugin from GitHub |
+| `gloomberb install <user/repo>` | Install a plugin from GitHub, at the commit the registry reviewed when it is listed |
 | `gloomberb remove <name>` | Remove an installed plugin |
-| `gloomberb update [name]` | Update plugins |
+| `gloomberb update [name]` | Update plugins to the next reviewed commit |
+| `gloomberb plugin enable\|disable <id>` | Turn a plugin on or off without removing it |
+| `gloomberb plugin link <path>` | Load a plugin from a local checkout while developing it |
+| `gloomberb plugin doctor [name]` | Check that a plugin loads, declares its hosts, and compiles for the desktop |
+
+## Plugins pane
+
+Open it with `PL` in the command bar. It lists what you have installed, what the registry offers, and, behind `b`, the built-in modules that can be switched off. Every row has a version and a status: `enabled`, `disabled`, `update` when the registry has something newer, `needs setup` when the plugin is missing a required setting, `errors (n)` when it has logged failures this session, and `failed` when it did not load at all, with the reason in the detail view.
+
+| Key | Action |
+|-----|--------|
+| `i` | Install the selected plugin, after a confirmation that names its source and declared hosts |
+| `u` | Update it, or reload one that failed to load |
+| `x` | Remove it |
+| `e` | Enable or disable it |
+| `s` | Open its setup form |
+| `p` | Open a pane it provides |
+| `l` | Open the debug log filtered to it |
+| `c` | Cycle the category filter |
+| `b` | Show or hide built-in modules |
+| `/` | Search |
+
+A plugin installed or updated from the pane is loaded into the running session: its panes and commands are available immediately. If your app starts with a plugin that failed to load, a notification says so and opens this pane.
 
 ## Broker position sync
 

@@ -38,8 +38,8 @@ import { createDesktopWindowBridge } from "./desktop/window/bridge";
 import { prepareDetachedSnapshot } from "./desktop/window/snapshot";
 import { createElectrobunAppServices } from "./app-services";
 import { getRendererPlugins } from "../../../plugins/catalog-ui";
-import { loadDesktopExternalPlugins } from "./external-plugins";
-import { setPluginInstaller } from "../../../plugins/builtin/plugin-marketplace/store";
+import { loadDesktopExternalPlugin, loadDesktopExternalPlugins } from "./external-plugins";
+import { setPluginManager } from "../../../plugins/builtin/plugin-marketplace/store";
 
 // Declared here rather than sniffed: the desktop view and the hosted browser
 // app are both browser contexts but differ in what plugins may do.
@@ -131,7 +131,17 @@ async function boot() {
     },
   );
 
-  setPluginInstaller((ref) => backendRequest("plugins.install", { ref }));
+  // The view cannot run git or bun; every operation is the Bun process doing
+  // it, and `load` is that process compiling the result for this renderer.
+  setPluginManager({
+    install: (repo, pin) => backendRequest("plugins.install", { ref: repo, ...(pin ? { pin } : {}) }),
+    update: (directory, pin) => backendRequest("plugins.update", { directory, ...(pin ? { pin } : {}) }),
+    remove: (directory) => backendRequest("plugins.remove", { directory }),
+    load: async (directory) => {
+      const bundle = await backendRequest("plugins.bundle", { directory });
+      return bundle ? loadDesktopExternalPlugin(bundle) : null;
+    },
+  });
 
   const remoteControlAdapter = init.windowKind === "main"
     ? { registerHandler: setElectrobunRemoteRequestHandler }

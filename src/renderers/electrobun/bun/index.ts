@@ -36,7 +36,13 @@ import {
 } from "./window/frame";
 import { MAIN_WINDOW_RPC_KEY } from "./window/focus";
 import { handleHttpFetch } from "./desktop/http-fetch";
-import { collectExternalPluginBundles, installExternalPlugin } from "./external-plugins";
+import {
+  bundleExternalPluginDirectory,
+  collectExternalPluginBundles,
+  installExternalPlugin,
+  removeExternalPlugin,
+  updateExternalPlugin,
+} from "./external-plugins";
 import { handleDesktopPluginStateRequest } from "./desktop/plugin-state";
 import { scheduleDesktopRelaunch } from "./desktop/relaunch";
 import {
@@ -484,7 +490,13 @@ async function handleBackendRequest(
     case "plugins.listExternal":
       return collectExternalPluginBundles();
     case "plugins.install":
-      return installExternalPlugin(request.payload.ref);
+      return installExternalPlugin(request.payload.ref, request.payload.pin);
+    case "plugins.update":
+      return updateExternalPlugin(request.payload.directory, request.payload.pin);
+    case "plugins.remove":
+      return removeExternalPlugin(request.payload.directory);
+    case "plugins.bundle":
+      return bundleExternalPluginDirectory(request.payload.directory);
     case "host.restart":
     case "host.exit":
     case "host.windowControl":

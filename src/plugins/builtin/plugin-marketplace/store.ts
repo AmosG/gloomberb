@@ -1,3 +1,4 @@
+import type { LoadedExternalPlugin } from "../../loader";
 import type { InstalledPlugin } from "./model";
 
 /**
@@ -13,6 +14,25 @@ import type { InstalledPlugin } from "./model";
 export interface MarketplaceHost {
   listInstalled(): InstalledPlugin[];
   setPluginEnabled(pluginId: string, enabled: boolean): void;
+  /**
+   * Registers a plugin that was loaded after startup, so its panes and
+   * commands exist in this session. Replaces a previous registration of the
+   * same id (an update). Rejects with the setup error when the plugin cannot
+   * be registered, in which case the entry is kept with that error attached.
+   */
+  activate(entry: LoadedExternalPlugin): Promise<void>;
+  /** Hides the plugin's panes and unregisters it, ahead of removing its files. */
+  deactivate(pluginId: string): Promise<void>;
+  /** What a registered plugin actually added, for "open what it added" and the detail view. */
+  contributions(pluginId: string): PluginContributions;
+}
+
+export interface PluginContributions {
+  panes: Array<{ id: string; name: string }>;
+  templates: Array<{ id: string; label: string; prefix?: string }>;
+  commands: Array<{ id: string; label: string }>;
+  capabilities: number;
+  broker: boolean;
 }
 
 let host: MarketplaceHost | null = null;
@@ -25,6 +45,15 @@ export function getMarketplaceHost(): MarketplaceHost | null {
   return host;
 }
 
+export interface PluginPin {
+  ref?: string;
+  commit?: string;
+}
+
+export type PluginOperationResult =
+  | { ok: true; directory: string }
+  | { ok: false; error: string };
+
 /**
  * Installing a plugin means running git and bun, which only the Bun-hosted
  * renderers can do — and the desktop view has to ask its Bun process over RPC.
@@ -33,14 +62,23 @@ export function getMarketplaceHost(): MarketplaceHost | null {
  * startup. A renderer that leaves it unset (the browser) gets the install
  * command shown instead of a button.
  */
-export type PluginInstaller = (ref: string) => Promise<{ ok: boolean; error?: string }>;
-
-let installer: PluginInstaller | null = null;
-
-export function setPluginInstaller(next: PluginInstaller | null): void {
-  installer = next;
+export interface PluginManager {
+  install(repo: string, pin?: PluginPin): Promise<PluginOperationResult>;
+  update(directory: string, pin?: PluginPin): Promise<PluginOperationResult>;
+  remove(directory: string): Promise<PluginOperationResult>;
+  /**
+   * Loads the plugin in `directory` into this renderer, fresh, so it can be
+   * activated without a restart. Null when the directory has no plugin entry.
+   */
+  load(directory: string): Promise<LoadedExternalPlugin | null>;
 }
 
-export function getPluginInstaller(): PluginInstaller | null {
-  return installer;
+let manager: PluginManager | null = null;
+
+export function setPluginManager(next: PluginManager | null): void {
+  manager = next;
+}
+
+export function getPluginManager(): PluginManager | null {
+  return manager;
 }

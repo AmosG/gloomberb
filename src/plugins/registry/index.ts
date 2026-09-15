@@ -62,6 +62,7 @@ import {
   type ResolvedRegistryPaneSettings,
 } from "./pane-settings";
 import { RegistryResumeStateListeners, createPluginPaneSettingsState, createPluginResumeState } from "./plugin-state";
+import { createPluginSetupCommand, isPluginConfigured } from "./setup-command";
 import {
   bindSharedRegistry,
   releaseSharedRegistry,
@@ -400,6 +401,13 @@ export class PluginRegistry implements PluginRuntimeAccess {
     return Object.keys(this.getConfigFn().pluginConfig[pluginId] ?? {}).sort();
   }
 
+  /** False while a plugin with a `configSchema` is missing a required value. */
+  isPluginConfigured(pluginId: string): boolean {
+    const plugin = this.plugins.get(pluginId);
+    if (!plugin) return true;
+    return isPluginConfigured(plugin, this.getConfigFn().pluginConfig[pluginId] ?? {});
+  }
+
   private resolvePaneTarget(paneId: string): string | undefined {
     return resolvePaneInstance(this.getLayoutFn(), paneId)?.instanceId;
   }
@@ -445,6 +453,10 @@ export class PluginRegistry implements PluginRuntimeAccess {
 
   getPaneTemplatePluginId(templateId: string): string | undefined {
     return this.contributions.paneTemplatesMap.owners.get(templateId);
+  }
+
+  getBrokerPluginId(brokerType: string): string | undefined {
+    return this.contributions.brokersMap.owners.get(brokerType);
   }
 
   getShortcutPluginId(shortcutId: string): string | undefined {
@@ -583,6 +595,13 @@ export class PluginRegistry implements PluginRuntimeAccess {
       }
 
       this.slots.register(plugin, this);
+
+      const setupCommand = createPluginSetupCommand(plugin, {
+        getValues: () => this.getConfigFn().pluginConfig[plugin.id] ?? {},
+        setValues: (values) => this.setConfigStates(plugin.id, values),
+        notify: (body, type) => this.notifyFn({ body, type }),
+      });
+      if (setupCommand) this.contributions.registerCommand(plugin.id, setupCommand);
 
       if (plugin.setup) {
         await plugin.setup(this.createContext(plugin.id));

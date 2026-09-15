@@ -1,6 +1,6 @@
 import { readdir } from "fs/promises";
-import { join } from "path";
-import { existsSync } from "fs";
+import { basename, join } from "path";
+import { existsSync, lstatSync, readFileSync, statSync } from "fs";
 import { homedir } from "os";
 import type { GloomPlugin, PluginTarget } from "../types/plugin";
 import { debugLog } from "../utils/debug-log";
@@ -18,9 +18,17 @@ const PLUGIN_CACHE_DIR = join(process.env.HOME || homedir(), ".gloomberb", "plug
 export interface LoadedExternalPlugin {
   plugin: GloomPlugin;
   path: string;
+  /** Folder name under the plugins directory; what `update` and `remove` address. */
+  directory?: string;
+  /** The checked-out git commit, when the install is a git checkout. */
+  commit?: string;
+  /** A symlink to a local checkout (`gloomberb plugin link`) rather than a clone. */
+  linked?: boolean;
   error?: string;
   /** Set when the plugin loaded but does not support the running renderer. */
   unsupportedTarget?: PluginTarget;
+  /** Loaded after startup in a way this session could not fully apply. */
+  needsRestart?: boolean;
 }
 
 export function getPluginsDir(): string {
@@ -96,6 +104,90 @@ export function pluginSupportsTarget(plugin: GloomPlugin, target: PluginTarget):
   return !plugin.targets || plugin.targets.length === 0 || plugin.targets.includes(target);
 }
 
+/**
+ * The commit a plugin checkout is at, read from `.git` directly so startup does
+ * not spawn one git process per plugin. Returns null for anything that is not
+ * a git checkout (a hand-copied folder, or a dev symlink without history).
+ */
+export function readPluginCommit(pluginDir: string): string | null {
+  const gitDir = join(pluginDir, ".git");
+  try {
+    const head = readFileSync(join(gitDir, "HEAD"), "utf-8").trim();
+    if (/^[0-9a-f]{40}$/i.test(head)) return head;
+    const ref = head.startsWith("ref: ") ? head.slice(5).trim() : null;
+    if (!ref) return null;
+    const refPath = join(gitDir, ref);
+    if (existsSync(refPath)) return readFileSync(refPath, "utf-8").trim() || null;
+    const packed = join(gitDir, "packed-refs");
+    if (!existsSync(packed)) return null;
+    for (const line of readFileSync(packed, "utf-8").split("\n")) {
+      const [sha, name] = line.trim().split(/\s+/);
+      if (name === ref && sha && /^[0-9a-f]{40}$/i.test(sha)) return sha;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export interface LoadExternalPluginOptions {
+  /**
+   * Import the entry as a fresh module. Bun caches `import()` by URL, so a
+   * plugin that was already evaluated in this process would otherwise come
+   * back unchanged after `update`.
+   */
+  fresh?: boolean;
+}
+
+/** Loads one plugin directory. Never throws: a broken plugin comes back with `error` set. */
+export async function loadExternalPlugin(
+  pluginDir: string,
+  target: PluginTarget = "cli",
+  options: LoadExternalPluginOptions = {},
+): Promise<LoadedExternalPlugin | null> {
+  const directory = basename(pluginDir);
+  const entryFile = await resolvePluginEntry(pluginDir);
+  if (!entryFile) return null;
+
+  // Repairs `gloomberb`/`react` links for plugins copied in by hand or left
+  // behind by a `bun install` that pruned them.
+  linkHostPackages(pluginDir);
+
+  const commit = readPluginCommit(pluginDir);
+  const base = {
+    path: pluginDir,
+    directory,
+    ...(commit ? { commit } : {}),
+    ...(isSymlink(pluginDir) ? { linked: true } : {}),
+  };
+
+  try {
+    const specifier = options.fresh ? `${entryFile}?reload=${Date.now()}` : entryFile;
+    const mod = await import(specifier);
+    const plugin: GloomPlugin = mod.default ?? mod.plugin;
+    if (!plugin || !plugin.id || !plugin.name) {
+      return {
+        ...base,
+        plugin: { id: directory, name: directory, version: "0.0.0" } as GloomPlugin,
+        error: "Plugin did not export a valid GloomPlugin (missing id or name).",
+      };
+    }
+    if (!pluginSupportsTarget(plugin, target)) {
+      loaderLog.info(`Skipped ${plugin.id}: does not support "${target}"`);
+      return { ...base, plugin, unsupportedTarget: target };
+    }
+    loaderLog.info(`Loaded external plugin: ${plugin.id} v${plugin.version ?? "0.0.0"}`);
+    return { ...base, plugin };
+  } catch (err) {
+    loaderLog.error(`Failed to load plugin from ${pluginDir}: ${err}`);
+    return {
+      ...base,
+      plugin: { id: directory, name: directory, version: "0.0.0" } as GloomPlugin,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 export async function loadExternalPlugins(target: PluginTarget = "cli"): Promise<LoadedExternalPlugin[]> {
   if (!existsSync(PLUGINS_DIR)) return [];
 
@@ -103,37 +195,31 @@ export async function loadExternalPlugins(target: PluginTarget = "cli"): Promise
   const entries = await readdir(PLUGINS_DIR, { withFileTypes: true });
 
   for (const entry of entries) {
-    if (!entry.isDirectory() || !isPluginDirectory(entry.name)) continue;
+    if (!isPluginDirectory(entry.name)) continue;
     const pluginDir = join(PLUGINS_DIR, entry.name);
-
-    const entryFile = await resolvePluginEntry(pluginDir);
-    if (!entryFile) continue;
-
-    // Repairs `gloomberb`/`react` links for plugins copied in by hand or left
-    // behind by a `bun install` that pruned them.
-    linkHostPackages(pluginDir);
-
-    try {
-      const mod = await import(entryFile);
-      const plugin: GloomPlugin = mod.default ?? mod.plugin;
-      if (plugin && plugin.id && plugin.name) {
-        if (!pluginSupportsTarget(plugin, target)) {
-          loaderLog.info(`Skipped ${plugin.id}: does not support "${target}"`);
-          results.push({ plugin, path: pluginDir, unsupportedTarget: target });
-          continue;
-        }
-        loaderLog.info(`Loaded external plugin: ${plugin.id} v${plugin.version ?? "0.0.0"}`);
-        results.push({ plugin, path: pluginDir });
-      }
-    } catch (err) {
-      loaderLog.error(`Failed to load plugin from ${pluginDir}: ${err}`);
-      results.push({
-        plugin: { id: entry.name, name: entry.name, version: "0.0.0" } as GloomPlugin,
-        path: pluginDir,
-        error: String(err),
-      });
-    }
+    if (!isDirectoryOrLink(entry, pluginDir)) continue;
+    const loaded = await loadExternalPlugin(pluginDir, target);
+    if (loaded) results.push(loaded);
   }
 
   return results;
+}
+
+function isSymlink(path: string): boolean {
+  try {
+    return lstatSync(path).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+/** A linked plugin (`gloomberb plugin link`) is a symlink, which `readdir` does not report as a directory. */
+export function isDirectoryOrLink(entry: { isDirectory(): boolean; isSymbolicLink(): boolean }, path: string): boolean {
+  if (entry.isDirectory()) return true;
+  if (!entry.isSymbolicLink()) return false;
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
 }

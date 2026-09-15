@@ -12,7 +12,9 @@ type PluginMetadataKey =
   | "toggleable"
   | "order"
   | "targets"
-  | "homepage";
+  | "homepage"
+  | "configSchema"
+  | "isConfigured";
 type PluginMetadata = Pick<GloomPlugin, PluginMetadataKey>;
 
 export type PluginModule = Omit<GloomPlugin, PluginMetadataKey>;
