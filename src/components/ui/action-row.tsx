@@ -3,13 +3,16 @@ import { Box, Text, useUiHost } from "../../ui";
 import { useThemeColors } from "../../theme/theme-context";
 import { Button, type ButtonProps } from "./button";
 
-export type ActionRowProps = Pick<ButtonProps, "label" | "children" | "onPress" | "active" | "disabled" | "expanded" | "width" | "height">;
+export type ActionRowProps = Pick<ButtonProps, "label" | "children" | "onPress" | "active" | "disabled" | "expanded" | "width" | "height"> & {
+  /** Text color when the row is neither disabled nor active; team headers use their accent. */
+  fg?: string;
+};
 
 /** A summary row with one action. Put independent actions beside it, not inside it. */
-export function ActionRow({ label, children, expanded, active, disabled, ...props }: ActionRowProps) {
+export function ActionRow({ label, children, expanded, active, disabled, fg, ...props }: ActionRowProps) {
   const colors = useThemeColors();
   const desktop = useUiHost().kind === "desktop-web";
-  const foreground = disabled ? colors.textMuted : active ? colors.selectedText : colors.text;
+  const foreground = disabled ? colors.textMuted : active ? colors.selectedText : fg ?? colors.text;
   return (
     <Button {...props} label={label} active={active} disabled={disabled} expanded={expanded} variant="ghost" compact stopPropagation>
       <Box flexDirection="row" width="100%" alignItems="center" gap={1}>

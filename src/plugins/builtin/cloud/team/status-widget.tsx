@@ -4,13 +4,15 @@ import { colors } from "../../../../theme/colors";
 import { Box, Span, Text, TextAttributes } from "../../../../ui";
 import { usePluginAppActions } from "../../../runtime";
 import { chatController } from "../../chat/controller";
-import { countTeamUpdates, teamAccentHex, teamChannelId } from "./model";
+import { countTeamUpdates, teamAccentHex, teamIdFromChannelId } from "./model";
+import { openTeamPane } from "./pane-request";
 import { teamStore } from "./store";
 
 /**
  * One chip per team in the status bar, in the team's accent, with the unread
  * chat count and the number of pending cards (invites, layout updates). Hidden
- * teams under FOCUS keep their chip so the lens is visible, dimmed.
+ * teams under FOCUS keep their chip so the lens is visible, dimmed. A click
+ * opens the team pane on that team.
  */
 export function TeamStatusWidget() {
   const { createPaneFromTemplate } = usePluginAppActions();
@@ -39,7 +41,10 @@ export function TeamStatusWidget() {
     <Box flexDirection="row" paddingRight={1}>
       {snapshot.teams.map((team) => {
         const accent = teamAccentHex(team.accentColor);
-        const unread = unreadByChannel.get(teamChannelId(team.id)) ?? 0;
+        let unread = 0;
+        for (const [channelId, count] of unreadByChannel) {
+          if (teamIdFromChannelId(channelId) === team.id) unread += count;
+        }
         const cards = updates.get(team.id) ?? 0;
         const muted =
           snapshot.focus === "personal" ||
@@ -48,11 +53,11 @@ export function TeamStatusWidget() {
         return (
           <Button
             key={team.id}
-            label={`${team.name}: open team chat`}
-            variant="ghost"
+            label={`${team.name}: open team`}
+            variant="plain"
             compact
             stopPropagation
-            onPress={() => createPaneFromTemplate("new-chat-pane", { arg: teamChannelId(team.id) })}
+            onPress={() => openTeamPane(createPaneFromTemplate, { teamId: team.id })}
           >
             <Text fg={muted ? colors.textMuted : accent} attributes={count > 0 && !muted ? TextAttributes.BOLD : 0}>
               <Span fg={muted ? colors.textMuted : accent}>●</Span>

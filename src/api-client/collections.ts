@@ -6,8 +6,8 @@ export class CloudCollectionsApi {
   constructor(private readonly request: CloudApiRequest) {}
 
   async listTeamCollections(teamId: string): Promise<TeamCollection[]> {
-    const body = await this.request<{ items: TeamCollection[] }>(`/teams/${encodeURIComponent(teamId)}/collections`);
-    return body.items;
+    const body = await this.request<{ items?: TeamCollection[] }>(`/teams/${encodeURIComponent(teamId)}/collections`);
+    return Array.isArray(body?.items) ? body.items : [];
   }
 
   async getTeamCollection(teamId: string, collectionId: string): Promise<TeamCollection & { items: TeamCollectionItem[] }> {

@@ -35,6 +35,13 @@ export function buttonPalette(
   props: Pick<ButtonProps, "variant" | "active" | "disabled">,
   palette: ThemeColors = colors,
 ) {
+  if (props.variant === "plain") {
+    return {
+      fg: props.disabled ? palette.textMuted : props.active ? palette.textBright : palette.textDim,
+      bg: "transparent",
+      border: "transparent",
+    };
+  }
   if (props.disabled) {
     return {
       fg: palette.textMuted,

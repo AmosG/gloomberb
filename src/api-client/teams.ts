@@ -1,14 +1,17 @@
 import { normalizeTeamNotification } from "./normalizers";
 import type { CloudApiSocket } from "./socket";
 import type {
+  ChatChannel,
   TeamAccentColor,
-  TeamInvitation,
   TeamInviteLink,
   TeamInvitePreview,
   TeamMember,
   TeamNotification,
+  TeamReceivedInvitation,
   TeamRole,
+  TeamSentInvitation,
   TeamSummary,
+  TeamUpdatedEvent,
   TeamUsernameInvitation,
 } from "./types";
 
@@ -113,73 +116,53 @@ export class CloudTeamsApi {
     );
   }
 
-  async inviteTeamMemberByEmail(
-    teamId: string,
-    email: string,
-  ): Promise<TeamInvitation> {
-    return this.options.request<TeamInvitation>(
-      "/auth/organization/invite-member",
-      {
-        method: "POST",
-        body: JSON.stringify({
-          email,
-          role: "member",
-          organizationId: teamId,
-          resend: true,
-        }),
-      },
+  async listTeamInvitations(teamId: string): Promise<TeamSentInvitation[]> {
+    const body = await this.options.request<{ invitations: TeamSentInvitation[] }>(
+      `/teams/${encodeURIComponent(teamId)}/invitations`,
     );
+    return body.invitations;
   }
 
-  async listTeamInvitations(teamId: string): Promise<TeamInvitation[]> {
-    const invitations = await this.options.request<TeamInvitation[]>(
-      `/auth/organization/list-invitations?organizationId=${encodeURIComponent(teamId)}`,
+  async listMyTeamInvitations(): Promise<TeamReceivedInvitation[]> {
+    const body = await this.options.request<{ invitations: TeamReceivedInvitation[] }>(
+      "/teams/invitations",
     );
-    return invitations.filter((invitation) => invitation.status === "pending");
+    return body.invitations;
   }
 
-  async listMyTeamInvitations(): Promise<TeamInvitation[]> {
-    const invitations = await this.options.request<TeamInvitation[]>(
-      "/auth/organization/list-user-invitations",
+  async acceptTeamInvitation(invitationId: string): Promise<TeamSummary> {
+    return this.options.request<TeamSummary>(
+      `/teams/invitations/${encodeURIComponent(invitationId)}/accept`,
+      { method: "POST", body: JSON.stringify({}) },
     );
-    return invitations.filter((invitation) => invitation.status === "pending");
-  }
-
-  async acceptTeamInvitation(invitationId: string): Promise<void> {
-    await this.options.request<void>("/auth/organization/accept-invitation", {
-      method: "POST",
-      body: JSON.stringify({ invitationId }),
-    });
   }
 
   async rejectTeamInvitation(invitationId: string): Promise<void> {
-    await this.options.request<void>("/auth/organization/reject-invitation", {
-      method: "POST",
-      body: JSON.stringify({ invitationId }),
-    });
+    await this.options.request<void>(
+      `/teams/invitations/${encodeURIComponent(invitationId)}/reject`,
+      { method: "POST", body: JSON.stringify({}) },
+    );
   }
 
-  async cancelTeamInvitation(invitationId: string): Promise<void> {
-    await this.options.request<void>("/auth/organization/cancel-invitation", {
-      method: "POST",
-      body: JSON.stringify({ invitationId }),
-    });
+  async cancelTeamInvitation(teamId: string, invitationId: string): Promise<void> {
+    await this.options.request<void>(
+      `/teams/${encodeURIComponent(teamId)}/invitations/${encodeURIComponent(invitationId)}`,
+      { method: "DELETE" },
+    );
   }
 
   async updateTeam(
     teamId: string,
     data: {
       name?: string;
-      metadata?: {
-        accentColor?: TeamAccentColor;
-        shortName?: string;
-        allowMemberInvites?: boolean;
-      };
+      accentColor?: TeamAccentColor;
+      shortName?: string;
+      allowMemberInvites?: boolean;
     },
-  ): Promise<void> {
-    await this.options.request<void>("/auth/organization/update", {
-      method: "POST",
-      body: JSON.stringify({ organizationId: teamId, data }),
+  ): Promise<TeamSummary> {
+    return this.options.request<TeamSummary>(`/teams/${encodeURIComponent(teamId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
     });
   }
 
@@ -187,34 +170,64 @@ export class CloudTeamsApi {
     teamId: string,
     memberId: string,
     role: TeamRole,
-  ): Promise<void> {
-    await this.options.request<void>("/auth/organization/update-member-role", {
-      method: "POST",
-      body: JSON.stringify({ organizationId: teamId, memberId, role }),
-    });
+  ): Promise<TeamMember[]> {
+    const body = await this.options.request<{ members: TeamMember[] }>(
+      `/teams/${encodeURIComponent(teamId)}/members/${encodeURIComponent(memberId)}`,
+      { method: "PATCH", body: JSON.stringify({ role }) },
+    );
+    return body.members;
   }
 
-  async removeTeamMember(teamId: string, memberId: string): Promise<void> {
-    await this.options.request<void>("/auth/organization/remove-member", {
-      method: "POST",
-      body: JSON.stringify({
-        organizationId: teamId,
-        memberIdOrEmail: memberId,
-      }),
-    });
+  async removeTeamMember(teamId: string, memberId: string): Promise<TeamMember[]> {
+    const body = await this.options.request<{ members: TeamMember[] }>(
+      `/teams/${encodeURIComponent(teamId)}/members/${encodeURIComponent(memberId)}`,
+      { method: "DELETE" },
+    );
+    return body.members;
   }
 
   async leaveTeam(teamId: string): Promise<void> {
-    await this.options.request<void>("/auth/organization/leave", {
+    await this.options.request<void>(`/teams/${encodeURIComponent(teamId)}/leave`, {
       method: "POST",
-      body: JSON.stringify({ organizationId: teamId }),
+      body: JSON.stringify({}),
     });
   }
 
   async deleteTeam(teamId: string): Promise<void> {
-    await this.options.request<void>("/auth/organization/delete", {
-      method: "POST",
-      body: JSON.stringify({ organizationId: teamId }),
+    await this.options.request<void>(`/teams/${encodeURIComponent(teamId)}`, {
+      method: "DELETE",
+    });
+  }
+
+  async listTeamChannels(teamId: string): Promise<ChatChannel[]> {
+    const body = await this.options.request<{ channels: ChatChannel[] }>(
+      `/teams/${encodeURIComponent(teamId)}/channels`,
+    );
+    return body.channels;
+  }
+
+  async createTeamChannel(teamId: string, name: string): Promise<ChatChannel> {
+    return this.options.request<ChatChannel>(
+      `/teams/${encodeURIComponent(teamId)}/channels`,
+      { method: "POST", body: JSON.stringify({ name }) },
+    );
+  }
+
+  async deleteTeamChannel(teamId: string, channelId: string): Promise<void> {
+    await this.options.request<void>(
+      `/teams/${encodeURIComponent(teamId)}/channels/${encodeURIComponent(channelId)}`,
+      { method: "DELETE" },
+    );
+  }
+
+  /** `team.updated` frames: settings, members, channels, or the team is gone. */
+  subscribeTeamUpdates(listener: (event: TeamUpdatedEvent) => void): () => void {
+    return this.options.socket.subscribeCloudEvent("team.updated", (data) => {
+      const event = data as Partial<TeamUpdatedEvent> | null;
+      if (!event || typeof event.teamId !== "string") return;
+      const change = event.change;
+      if (change !== "settings" && change !== "members" && change !== "channels" && change !== "deleted") return;
+      listener({ teamId: event.teamId, change });
     });
   }
 

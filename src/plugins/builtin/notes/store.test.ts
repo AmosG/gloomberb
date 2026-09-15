@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { CloudNote, CloudNoteScope, CloudNoteSummary } from "../../../api-client";
 import { NoteConflictError } from "../../../api-client";
+import { ApiRequestError } from "../../../api-client/errors";
 import { MemoryPluginPersistence } from "../../../test-support/plugin-persistence";
 import { NotesFiles } from "./files";
 import { migrateLocalNotes } from "./migration";
@@ -175,6 +176,9 @@ describe("migrateLocalNotes", () => {
     await fs.mkdir(dir, { recursive: true });
     await files.save("AAPL", "local apple");
     await files.save("MSFT", "local microsoft");
+    // Empty placeholder files stay local; an option symbol with OCC padding goes up.
+    await files.save("NVDA", "");
+    await files.save("AMD   270917C00230000", "call spread notes");
     await files.saveQuickNotesIndex([{ id: "q1", title: "Ideas" }, { id: "q2", title: "Empty tab" }]);
     await files.save(files.quickNoteKey("q1"), "quick body");
 
@@ -194,15 +198,48 @@ describe("migrateLocalNotes", () => {
     const cloud = new CloudNotesStore({ kind: "user" }, persistence, server.client);
 
     const result = await migrateLocalNotes(files, cloud, persistence);
-    expect(result).toEqual({ uploaded: 3, skipped: 1 });
+    expect(result).toEqual({ uploaded: 4, skipped: 2, rejected: [] });
     const byKey = new Map([...server.notes.values()].map((note) => [`${note.kind}:${note.key}`, note]));
     expect(byKey.get("ticker:AAPL")?.content).toBe("local apple");
+    expect(byKey.get("ticker:AMD   270917C00230000")?.content).toBe("call spread notes");
+    expect(byKey.has("ticker:NVDA")).toBe(false);
     expect(byKey.get("ticker:MSFT")?.content).toBe("cloud microsoft, newer");
     expect(byKey.get("quick:q1")).toMatchObject({ title: "Ideas", content: "quick body" });
     expect(byKey.get("quick:q2")).toMatchObject({ title: "Empty tab", content: "" });
 
     expect(await migrateLocalNotes(files, cloud, persistence)).toBeNull();
     expect(await files.load("AAPL")).toBe("local apple");
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  test("a key the server refuses is logged once and does not block the stamp", async () => {
+    const dir = `/tmp/gloomberb-notes-migration-reject-${Date.now()}`;
+    const files = new NotesFiles(dir);
+    const fs = await import("fs/promises");
+    await fs.mkdir(dir, { recursive: true });
+    await files.save("GOOD", "fine");
+    await files.save("BAD", "refused");
+    const server = fakeServer([]);
+    const client = {
+      ...server.client,
+      putCloudNote: async (input: Parameters<typeof server.client.putCloudNote>[0]) => {
+        if (input.key === "BAD") throw new ApiRequestError("Invalid note key.", 400);
+        return server.client.putCloudNote(input);
+      },
+    };
+    const persistence = new MemoryPluginPersistence();
+    const cloud = new CloudNotesStore({ kind: "user" }, persistence, client);
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (message: unknown) => { warnings.push(String(message)); };
+    try {
+      expect(await migrateLocalNotes(files, cloud, persistence)).toEqual({ uploaded: 1, skipped: 0, rejected: ["BAD"] });
+    } finally {
+      console.warn = originalWarn;
+    }
+    expect(warnings[0]).toContain("BAD");
+    // Stamped: the next launch does not try again.
+    expect(await migrateLocalNotes(files, cloud, persistence)).toBeNull();
     await fs.rm(dir, { recursive: true, force: true });
   });
 });

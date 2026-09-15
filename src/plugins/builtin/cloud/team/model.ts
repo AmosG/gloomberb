@@ -1,9 +1,9 @@
 import type {
   TeamAccentColor,
-  TeamInvitation,
   TeamNotification,
   TeamRole,
   TeamSummary,
+  TeamUser,
 } from "../../../../api-client";
 import { blendHex, colors } from "../../../../theme/colors";
 
@@ -14,14 +14,69 @@ export function teamPrefix(team: Pick<TeamSummary, "shortName">): string {
   return `${team.shortName}·`;
 }
 
-export function teamChannelId(teamId: string): string {
-  return `${TEAM_CHANNEL_PREFIX}${teamId}`;
+export const TEAM_ACCENT_COLORS: readonly TeamAccentColor[] = [
+  "amber", "blue", "cyan", "green", "magenta", "orange", "red", "violet",
+];
+
+/** `team:<teamId>` is #general; other channels append their name. */
+export function teamChannelId(teamId: string, channelName?: string): string {
+  return channelName && channelName !== "general"
+    ? `${TEAM_CHANNEL_PREFIX}${teamId}:${channelName}`
+    : `${TEAM_CHANNEL_PREFIX}${teamId}`;
 }
 
 export function teamIdFromChannelId(channelId: string): string | null {
-  return channelId.startsWith(TEAM_CHANNEL_PREFIX)
-    ? channelId.slice(TEAM_CHANNEL_PREFIX.length) || null
-    : null;
+  if (!channelId.startsWith(TEAM_CHANNEL_PREFIX)) return null;
+  const rest = channelId.slice(TEAM_CHANNEL_PREFIX.length);
+  const teamId = rest.split(":")[0];
+  return teamId || null;
+}
+
+export function isTeamChannelId(channelId: string): boolean {
+  return channelId.startsWith(TEAM_CHANNEL_PREFIX);
+}
+
+/** What a person types for a channel name, as the server will keep it. */
+export function normalizeTeamChannelName(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/^#+/, "")
+    .replace(/[\s_]+/g, "-")
+    .replace(/[^a-z0-9-]/g, "")
+    .replace(/-{2,}/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 24);
+}
+
+/** Initials for multi-word names, otherwise the first three letters; mirrors the server. */
+export function deriveTeamShortName(name: string): string {
+  const words = name
+    .split(/[\s\-_/]+/)
+    .map((word) => word.replace(/[^A-Za-z0-9]/g, ""))
+    .filter(Boolean);
+  const candidate = words.length >= 2
+    ? words.slice(0, 4).map((word) => word[0] ?? "").join("")
+    : (words[0] ?? "").slice(0, 3);
+  return normalizeTeamShortName(candidate) || "TM";
+}
+
+export function normalizeTeamShortName(value: string): string {
+  return value.replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 4);
+}
+
+export function userHandle(user: TeamUser): string {
+  return user.username ? `@${user.username}` : user.displayName;
+}
+
+/** "in 6d", "in 3h", or "expired", for invites and links. */
+export function describeExpiry(iso: string, now = Date.now()): string {
+  const remaining = new Date(iso).getTime() - now;
+  if (!Number.isFinite(remaining) || remaining <= 0) return "expired";
+  const hours = Math.round(remaining / 3_600_000);
+  if (hours < 1) return "in minutes";
+  if (hours < 48) return `in ${hours}h`;
+  return `in ${Math.round(hours / 24)}d`;
 }
 
 /**
@@ -100,10 +155,6 @@ export function teamLabel(team: Pick<TeamSummary, "name" | "shortName">): string
 export function describeTeam(team: TeamSummary): string {
   const members = team.memberCount === 1 ? "1 member" : `${team.memberCount} members`;
   return `${roleLabel(team.role)} · ${members}`;
-}
-
-export function invitationTeamName(invitation: TeamInvitation): string {
-  return invitation.organizationName?.trim() || "a team";
 }
 
 /** Toast text for the team frames the server sends. */

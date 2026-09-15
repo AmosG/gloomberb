@@ -9,8 +9,8 @@ function publicSnapshot(snapshot: TeamStoreSnapshot) {
     teams: snapshot.teams,
     invitations: snapshot.invitations.map((invitation) => ({
       id: invitation.id,
-      teamId: invitation.organizationId,
-      teamName: invitation.organizationName ?? null,
+      teamId: invitation.team.id,
+      teamName: invitation.team.name,
       expiresAt: invitation.expiresAt,
     })),
     focus: snapshot.focus,

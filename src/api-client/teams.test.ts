@@ -140,59 +140,52 @@ describe("apiClient teams", () => {
     ]);
   });
 
-  test("invites by email through the organization plugin", async () => {
-    const requests = recordRequests(() => ({
-      id: "invitation-1",
-      organizationId: "team-1",
-      email: "analyst@example.com",
-      role: "member",
-      status: "pending",
-      expiresAt: "2026-05-08T00:00:00.000Z",
-      inviterId: "user-1",
-    }));
-
-    const invitation = await apiClient.inviteTeamMemberByEmail(
-      "team-1",
-      "analyst@example.com",
-    );
-
-    expect(requests).toEqual([
-      {
-        path: "/auth/organization/invite-member",
-        search: "",
-        method: "POST",
-        body: {
-          email: "analyst@example.com",
-          role: "member",
-          organizationId: "team-1",
-          resend: true,
-        },
-      },
-    ]);
-    expect(invitation.id).toBe("invitation-1");
-  });
-
-  test("keeps only pending invitations", async () => {
-    const invitation = (id: string, status: string) => ({
-      id,
-      organizationId: "team-1",
-      email: `${id}@example.com`,
-      role: "member",
-      status,
-      expiresAt: "2026-05-08T00:00:00.000Z",
-      inviterId: "user-1",
+  test("manages a team through /teams routes, never the auth plugin directly", async () => {
+    const requests = recordRequests(({ path }) => {
+      if (path.endsWith("/members/m-2")) return { members: [{ id: "m-2", role: "admin", joinedAt: "2026-05-01T00:00:00.000Z", user: { id: "u2", username: "lucas", displayName: "Lucas" } }] };
+      if (path.endsWith("/invitations") && path.startsWith("/teams/team-1")) {
+        return { invitations: [{ id: "inv-1", status: "pending", role: "member", expiresAt: "2026-05-08T00:00:00.000Z", createdAt: "2026-05-01T00:00:00.000Z", inviter: { id: "u1", username: "vince", displayName: "Vince" }, invitee: { id: "u3", username: "bob", displayName: "Bob" } }] };
+      }
+      if (path === "/teams/invitations") {
+        return { invitations: [{ id: "inv-2", role: "member", expiresAt: "2026-05-08T00:00:00.000Z", createdAt: "2026-05-01T00:00:00.000Z", team: { id: "team-2", name: "Rates", slug: "rates", accentColor: "blue", shortName: "RT", memberCount: 4 }, inviter: { id: "u9", username: "ann", displayName: "Ann" } }] };
+      }
+      if (path.endsWith("/channels") && !path.includes("team:")) return { id: "team:team-1:trades", name: "trades", kind: "team", teamId: "team-1", created_at: "2026-05-01T00:00:00.000Z" };
+      return { id: "team-1", name: "Macro Desk", role: "owner" };
     });
-    const requests = recordRequests(() => [
-      invitation("pending-1", "pending"),
-      invitation("canceled-1", "canceled"),
-      invitation("accepted-1", "accepted"),
+
+    await apiClient.updateTeam("team-1", { name: "Macro Desk", accentColor: "blue", allowMemberInvites: true });
+    const members = await apiClient.updateTeamMemberRole("team-1", "m-2", "admin");
+    await apiClient.removeTeamMember("team-1", "m-2");
+    await apiClient.leaveTeam("team-1");
+    await apiClient.deleteTeam("team-1");
+    const sent = await apiClient.listTeamInvitations("team-1");
+    const received = await apiClient.listMyTeamInvitations();
+    await apiClient.acceptTeamInvitation("inv-2");
+    await apiClient.rejectTeamInvitation("inv-2");
+    await apiClient.cancelTeamInvitation("team-1", "inv-1");
+    const channel = await apiClient.createTeamChannel("team-1", "Trades");
+    await apiClient.deleteTeamChannel("team-1", "team:team-1:trades");
+
+    expect(requests.map((entry) => `${entry.method} ${entry.path}`)).toEqual([
+      "PATCH /teams/team-1",
+      "PATCH /teams/team-1/members/m-2",
+      "DELETE /teams/team-1/members/m-2",
+      "POST /teams/team-1/leave",
+      "DELETE /teams/team-1",
+      "GET /teams/team-1/invitations",
+      "GET /teams/invitations",
+      "POST /teams/invitations/inv-2/accept",
+      "POST /teams/invitations/inv-2/reject",
+      "DELETE /teams/team-1/invitations/inv-1",
+      "POST /teams/team-1/channels",
+      "DELETE /teams/team-1/channels/team%3Ateam-1%3Atrades",
     ]);
-
-    const invitations = await apiClient.listTeamInvitations("team-1");
-
-    expect(requests[0]?.path).toBe("/auth/organization/list-invitations");
-    expect(requests[0]?.search).toBe("?organizationId=team-1");
-    expect(invitations.map((entry) => entry.id)).toEqual(["pending-1"]);
+    expect(requests[0]?.body).toEqual({ name: "Macro Desk", accentColor: "blue", allowMemberInvites: true });
+    expect(members[0]?.role).toBe("admin");
+    expect(sent[0]?.invitee?.username).toBe("bob");
+    expect(received[0]?.team.shortName).toBe("RT");
+    expect(channel.id).toBe("team:team-1:trades");
+    expect(requests.some((entry) => entry.path.startsWith("/auth/organization"))).toBe(false);
   });
 
   test("normalizes team notification timestamps", async () => {

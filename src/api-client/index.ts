@@ -607,7 +607,6 @@ class GloomApiClient {
   previewTeamInviteLink = this.teams.previewTeamInviteLink.bind(this.teams);
   joinTeamThroughLink = this.teams.joinTeamThroughLink.bind(this.teams);
   getTeamNotifications = this.teams.getTeamNotifications.bind(this.teams);
-  inviteTeamMemberByEmail = this.teams.inviteTeamMemberByEmail.bind(this.teams);
   listTeamInvitations = this.teams.listTeamInvitations.bind(this.teams);
   listMyTeamInvitations = this.teams.listMyTeamInvitations.bind(this.teams);
   acceptTeamInvitation = this.teams.acceptTeamInvitation.bind(this.teams);
@@ -618,6 +617,10 @@ class GloomApiClient {
   removeTeamMember = this.teams.removeTeamMember.bind(this.teams);
   leaveTeam = this.teams.leaveTeam.bind(this.teams);
   deleteTeam = this.teams.deleteTeam.bind(this.teams);
+  listTeamChannels = this.teams.listTeamChannels.bind(this.teams);
+  createTeamChannel = this.teams.createTeamChannel.bind(this.teams);
+  deleteTeamChannel = this.teams.deleteTeamChannel.bind(this.teams);
+  subscribeTeamUpdates = this.teams.subscribeTeamUpdates.bind(this.teams);
   subscribeTeamNotifications = this.teams.subscribeTeamNotifications.bind(this.teams);
   subscribeCloudEvent = this.teams.subscribeCloudEvent.bind(this.teams);
   listCloudNotes = this.notes.listNotes.bind(this.notes);

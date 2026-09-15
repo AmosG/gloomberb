@@ -4,8 +4,13 @@ import {
   canInviteToTeam,
   canManageTeam,
   countTeamUpdates,
+  deriveTeamShortName,
+  describeExpiry,
   describeTeamNotification,
   findTeam,
+  isTeamChannelId,
+  normalizeTeamChannelName,
+  normalizeTeamShortName,
   teamChannelId,
   teamIdFromChannelId,
   teamLabel,
@@ -121,5 +126,39 @@ describe("notifications", () => {
     };
     expect(describeTeamNotification(layout).body).toBe("@vince published Morning r4.");
     expect(countTeamUpdates([invite, joined, layout])).toEqual(new Map([["org-1", 3]]));
+  });
+});
+
+describe("team channels and names", () => {
+  test("channel ids carry the team id, with or without a channel name", () => {
+    expect(teamChannelId("org-1")).toBe("team:org-1");
+    expect(teamChannelId("org-1", "general")).toBe("team:org-1");
+    expect(teamChannelId("org-1", "trades")).toBe("team:org-1:trades");
+    expect(teamIdFromChannelId("team:org-1:trades")).toBe("org-1");
+    expect(teamIdFromChannelId("team:org-1")).toBe("org-1");
+    expect(teamIdFromChannelId("everyone")).toBeNull();
+    expect(isTeamChannelId("team:x")).toBe(true);
+  });
+
+  test("channel names normalize the way the server keeps them", () => {
+    expect(normalizeTeamChannelName("Earnings Season")).toBe("earnings-season");
+    expect(normalizeTeamChannelName("#Trades")).toBe("trades");
+    expect(normalizeTeamChannelName("!!!")).toBe("");
+  });
+
+  test("short names derive like the server: initials or the first three letters", () => {
+    expect(deriveTeamShortName("Macro Desk")).toBe("MD");
+    expect(deriveTeamShortName("Options")).toBe("OPT");
+    expect(deriveTeamShortName("a b c d e")).toBe("ABCD");
+    expect(deriveTeamShortName("!!!")).toBe("TM");
+    expect(normalizeTeamShortName("m-d x1")).toBe("MDX1");
+  });
+
+  test("expiry reads as a short relative time", () => {
+    const now = Date.parse("2026-09-15T12:00:00.000Z");
+    expect(describeExpiry("2026-09-21T12:00:00.000Z", now)).toBe("in 6d");
+    expect(describeExpiry("2026-09-15T20:00:00.000Z", now)).toBe("in 8h");
+    expect(describeExpiry("2026-09-15T12:10:00.000Z", now)).toBe("in minutes");
+    expect(describeExpiry("2026-09-14T12:00:00.000Z", now)).toBe("expired");
   });
 });

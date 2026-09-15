@@ -6,7 +6,8 @@ import { useThemeColors } from "../../theme/theme-context";
 import { t } from "../../i18n";
 import { useRemoteUiNode } from "../../remote/semantic-tree";
 
-export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
+/** `plain` is text that happens to be clickable: no border, no fill. Status bar chips use it. */
+export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "plain";
 
 export interface ButtonProps {
   label: string;
@@ -26,7 +27,10 @@ export interface ButtonProps {
   stopPropagation?: boolean;
 }
 
-function resolveButtonColors(variant: ButtonVariant, active: boolean, disabled: boolean, colors: ThemeColors) {
+function resolveButtonColors(variant: ButtonVariant, active: boolean, disabled: boolean, colors: ThemeColors): { bg?: string; fg: string } {
+  if (variant === "plain") {
+    return { fg: disabled ? colors.textMuted : active ? colors.textBright : colors.textDim };
+  }
   if (disabled) {
     return { bg: colors.panel, fg: colors.textMuted };
   }

@@ -89,7 +89,7 @@ export function ChatStatusWidget({ controller = chatController }: ChatStatusWidg
           <InlineAuthActions showSignup={false} />
         </>
       ) : (
-        <Button label={username ? `Open chat as ${username}` : "Open chat"} variant="ghost" compact stopPropagation onPress={openChat}>
+        <Button label={username ? `Open chat as ${username}` : "Open chat"} variant="plain" compact stopPropagation onPress={openChat}>
           <Text fg={unreadCount > 0 ? colors.text : colors.textDim}>
             <Span fg={colors.positive}>@</Span>
             {username ? (
