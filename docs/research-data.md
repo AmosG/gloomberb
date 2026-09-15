@@ -2,7 +2,7 @@
 
 [User guide](usage.md) · [Price comparisons](price-comparisons.md) · [Economic statistics](economics-reference.md) · [Market valuation](valuation-reference.md)
 
-This reference describes how the terminal calculates and labels research data. Pane bodies show the data and current failures; recurring methodology belongs here. Headless reports and shared chart metadata retain source details and limitations.
+This reference describes how the terminal calculates and labels research data. Pane bodies show data, units, source dates and blocking failures; recurring methodology belongs here. Active data limitations appear as an amber warning indicator in the existing pane footer. Click it or press `!` in the focused pane to read the details; Escape or Close returns to the research view. The indicator disappears when its warnings clear. Headless reports and shared chart metadata retain source details and limitations.
 
 Instrument search keeps broker contract definitions distinct when an underlying symbol represents several expiries, strikes or deliverables. A contract selected from search is retained in that research pane, its followers and saved layout; opening another contract does not reorder the shared ticker's broker definitions. Symbol-only lookups that match several saved contracts require a search selection. Contract-specific prices must come from that contract's data context, rather than the app's symbol-only cache. Broker contract panes and charts are retained in local layouts and exports; public symbol-only sharing is unavailable for them because a recipient's market source cannot be assumed to identify the same contract or broker account.
 
@@ -13,6 +13,8 @@ A quote needs a finite, positive observation timestamp that is no later than the
 Earnings estimates, corporate actions, analyst research and historical prices retain the last successful response when a refresh fails, with the failure shown in the footer. A failed refresh does not advance the retrieval time. Changing the ticker, venue or request range clears the previous response; explicit account or access rejection clears denied research. A successful empty response also replaces old data.
 
 ## Charts, comparisons, and correlations
+
+Financial series use their selected date basis. When publication dates are missing, affected observations may use period-end dates; the chart warning identifies that fallback. A period-end date does not establish when the value became public. This limitation stays in shared chart metadata and headless output.
 
 Bond history currently has no source-declared price convention. Charts retain its raw observations with unknown price units and do not append a current bond quote: that quote's per-unit or percent-of-par declaration does not establish the basis of a separate historical series. Overview price returns also use the historical observations without appending that quote. A numeric ratio between a quote and an old close cannot establish compatible units. Historical values and current source quotes remain separate; this does not add bond historical coverage or reconstruct yield.
 
