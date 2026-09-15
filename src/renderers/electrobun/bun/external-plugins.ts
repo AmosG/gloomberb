@@ -1,6 +1,6 @@
 import { readdir, rm, stat } from "fs/promises";
 import { existsSync, lstatSync } from "fs";
-import { join } from "path";
+import { basename, join } from "path";
 
 import type {
   DesktopExternalPluginBundle,
@@ -13,8 +13,7 @@ import { linkHostPackages } from "../../../plugins/host-link";
 import {
   getPluginCacheDir,
   getPluginsDir,
-  isDirectoryOrLink,
-  isPluginDirectory,
+  listPluginDirectories,
   loadExternalPlugin,
   readPluginCommit,
   resolvePluginEntry,
@@ -168,9 +167,10 @@ export async function collectExternalPluginBundles(): Promise<DesktopExternalPlu
   await removeLegacyBundleCache(pluginsDir);
   const bundles: DesktopExternalPluginBundle[] = [];
 
-  for (const entry of await readdir(pluginsDir, { withFileTypes: true })) {
-    if (!isPluginDirectory(entry.name) || !isDirectoryOrLink(entry, join(pluginsDir, entry.name))) continue;
-    const bundle = await bundlePluginDirectory(pluginsDir, entry.name);
+  // Links every folder before reading any: a plugin that imports a sibling
+  // needs the sibling linked too, whichever of them is read first.
+  for (const pluginDir of await listPluginDirectories(pluginsDir)) {
+    const bundle = await bundlePluginDirectory(pluginsDir, basename(pluginDir));
     if (bundle) bundles.push(bundle);
   }
 

@@ -188,20 +188,36 @@ export async function loadExternalPlugin(
   }
 }
 
-export async function loadExternalPlugins(target: PluginTarget = "cli"): Promise<LoadedExternalPlugin[]> {
-  if (!existsSync(PLUGINS_DIR)) return [];
-
-  const results: LoadedExternalPlugin[] = [];
-  const entries = await readdir(PLUGINS_DIR, { withFileTypes: true });
-
+/**
+ * Every plugin folder under the plugins directory, linked to the host.
+ *
+ * Linking has to finish for all of them before any is imported. A plugin
+ * that imports a sibling (Gateway imports Flex) pulls the sibling's files in
+ * during its own import, and those files resolve `gloomberb/*` from the
+ * sibling's folder. If that folder is linked only when its own turn comes,
+ * the lookup fails, and Bun caches the miss, so linking it afterwards does
+ * not repair the sibling either. Which plugin comes first is up to readdir.
+ */
+export async function listPluginDirectories(pluginsDir: string = PLUGINS_DIR): Promise<string[]> {
+  if (!existsSync(pluginsDir)) return [];
+  const entries = await readdir(pluginsDir, { withFileTypes: true });
+  const dirs: string[] = [];
   for (const entry of entries) {
     if (!isPluginDirectory(entry.name)) continue;
-    const pluginDir = join(PLUGINS_DIR, entry.name);
-    if (!isDirectoryOrLink(entry, pluginDir)) continue;
+    const pluginDir = join(pluginsDir, entry.name);
+    if (isDirectoryOrLink(entry, pluginDir)) dirs.push(pluginDir);
+  }
+  dirs.sort();
+  for (const pluginDir of dirs) linkHostPackages(pluginDir);
+  return dirs;
+}
+
+export async function loadExternalPlugins(target: PluginTarget = "cli"): Promise<LoadedExternalPlugin[]> {
+  const results: LoadedExternalPlugin[] = [];
+  for (const pluginDir of await listPluginDirectories()) {
     const loaded = await loadExternalPlugin(pluginDir, target);
     if (loaded) results.push(loaded);
   }
-
   return results;
 }
 
