@@ -208,7 +208,7 @@ export function InvitesSection({
                   <ConfirmAction
                     id={`revoke-link:${link.token}`}
                     label="Revoke"
-                    question="Revoke this link?"
+                    question="Revoke?"
                     confirmLabel="Revoke"
                     busy={busy === link.token}
                     onConfirm={() => onRevokeLink(link)}
