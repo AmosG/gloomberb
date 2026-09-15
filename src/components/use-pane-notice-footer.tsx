@@ -3,6 +3,7 @@ import { t } from "../i18n";
 import { useShortcut, useViewport } from "../react/input";
 import { Box, ScrollBox, type ScrollBoxRenderable } from "../ui";
 import { useDialog, useDialogKeyboard, useDialogState, type AlertContext } from "../ui/dialog";
+import { wrapTextLines } from "../utils/text-wrap";
 import { usePaneFooter } from "./layout/pane/footer";
 import { usePaneFooterScopeActive } from "./layout/pane/footer/registration";
 import { Button } from "./ui/button";
@@ -23,7 +24,9 @@ function NoticeDialog({ notices, title, dismiss, dialogId }: AlertContext & {
 }) {
   const viewport = useViewport();
   const width = Math.max(8, Math.min(74, viewport.width - 8));
-  const height = Math.max(1, Math.min(18, viewport.height - 10));
+  const contentHeight = notices.reduce((total, notice) => total + wrapTextLines(notice, Math.max(8, width - 1)).length, 0)
+    + Math.max(0, notices.length - 1);
+  const height = Math.max(1, Math.min(contentHeight, 18, viewport.height - 10));
   const scrollRef = useRef<ScrollBoxRenderable | null>(null);
   useDialogKeyboard((event) => {
     if (event.ctrl || event.alt || event.meta || event.super) return;
@@ -96,7 +99,7 @@ export function usePaneNoticeFooter({
         dismissRef.current = context.dismiss;
         return <NoticeDialog {...context} title={title} notices={currentNotices} />;
       },
-    }).finally(() => {
+    }).catch(() => {}).finally(() => {
       openingRef.current = false;
       dismissRef.current = undefined;
     });

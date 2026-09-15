@@ -50,6 +50,8 @@ test("compact warnings disclose by mouse, follow the current data and vanish wit
   await act(async () => { await setup!.mockMouse.click(setup!.captureCharFrame().split("\n")[0]!.indexOf("⚠"), 0); });
   await controls.waitForFrameToContain("publication dates unavailable");
   expect(setup!.captureCharFrame().match(/publication dates unavailable/g)?.length).toBe(1);
+  const dialogLines = setup!.captureCharFrame().split("\n");
+  expect(dialogLines.findIndex((line) => line.includes("Close")) - dialogLines.findIndex((line) => line.includes("Data warnings"))).toBeLessThanOrEqual(5);
   await change({ notices: ["MSFT: stale provider observation."] });
   expect(setup!.captureCharFrame()).not.toContain("publication");
   await act(async () => retained());
