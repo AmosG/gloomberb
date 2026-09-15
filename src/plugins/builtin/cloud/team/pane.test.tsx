@@ -41,6 +41,7 @@ function respond(path: string, method: string): unknown {
   if (path === "/teams/invitations") return { invitations: receivedInvitations };
   if (path === "/teams/notifications") return { notifications: [] };
   if (path === "/chat/channels") return [];
+  if (path === "/chat/state") return { channels: [], onlineCount: 0, channelStates: [], notifications: [] };
   if (path.endsWith("/views") || path.endsWith("/collections")) return { items: [] };
   return {};
 }

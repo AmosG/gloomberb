@@ -64,7 +64,7 @@ export const teamModule: PluginModule = {
     // The chat sidebar reads channels from the chat controller; when a team's
     // channels or membership change, that list is stale until refetched.
     disposeChannelRefresh = teamStore.onTeamUpdated((event) => {
-      if (event.change !== "settings") void chatController.refreshChannels().catch(() => {});
+      if (event.change !== "settings") void chatController.refreshChatState().catch(() => {});
     });
   },
   dispose() {

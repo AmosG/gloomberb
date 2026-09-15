@@ -254,7 +254,7 @@ export function TeamPane({ focused, width, height, close }: PaneProps) {
   useEffect(() => {
     if (!team) return;
     return teamStore.onTeamUpdated((event) => {
-      if (event.teamId === team.id && event.change === "channels") void chatController.refreshChannels();
+      if (event.teamId === team.id && event.change === "channels") void chatController.refreshChatState();
     });
   }, [team]);
 
@@ -310,7 +310,7 @@ export function TeamPane({ focused, width, height, close }: PaneProps) {
     });
     teamStore.upsertTeam(created);
     void teamStore.refresh();
-    void chatController.refreshChannels();
+    void chatController.refreshChatState();
     setCreating(false);
     setTeamId(created.id);
     setSection("invites");
@@ -387,7 +387,7 @@ export function TeamPane({ focused, width, height, close }: PaneProps) {
     void run("channel", async () => {
       const channel = await apiClient.createTeamChannel(team.id, name);
       setChannelName("");
-      await chatController.refreshChannels().catch(() => {});
+      await chatController.refreshChatState().catch(() => {});
       return { tone: "success", text: `#${channel.name} is ready. Open it from the list.` };
     });
   }, [channelName, run, team]);
@@ -397,7 +397,7 @@ export function TeamPane({ focused, width, height, close }: PaneProps) {
     teamStore.removeInvitation(invitation.id);
     teamStore.upsertTeam(joined);
     void teamStore.refresh();
-    void chatController.refreshChannels();
+    void chatController.refreshChatState();
     setCreating(false);
     setTeamId(joined.id);
     setSection("members");
@@ -652,7 +652,7 @@ export function TeamPane({ focused, width, height, close }: PaneProps) {
                 onDelete={(channel) => {
                   void run(channel.id, async () => {
                     await apiClient.deleteTeamChannel(team.id, channel.id);
-                    await chatController.refreshChannels().catch(() => {});
+                    await chatController.refreshChatState().catch(() => {});
                     return { tone: "info", text: `Deleted #${channel.name}.` };
                   });
                 }}
@@ -671,7 +671,7 @@ export function TeamPane({ focused, width, height, close }: PaneProps) {
                     await apiClient.leaveTeam(team.id);
                     teamStore.removeTeam(team.id);
                     void teamStore.refresh();
-                    void chatController.refreshChannels();
+                    void chatController.refreshChatState();
                     setTeamId(null);
                     notify({ body: `You left ${team.name}.`, type: "info" });
                     if (teamStore.getSnapshot().teams.length <= 1) close?.();
@@ -683,7 +683,7 @@ export function TeamPane({ focused, width, height, close }: PaneProps) {
                     await apiClient.deleteTeam(team.id);
                     teamStore.removeTeam(team.id);
                     void teamStore.refresh();
-                    void chatController.refreshChannels();
+                    void chatController.refreshChatState();
                     setTeamId(null);
                     notify({ body: `Deleted ${team.name}.`, type: "info" });
                     if (teamStore.getSnapshot().teams.length <= 1) close?.();
