@@ -1,36 +1,19 @@
 import { apiClient } from "../../../../api-client";
 import type { CommandResultDef, GloomPluginContext } from "../../../../types/plugin";
 import { requestAuthDialog } from "../auth-dialog";
-import { requestTeamFlow } from "./flow-host";
-import {
-  inviteByUsernameFlow,
-  inviteLinkFlow,
-  respondToInvitationFlow,
-  reviewInvitationsFlow,
-  runCreateTeamWizard,
-  settingsFlow,
-  showTeamActions,
-} from "./flows";
 import {
   canInviteToTeam,
   canManageTeam,
   describeTeam,
   findTeam,
-  invitationTeamName,
   teamChannelId,
   teamLabel,
+  userHandle,
 } from "./model";
+import { openTeamPane, type TeamPaneSection } from "./pane-request";
 import { teamStore } from "./store";
 
-const TEAM_SUBCOMMAND = /^(invite|new|settings|members|leave|focus)\b\s*(.*)$/i;
-
-function notAvailable(ctx: GloomPluginContext) {
-  ctx.notify({ body: "Teams are not available right now.", type: "error" });
-}
-
-function run(ctx: GloomPluginContext, flow: Parameters<typeof requestTeamFlow>[0]) {
-  if (!requestTeamFlow(flow)) notAvailable(ctx);
-}
+const TEAM_SUBCOMMAND = /^(invite|new|settings|members|channels|leave|focus|chat)\b\s*(.*)$/i;
 
 function requireSignIn(ctx: GloomPluginContext): boolean {
   if (apiClient.isVerified()) return true;
@@ -39,8 +22,41 @@ function requireSignIn(ctx: GloomPluginContext): boolean {
   return false;
 }
 
+function open(ctx: GloomPluginContext, view: { teamId?: string | null; section?: TeamPaneSection; mode?: "team" | "create" }) {
+  openTeamPane(ctx.createPaneFromTemplate, view);
+}
+
 function openTeamChannel(ctx: GloomPluginContext, teamId: string) {
   ctx.createPaneFromTemplate("new-chat-pane", { arg: teamChannelId(teamId) });
+}
+
+function errorText(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
+/** `TEAM invite @user` sends straight away; `TEAM invite link` copies a fresh link. */
+async function inviteFromCommand(ctx: GloomPluginContext, teamId: string, target: string | null) {
+  const team = teamStore.getTeam(teamId);
+  if (!team) return;
+  if (target === "link") {
+    try {
+      const link = await apiClient.createTeamInviteLink(team.id);
+      ctx.notify({ body: `Invite link for ${team.name}: ${link.url}`, type: "success" });
+    } catch (error) {
+      ctx.notify({ body: errorText(error, "Could not create an invite link."), type: "error" });
+    }
+    return;
+  }
+  if (target) {
+    try {
+      const invitation = await apiClient.inviteTeamMemberByUsername(team.id, target.replace(/^@/, ""));
+      ctx.notify({ body: `Invited ${userHandle(invitation.invitee)} to ${team.name}.`, type: "success" });
+    } catch (error) {
+      ctx.notify({ body: errorText(error, "Could not send the invitation."), type: "error" });
+    }
+    return;
+  }
+  open(ctx, { teamId: team.id, section: "invites" });
 }
 
 export function buildTeamCommandResults(ctx: GloomPluginContext, arg: string): CommandResultDef[] {
@@ -53,7 +69,7 @@ export function buildTeamCommandResults(ctx: GloomPluginContext, arg: string): C
     return [{
       id: "sign-in",
       label: "Sign in to use teams",
-      detail: "Teams share layouts, notes, watchlists, and a chat channel.",
+      detail: "Teams share layouts, notes, watchlists, and chat channels.",
       category,
       right: "TEAM",
       execute: () => {
@@ -62,20 +78,19 @@ export function buildTeamCommandResults(ctx: GloomPluginContext, arg: string): C
     }];
   }
 
+  const focused = teamStore.getTeam(teamStore.getDefaultTeamId()) ?? snapshot.teams[0] ?? null;
+
   if (sub) {
     const verb = sub[1]!.toLowerCase();
     const rest = sub[2]?.trim() ?? "";
-    const focused = teamStore.getTeam(teamStore.getDefaultTeamId()) ?? snapshot.teams[0] ?? null;
     if (verb === "new") {
       return [{
         id: "new",
         label: "New team",
-        detail: "Name, accent color, invites. Needs Pro.",
+        detail: "Name, short name, accent color. Needs Pro; joining is free.",
         category,
         right: "TEAM",
-        execute: () => run(ctx, async (tools) => {
-          await runCreateTeamWizard(tools);
-        }),
+        execute: () => open(ctx, { mode: "create" }),
       }];
     }
     if (verb === "invite") {
@@ -96,33 +111,38 @@ export function buildTeamCommandResults(ctx: GloomPluginContext, arg: string): C
       return teams.map((team) => ({
         id: `invite:${team.id}`,
         label: linkOnly
-          ? `Copy invite link for ${team.name}`
+          ? `Copy an invite link for ${team.name}`
           : username
             ? `Invite ${username} to ${team.name}`
-            : `Invite to ${team.name}`,
+            : `Invite people to ${team.name}`,
         detail: linkOnly ? "Anyone with the link joins as a member." : describeTeam(team),
         category,
         right: team.shortName,
         current: focused?.id === team.id,
-        execute: () => run(ctx, async (tools) => {
-          if (linkOnly) await inviteLinkFlow(tools, team);
-          else await inviteByUsernameFlow(tools, team, username ?? undefined);
-        }),
+        execute: () => inviteFromCommand(ctx, team.id, linkOnly ? "link" : username),
       }));
     }
-    if (verb === "settings" || verb === "members" || verb === "leave") {
-      const teams = verb === "settings" ? snapshot.teams.filter((team) => canManageTeam(team.role)) : snapshot.teams;
-      return teams.map((team) => ({
+    if (verb === "settings" || verb === "members" || verb === "channels" || verb === "leave" || verb === "chat") {
+      const section: TeamPaneSection = verb === "leave" ? "settings" : verb === "chat" ? "channels" : verb;
+      const teams = verb === "settings"
+        ? snapshot.teams.filter((team) => canManageTeam(team.role))
+        : snapshot.teams;
+      const named = rest ? findTeam(teams, rest) : null;
+      return (named ? [named] : teams).map((team) => ({
         id: `${verb}:${team.id}`,
-        label: `${verb === "settings" ? "Settings for" : verb === "members" ? "Members of" : "Leave"} ${team.name}`,
+        label: verb === "leave"
+          ? `Leave ${team.name}`
+          : verb === "chat"
+            ? `Open ${team.name} chat`
+            : `${team.name}: ${section}`,
         detail: describeTeam(team),
         category,
         right: team.shortName,
         current: focused?.id === team.id,
-        execute: () => run(ctx, async (tools) => {
-          if (verb === "settings") await settingsFlow(tools, team);
-          else await showTeamActions(tools, team);
-        }),
+        execute: () => {
+          if (verb === "chat") openTeamChannel(ctx, team.id);
+          else open(ctx, { teamId: team.id, section });
+        },
       }));
     }
     if (verb === "focus") {
@@ -134,11 +154,11 @@ export function buildTeamCommandResults(ctx: GloomPluginContext, arg: string): C
   for (const invitation of snapshot.invitations) {
     results.push({
       id: `invitation:${invitation.id}`,
-      label: `Invitation to ${invitationTeamName(invitation)}`,
-      detail: invitation.inviterEmail ? `From ${invitation.inviterEmail}. Accept or decline.` : "Accept or decline.",
+      label: `Invitation to ${invitation.team.name}`,
+      detail: `From ${userHandle(invitation.inviter)}. Accept or decline in the team pane.`,
       category: "Invitations",
       right: "NEW",
-      execute: () => run(ctx, (tools) => respondToInvitationFlow(tools, invitation)),
+      execute: () => open(ctx, {}),
     });
   }
 
@@ -152,36 +172,25 @@ export function buildTeamCommandResults(ctx: GloomPluginContext, arg: string): C
     results.push({
       id: `team:${team.id}`,
       label: teamLabel(team),
-      detail: `${describeTeam(team)} · enter for actions`,
+      detail: `${describeTeam(team)} · members, invites, channels, settings`,
       category,
       right: team.shortName,
       keywords: [team.name, team.shortName, team.slug],
       current: teamStore.getDefaultTeamId() === team.id,
-      execute: () => run(ctx, (tools) => showTeamActions(tools, team)),
+      execute: () => open(ctx, { teamId: team.id }),
     });
   }
 
-  if (snapshot.teams.length === 0 && snapshot.invitations.length === 0 && !trimmed) {
+  if (!trimmed) {
     results.push({
       id: "new",
-      label: "Create a team",
-      detail: "Share layouts, notes, watchlists, and a chat channel. Needs Pro; joining is free.",
+      label: snapshot.teams.length === 0 ? "Create a team" : "New team",
+      detail: snapshot.teams.length === 0
+        ? "Share layouts, notes, watchlists, and chat channels. Needs Pro; joining is free."
+        : "TEAM new",
       category,
       right: "TEAM",
-      execute: () => run(ctx, async (tools) => {
-        await runCreateTeamWizard(tools);
-      }),
-    });
-  } else if (!trimmed) {
-    results.push({
-      id: "new",
-      label: "New team",
-      detail: "TEAM new",
-      category,
-      right: "TEAM",
-      execute: () => run(ctx, async (tools) => {
-        await runCreateTeamWizard(tools);
-      }),
+      execute: () => open(ctx, { mode: "create" }),
     });
   }
 
@@ -254,12 +263,12 @@ export function registerTeamCommands(ctx: GloomPluginContext): void {
   ctx.registerCommand({
     id: "team",
     label: "Team",
-    description: "Your teams: chat, invites, members, settings",
-    keywords: ["team", "teams", "invite", "members", "collaborate", "share"],
+    description: "Your teams: members, invites, channels, settings",
+    keywords: ["team", "teams", "invite", "members", "channels", "collaborate", "share"],
     category: "navigation",
     shortcut: "TEAM",
     shortcutArg: {
-      placeholder: "[team | new | invite [@user|link] | settings | members | leave | focus]",
+      placeholder: "[team | new | invite [@user|link] | members | channels | settings | leave | focus]",
       kind: "text",
       parse: (arg) => ({ query: arg.trim() }),
     },
@@ -267,23 +276,14 @@ export function registerTeamCommands(ctx: GloomPluginContext): void {
     execute: async (values) => {
       const query = values?.query ?? values?.shortcut ?? "";
       if (!requireSignIn(ctx)) return;
+      if (!query.trim()) {
+        // Plain TEAM opens the pane: the current team, or the form when there is none.
+        open(ctx, {});
+        return;
+      }
       const results = buildTeamCommandResults(ctx, query);
       const first = results.find((result) => !result.disabled);
       if (!first) return;
-      if (query.trim() && results.length === 1 && first.id.startsWith("team:")) {
-        openTeamChannel(ctx, first.id.slice("team:".length));
-        return;
-      }
-      if (!query.trim() && teamStore.getSnapshot().teams.length === 0) {
-        if (teamStore.getSnapshot().invitations.length > 0) {
-          run(ctx, reviewInvitationsFlow);
-          return;
-        }
-        run(ctx, async (tools) => {
-          await runCreateTeamWizard(tools);
-        });
-        return;
-      }
       await first.execute();
     },
   });
@@ -309,4 +309,5 @@ export function registerTeamCommands(ctx: GloomPluginContext): void {
       await target?.execute();
     },
   });
+
 }

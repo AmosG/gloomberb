@@ -2,26 +2,21 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { ListView, type ListViewItem } from "../../../../components/ui/list-view";
 import { useShortcut } from "../../../../react/input";
 import { colors } from "../../../../theme/colors";
-import { Box, Text, useRendererHost } from "../../../../ui";
-import { useDialog } from "../../../../ui/dialog";
+import { Box, Text } from "../../../../ui";
 import { isPlainKey } from "../../../../utils/keyboard";
 import { usePluginAppActions } from "../../../runtime";
-import type { TeamFlowTools } from "./flows";
-import { respondToInvitationFlow, runCreateTeamWizard, showTeamActions } from "./flows";
-import { describeTeam, invitationTeamName, teamAccentHex, teamChannelId, teamLabel } from "./model";
+import { describeTeam, teamAccentHex, teamLabel, userHandle } from "./model";
+import { openTeamPane } from "./pane-request";
 import { teamStore } from "./store";
 
 const NEW_TEAM_ID = "__new__";
 
 /**
  * The Teams tab of the account pane: one list of teams and pending
- * invitations. Enter opens the same action sheet the TEAM command uses, so the
- * two surfaces never drift.
+ * invitations. Enter opens the team pane, where everything happens.
  */
 export function TeamsAccountTab({ focused, width }: { focused: boolean; width: number }) {
-  const dialog = useDialog();
-  const renderer = useRendererHost();
-  const { notify, createPaneFromTemplate } = usePluginAppActions();
+  const { createPaneFromTemplate } = usePluginAppActions();
   const snapshot = useSyncExternalStore(
     (onChange) => teamStore.subscribe(onChange),
     () => teamStore.getSnapshot(),
@@ -32,48 +27,40 @@ export function TeamsAccountTab({ focused, width }: { focused: boolean; width: n
     void teamStore.refresh();
   }, []);
 
-  const tools = useMemo<TeamFlowTools>(() => ({
-    dialog,
-    copyText: (text) => renderer.copyText(text),
-    notify,
-    openTeamChannel: (teamId) => createPaneFromTemplate("new-chat-pane", { arg: teamChannelId(teamId) }),
-  }), [createPaneFromTemplate, dialog, notify, renderer]);
-
   const items = useMemo<ListViewItem[]>(() => [
     ...snapshot.invitations.map((invitation) => ({
       id: `invitation:${invitation.id}`,
-      label: `Invitation to ${invitationTeamName(invitation)}`,
-      description: invitation.inviterEmail ? `From ${invitation.inviterEmail}. Enter to accept or decline.` : "Enter to accept or decline.",
+      label: `Invitation to ${invitation.team.name}`,
+      description: `From ${userHandle(invitation.inviter)}. Enter to accept or decline.`,
       right: "NEW",
       category: "Invitations",
     })),
     ...snapshot.teams.map((team) => ({
       id: `team:${team.id}`,
       label: teamLabel(team),
-      description: `${describeTeam(team)} · enter for actions`,
+      description: `${describeTeam(team)} · enter to open`,
       right: team.shortName,
       current: teamStore.getDefaultTeamId() === team.id,
     })),
     {
       id: NEW_TEAM_ID,
       label: "New team",
-      description: "Name, accent color, invites. Needs Pro; joining is free.",
+      description: "Name, short name, accent color. Needs Pro; joining is free.",
       right: "+",
     },
   ], [snapshot.invitations, snapshot.teams]);
 
   const activate = (item: ListViewItem) => {
     if (item.id === NEW_TEAM_ID) {
-      void runCreateTeamWizard(tools);
+      openTeamPane(createPaneFromTemplate, { mode: "create" });
       return;
     }
     if (item.id.startsWith("invitation:")) {
-      const invitation = snapshot.invitations.find((entry) => `invitation:${entry.id}` === item.id);
-      if (invitation) void respondToInvitationFlow(tools, invitation);
+      openTeamPane(createPaneFromTemplate, {});
       return;
     }
     const team = snapshot.teams.find((entry) => `team:${entry.id}` === item.id);
-    if (team) void showTeamActions(tools, team);
+    if (team) openTeamPane(createPaneFromTemplate, { teamId: team.id });
   };
 
   useShortcut((event) => {

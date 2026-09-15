@@ -12,7 +12,7 @@ import { TextAttributes } from "../../../ui";
 import { colors } from "../../../theme/colors";
 import { t, tf } from "../../../i18n";
 import type { ChatChannel, TeamSummary } from "../../../api-client";
-import { teamAccentHex, teamPrefix } from "../cloud/team/model";
+import { sortTeamChannels, teamAccentHex, teamPrefix } from "../cloud/team/model";
 import { teamStore } from "../cloud/team/store";
 import type { ChatController } from "./controller";
 import {
@@ -160,6 +160,7 @@ export function ChannelSidebar({
   onOpenProfile,
   onToggleNotifications,
   onToggleDirectExpanded,
+  onCreateTeamChannel,
 }: {
   channels: ChatChannel[];
   channelStates: ReturnType<ChatController["getSnapshot"]>["channelStates"];
@@ -180,6 +181,7 @@ export function ChannelSidebar({
   onOpenProfile?: () => void;
   onToggleNotifications?: (channelId: string, enabled: boolean) => void;
   onToggleDirectExpanded?: () => void;
+  onCreateTeamChannel?: (teamId: string) => void;
 }) {
   const { nativePaneChrome } = useUiCapabilities();
   const notificationWidth = canManageNotifications ? (nativePaneChrome ? DESKTOP_NOTIFICATION_ICON_WIDTH : 2) : 0;
@@ -212,11 +214,13 @@ export function ChannelSidebar({
     ...publicChannels.map((channel) => ({ kind: "channel" as const, channel })),
     ...teamSections.flatMap((section) => [
       { kind: "team-header" as const, teamId: section.teamId, team: section.team, channels: section.channels },
-      ...section.channels.map((channel) => ({ kind: "channel" as const, channel })),
+      ...(teamSnapshot.collapsedTeams.has(section.teamId)
+        ? []
+        : section.channels.map((channel) => ({ kind: "channel" as const, channel }))),
     ]),
     ...(conversationChannels.length > 0 || canCreateConversation ? [{ kind: "direct-header" as const }] : []),
     ...(directExpanded ? conversationChannels.map((channel) => ({ kind: "channel" as const, channel })) : []),
-  ], [canCreateConversation, conversationChannels, directExpanded, publicChannels, teamSections]);
+  ], [canCreateConversation, conversationChannels, directExpanded, publicChannels, teamSections, teamSnapshot.collapsedTeams]);
 
   return (
     <PaneSidebar
@@ -234,6 +238,8 @@ export function ChannelSidebar({
                 const unread = row.channels.some((channel) => (channelStateById.get(channel.id)?.unreadCount ?? 0) > 0);
                 const accent = row.team ? teamAccentHex(row.team.accentColor) : colors.textDim;
                 const label = row.team ? `${teamPrefix(row.team)} ${row.team.name}` : "Team";
+                const expanded = !teamSnapshot.collapsedTeams.has(row.teamId);
+                const canAddChannel = !!row.team && !!onCreateTeamChannel;
                 return (
                   <Box
                     key={`team-header:${row.teamId}`}
@@ -242,9 +248,25 @@ export function ChannelSidebar({
                     flexDirection="row"
                     backgroundColor={sidebarBg}
                   >
-                    <Text fg={accent} attributes={unread ? TextAttributes.BOLD : 0} selectable={false}>
-                      {truncateChannelLabel(label, Math.max(1, listWidth - 1))}
-                    </Text>
+                    <ActionRow
+                      label={truncateChannelLabel(label, Math.max(1, listWidth - 2 - (canAddChannel ? 3 : 0)))}
+                      active={unread}
+                      expanded={expanded}
+                      fg={accent}
+                      width={Math.max(1, listWidth - (canAddChannel ? 3 : 0))}
+                      onPress={() => teamStore.toggleTeamCollapsed(row.teamId)}
+                    />
+                    {canAddChannel ? (
+                      <PaneSidebarAction
+                        width={3}
+                        ariaLabel={`New channel in ${row.team?.name ?? "team"}`}
+                        onPress={() => onCreateTeamChannel?.(row.teamId)}
+                      >
+                        {({ foregroundColor, onMouseDown }) => (
+                          <Text fg={foregroundColor} selectable={false} onMouseDown={onMouseDown}>+</Text>
+                        )}
+                      </PaneSidebarAction>
+                    ) : null}
                   </Box>
                 );
               }

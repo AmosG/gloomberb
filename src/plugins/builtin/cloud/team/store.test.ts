@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { TeamInvitation, TeamNotification, TeamSummary } from "../../../../api-client";
+import type { TeamNotification, TeamReceivedInvitation, TeamSummary, TeamUpdatedEvent } from "../../../../api-client";
 import { MemoryPluginPersistence } from "../../../../test-support/plugin-persistence";
 import { TeamStore, type TeamStoreClient } from "./store";
 
@@ -38,7 +38,8 @@ function fakeClient(overrides: Partial<TeamStoreClient> = {}) {
   const teamListeners = new Set<(n: TeamNotification) => void>();
   const delivered: string[][] = [];
   let teams: TeamSummary[] = [team({ name: "Rates", id: "org-2", shortName: "RT" }), team({})];
-  let invitations: TeamInvitation[] = [];
+  let invitations: TeamReceivedInvitation[] = [];
+  const updateListeners = new Set<(event: TeamUpdatedEvent) => void>();
   let listCalls = 0;
   const client: TeamStoreClient = {
     isVerified: () => verified,
@@ -49,6 +50,10 @@ function fakeClient(overrides: Partial<TeamStoreClient> = {}) {
     subscribeTeamNotifications: (listener) => {
       teamListeners.add(listener);
       return () => teamListeners.delete(listener);
+    },
+    subscribeTeamUpdates: (listener) => {
+      updateListeners.add(listener);
+      return () => updateListeners.delete(listener);
     },
     listTeams: async () => {
       listCalls += 1;
@@ -75,11 +80,14 @@ function fakeClient(overrides: Partial<TeamStoreClient> = {}) {
     setTeams(next: TeamSummary[]) {
       teams = next;
     },
-    setInvitations(next: TeamInvitation[]) {
+    setInvitations(next: TeamReceivedInvitation[]) {
       invitations = next;
     },
     push(n: TeamNotification) {
       for (const listener of teamListeners) listener(n);
+    },
+    pushUpdate(event: TeamUpdatedEvent) {
+      for (const listener of updateListeners) listener(event);
     },
   };
 }
@@ -162,6 +170,38 @@ describe("TeamStore", () => {
     expect(fake.delivered).toEqual([["n2"]]);
     await store.dismissNotifications([]);
     expect(fake.delivered).toHaveLength(1);
+    store.dispose();
+  });
+
+  test("team.updated refreshes, tells listeners, and folded channel sections persist", async () => {
+    const fake = fakeClient();
+    const store = new TeamStore(fake.client);
+    const persistence = new MemoryPluginPersistence();
+    store.attach(persistence);
+    store.start();
+    await flush();
+    const before = fake.listCalls;
+    const seen: TeamUpdatedEvent[] = [];
+    const stop = store.onTeamUpdated((event) => seen.push(event));
+    fake.pushUpdate({ teamId: "org-1", change: "channels" });
+    await flush();
+    expect(fake.listCalls).toBe(before + 1);
+    expect(seen).toEqual([{ teamId: "org-1", change: "channels" }]);
+    stop();
+
+    store.toggleTeamCollapsed("org-1");
+    expect(store.isTeamCollapsed("org-1")).toBe(true);
+    expect(persistence.getState("team-collapsed-channels")).toEqual(["org-1"]);
+    store.toggleTeamCollapsed("org-1");
+    expect(store.isTeamCollapsed("org-1")).toBe(false);
+
+    // Applying a server response is immediate; a later refresh confirms it.
+    store.upsertTeam(team({ id: "org-3", name: "Alpha", shortName: "AL" }));
+    expect(store.getSnapshot().teams.map((entry) => entry.name)).toEqual(["Alpha", "Macro Desk", "Rates"]);
+    store.setFocus({ teamId: "org-3" });
+    store.removeTeam("org-3");
+    expect(store.getSnapshot().teams).toHaveLength(2);
+    expect(store.getSnapshot().focus).toBe("all");
     store.dispose();
   });
 

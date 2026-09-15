@@ -1379,17 +1379,43 @@ export interface TeamInvitePreview {
 }
 
 /** A Better Auth organization invitation as returned by /auth/organization/* endpoints. */
-export interface TeamInvitation {
+export interface TeamUser {
   id: string;
-  organizationId: string;
-  email: string;
-  role: string;
-  status: "pending" | "accepted" | "rejected" | "canceled";
+  username: string | null;
+  displayName: string;
+}
+
+/** An invitation addressed to the signed-in person. */
+export interface TeamReceivedInvitation {
+  id: string;
+  role: TeamRole;
   expiresAt: string;
-  inviterId: string;
-  organizationName?: string;
-  organizationSlug?: string;
-  inviterEmail?: string;
+  createdAt: string;
+  team: {
+    id: string;
+    name: string;
+    slug: string;
+    accentColor: TeamAccentColor;
+    shortName: string;
+    memberCount: number;
+  };
+  inviter: TeamUser;
+}
+
+/** An invitation a team sent; the invitee is null for addresses without an account. */
+export interface TeamSentInvitation {
+  id: string;
+  status: string;
+  role: TeamRole;
+  expiresAt: string;
+  createdAt: string;
+  inviter: TeamUser;
+  invitee: TeamUser | null;
+}
+
+export interface TeamUpdatedEvent {
+  teamId: string;
+  change: "settings" | "members" | "channels" | "deleted";
 }
 
 export interface TeamUsernameInvitation {

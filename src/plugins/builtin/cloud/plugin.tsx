@@ -77,12 +77,16 @@ function createChatModule(
       keywords: ["new", "chat", "pane", "message"],
       shortcut: { prefix: "CHAT", argPlaceholder: "channel", argKind: "text" },
       createInstance: async (context, options) => {
-        // `CHAT MD` or `CHAT "Macro Desk"` opens that team's #general.
-        const team = options?.arg ? teamStore.findTeam(options.arg) : null;
+        // `CHAT MD` or `CHAT "Macro Desk"` opens that team's #general. A raw
+        // channel id (team ids are mixed case) is kept as typed.
+        const rawArg = options?.arg?.trim() ?? "";
+        const team = rawArg ? teamStore.findTeam(rawArg) : null;
         const channelId = team
           ? teamChannelId(team.id)
-          : options?.arg
-          ? await chatController.resolveRequiredChannelId(normalizeShortcutChannelId(options.arg))
+          : rawArg && chatController.getChannels().some((entry) => entry.id === rawArg)
+          ? rawArg
+          : rawArg
+          ? await chatController.resolveRequiredChannelId(normalizeShortcutChannelId(rawArg))
           : await chatController.resolvePreferredChannelId(
             getPreferredChatOpenChannelId(context.config, chatController.getSnapshot()),
           );

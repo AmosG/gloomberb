@@ -68,11 +68,15 @@ export class ChatControllerChannels {
 
     const request = apiClient.getChannels()
       .then((channels) => {
+        // /chat/channels lists public channels only; DMs, groups, and team
+        // channels come from /chat/state and survive a public refresh.
         const publicChannels = normalizeChannels(channels);
         this.channels = this.options.canLoadPrivateState()
           ? normalizeChannels([
             ...publicChannels,
-            ...this.channels.filter((channel) => channel.kind === "direct" || channel.kind === "group"),
+            ...this.channels.filter((channel) =>
+              channel.kind === "direct" || channel.kind === "group" || channel.kind === "team",
+            ),
           ])
           : publicChannels;
       })

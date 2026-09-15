@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import type { ChatChannel } from "../../../../api-client";
 import { useThrottledCommitValue } from "../../../../react/use-throttled-commit-value";
+import { teamIdFromChannelId } from "../../cloud/team/model";
+import { teamStore } from "../../cloud/team/store";
 import {
   DEFAULT_CHAT_CHANNEL_ID,
   normalizeChannelId,
@@ -55,11 +57,22 @@ export function useChatChannelNavigation({
     sidebarFocusedRef.current = nextFocused;
     setSidebarFocusedState((current) => (current === nextFocused ? current : nextFocused));
   }, []);
+  const collapsedTeams = useSyncExternalStore(
+    (onChange) => teamStore.subscribe(onChange),
+    () => teamStore.getSnapshot().collapsedTeams,
+  );
+  // Mirrors the sidebar's order: public, then each team's channels unless the
+  // team is folded, then DMs when expanded.
   const sidebarNavigationChannels = useMemo(() => {
     const publicChannels = channels.filter((channel) => (channel.kind ?? "public") === "public");
+    const teamChannels = channels.filter((channel) =>
+      channel.kind === "team" && !collapsedTeams.has(teamIdFromChannelId(channel.id) ?? channel.id),
+    );
     const conversationChannels = channels.filter((channel) => channel.kind === "direct" || channel.kind === "group");
-    return directExpanded ? [...publicChannels, ...conversationChannels] : publicChannels;
-  }, [channels, directExpanded]);
+    return directExpanded
+      ? [...publicChannels, ...teamChannels, ...conversationChannels]
+      : [...publicChannels, ...teamChannels];
+  }, [channels, collapsedTeams, directExpanded]);
 
   const changeChannel = useCallback((nextChannelId: string) => {
     const normalized = normalizeChannelId(nextChannelId);

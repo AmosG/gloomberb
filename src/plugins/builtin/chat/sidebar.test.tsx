@@ -727,6 +727,36 @@ describe("team channels in the sidebar", () => {
     expect(lines.findIndex((line) => line.includes("everyone"))).toBeLessThan(header);
   });
 
+  test("a team header folds its channels and offers a new-channel action", async () => {
+    (teamStore as any).update({ teams: [macroDesk], collapsedTeams: new Set() });
+    const controller = createController({ sessionToken: "token-123" });
+    installServerChannels(controller, [
+      { id: "everyone", name: "everyone", created_at: "2026-03-26T12:10:05.684Z" },
+      { id: "team:org-1", name: "general", kind: "team", teamId: "org-1", created_at: "2026-09-14T12:00:00.000Z" },
+      { id: "team:org-1:trades", name: "trades", kind: "team", teamId: "org-1", created_at: "2026-09-14T12:00:00.000Z" },
+    ]);
+    controller.refreshChannels = async () => {};
+    controller.refreshChannelMessages = async () => {};
+    const ChannelPane = createChannelPane(controller, "everyone");
+
+    await act(async () => {
+      testSetup = await testRender(<ChannelPane />, { width: 90, height: 14 });
+    });
+    await flushFrame();
+    let frame = setup().captureCharFrame();
+    expect(frame).toMatch(/▾ MD· Macro Desk\s+\+ /);
+    expect(frame).toContain("trades");
+
+    await act(async () => {
+      teamStore.toggleTeamCollapsed("org-1");
+    });
+    await flushFrame();
+    frame = setup().captureCharFrame();
+    expect(frame).toContain("▸ MD· Macro Desk");
+    expect(frame).not.toContain("trades");
+    (teamStore as any).update({ collapsedTeams: new Set() });
+  });
+
   test("the status chip mounts against the live chat controller and shows unread", async () => {
     // chatController.getSnapshot() builds a fresh object per call; the chip
     // must not feed it to useSyncExternalStore or React loops at startup.

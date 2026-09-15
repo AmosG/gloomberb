@@ -234,6 +234,13 @@ describe("ChatController", () => {
       kind: "direct",
       created_at: "2026-03-28T00:00:00.000Z",
     };
+    const teamChannel: ChatChannel = {
+      id: "team:org-1:trades",
+      name: "trades",
+      kind: "team",
+      teamId: "org-1",
+      created_at: "2026-09-14T00:00:00.000Z",
+    };
     let resolvePublicChannels: ((channels: ChatChannel[]) => void) | undefined;
 
     persistSession(persistence, { emailVerified: true });
@@ -241,7 +248,7 @@ describe("ChatController", () => {
       resolvePublicChannels = resolve;
     });
     apiClient.getChatState = async () => ({
-      channels: [...SERVER_CHAT_CHANNELS, directChannel],
+      channels: [...SERVER_CHAT_CHANNELS, directChannel, teamChannel],
       onlineCount: 0,
       channelStates: [],
       notifications: [],
@@ -251,11 +258,13 @@ describe("ChatController", () => {
     const publicRefresh = controller.refreshChannels();
     await controller.refreshChatState();
     expect(controller.getChannels().map((channel) => channel.id)).toContain(directChannel.id);
+    expect(controller.getChannels().map((channel) => channel.id)).toContain(teamChannel.id);
 
     resolvePublicChannels!(SERVER_CHAT_CHANNELS);
     await publicRefresh;
 
     expect(controller.getChannels().map((channel) => channel.id)).toContain(directChannel.id);
+    expect(controller.getChannels().map((channel) => channel.id)).toContain(teamChannel.id);
   });
 
   test("hydrates a cached verified user into the api client for offline use", async () => {

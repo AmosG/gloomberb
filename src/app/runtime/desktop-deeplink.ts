@@ -11,6 +11,7 @@ import {
 import type { DesktopDeepLinkBridge } from "../../types/desktop-deeplink";
 import type { DesktopWindowBridge } from "../../types/desktop-window";
 import { requestAccountManagementTab } from "../../plugins/builtin/account-management/navigation";
+import { openTeamPane } from "../../plugins/builtin/cloud/team/pane-request";
 import { chatController } from "../../plugins/builtin/chat/controller";
 import { getShare } from "../../shares/api";
 import { openPaneShare } from "../../shares/pane";
@@ -529,7 +530,12 @@ export function handleDesktopDeepLink(rawUrl: string, options: DesktopDeepLinkHa
     case "open-account-management":
       if (!requirePane(options.pluginRegistry, "account-management", "Account management is unavailable.")) return;
       if (action.route.kind === "cloud-emails") requestAccountManagementTab("emails");
-      if (action.route.kind === "cloud-teams") requestAccountManagementTab("teams");
+      if (action.route.kind === "cloud-teams") {
+        // Teams have their own pane; the web hand-off lands there.
+        openTeamPane((templateId, opts) => options.pluginRegistry.createPaneFromTemplate(templateId, opts), {});
+        notifySuccess(options.pluginRegistry, action.message);
+        return;
+      }
       if (action.route.kind === "cloud-success") {
         requestAccountManagementTab("pro");
         // Checkout just completed: re-read the session so the new plan shows at once.

@@ -23,8 +23,8 @@ export class CloudViewsApi {
   constructor(private readonly request: CloudApiRequest) {}
 
   async listTeamViews(teamId: string): Promise<TeamView[]> {
-    const body = await this.request<{ items: TeamView[] }>(`/teams/${encodeURIComponent(teamId)}/views`);
-    return body.items;
+    const body = await this.request<{ items?: TeamView[] }>(`/teams/${encodeURIComponent(teamId)}/views`);
+    return Array.isArray(body?.items) ? body.items : [];
   }
 
   async getTeamView(viewId: string): Promise<TeamView | null> {

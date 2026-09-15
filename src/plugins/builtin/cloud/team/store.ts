@@ -1,8 +1,9 @@
 import {
   apiClient,
-  type TeamInvitation,
   type TeamNotification,
+  type TeamReceivedInvitation,
   type TeamSummary,
+  type TeamUpdatedEvent,
 } from "../../../../api-client";
 import type { AppNotificationDelivery, AppNotificationRequest, PluginPersistence } from "../../../../types/plugin";
 import { describeTeamNotification, findTeam, teamIdFromChannelId } from "./model";
@@ -10,8 +11,8 @@ import { describeTeamNotification, findTeam, teamIdFromChannelId } from "./model
 export interface TeamStoreSnapshot {
   /** Teams the signed-in person belongs to, sorted by name. */
   teams: TeamSummary[];
-  /** Invitations waiting on this person, from the organization plugin. */
-  invitations: TeamInvitation[];
+  /** Invitations waiting on this person. */
+  invitations: TeamReceivedInvitation[];
   /** Undelivered team cards: invites, joins, layout updates. */
   notifications: TeamNotification[];
   loaded: boolean;
@@ -21,6 +22,8 @@ export interface TeamStoreSnapshot {
   focus: "all" | "personal" | { teamId: string };
   /** Tab groups the person folded or unfolded by hand since the last FOCUS change. */
   toggledGroups: ReadonlySet<string>;
+  /** Teams whose channel section in the chat sidebar is folded. Per device. */
+  collapsedTeams: ReadonlySet<string>;
 }
 
 type Listener = (snapshot: TeamStoreSnapshot) => void
@@ -28,6 +31,7 @@ type Notifier = (request: AppNotificationRequest) => AppNotificationDelivery | v
 
 const FOCUS_STATE_KEY = "team-focus";
 const NOTIFICATION_STATE_KEY = "team-notifications";
+const COLLAPSED_STATE_KEY = "team-collapsed-channels";
 
 interface TeamNotificationActions {
   openTeamChannel?: (teamId: string) => void;
@@ -44,6 +48,7 @@ const EMPTY: TeamStoreSnapshot = {
   error: null,
   focus: "all",
   toggledGroups: new Set(),
+  collapsedTeams: new Set(),
 };
 
 /**
@@ -58,6 +63,7 @@ export type TeamStoreClient = Pick<
   | "isVerified"
   | "subscribeCurrentUser"
   | "subscribeTeamNotifications"
+  | "subscribeTeamUpdates"
   | "listTeams"
   | "listMyTeamInvitations"
   | "getTeamNotifications"
@@ -91,9 +97,11 @@ export class TeamStore {
     this.persistence = persistence;
     const focus = persistence.getState<TeamStoreSnapshot["focus"]>(FOCUS_STATE_KEY);
     const notifications = persistence.getState<TeamNotification[]>(NOTIFICATION_STATE_KEY);
+    const collapsed = persistence.getState<string[]>(COLLAPSED_STATE_KEY);
     this.update({
       focus: focus ?? "all",
       notifications: Array.isArray(notifications) ? notifications : [],
+      collapsedTeams: new Set(Array.isArray(collapsed) ? collapsed : []),
     });
   }
 
@@ -110,14 +118,60 @@ export class TeamStore {
       if (this.client.isVerified()) {
         void this.refresh();
       } else if (this.snapshot.loaded || this.snapshot.teams.length > 0) {
-        this.update({ ...EMPTY, focus: this.snapshot.focus });
+        this.update({ ...EMPTY, focus: this.snapshot.focus, collapsedTeams: this.snapshot.collapsedTeams });
       }
     };
     this.disposers.push(this.client.subscribeCurrentUser(syncAuth));
     this.disposers.push(
       this.client.subscribeTeamNotifications((notification) => this.receive(notification)),
     );
+    this.disposers.push(this.client.subscribeTeamUpdates((event) => this.receiveUpdate(event)));
     syncAuth();
+  }
+
+  /** Listeners for `team.updated`, so panes showing a team refetch its details. */
+  private readonly updateListeners = new Set<(event: TeamUpdatedEvent) => void>();
+
+  onTeamUpdated(listener: (event: TeamUpdatedEvent) => void): () => void {
+    this.updateListeners.add(listener);
+    return () => {
+      this.updateListeners.delete(listener);
+    };
+  }
+
+  private receiveUpdate(event: TeamUpdatedEvent): void {
+    void this.refresh();
+    for (const listener of this.updateListeners) listener(event);
+  }
+
+  /** Applies a team the server just returned without waiting for a refresh. */
+  upsertTeam(team: TeamSummary): void {
+    const others = this.snapshot.teams.filter((entry) => entry.id !== team.id);
+    this.update({ teams: [...others, team].sort((a, b) => a.name.localeCompare(b.name)) });
+  }
+
+  removeTeam(teamId: string): void {
+    const focus = this.snapshot.focus;
+    this.update({
+      teams: this.snapshot.teams.filter((entry) => entry.id !== teamId),
+      ...(typeof focus === "object" && focus.teamId === teamId ? { focus: "all" as const } : {}),
+    });
+  }
+
+  removeInvitation(invitationId: string): void {
+    this.update({ invitations: this.snapshot.invitations.filter((entry) => entry.id !== invitationId) });
+  }
+
+  isTeamCollapsed(teamId: string): boolean {
+    return this.snapshot.collapsedTeams.has(teamId);
+  }
+
+  toggleTeamCollapsed(teamId: string): void {
+    const next = new Set(this.snapshot.collapsedTeams);
+    if (next.has(teamId)) next.delete(teamId);
+    else next.add(teamId);
+    this.update({ collapsedTeams: next });
+    this.persistence?.setState(COLLAPSED_STATE_KEY, [...next]);
   }
 
   dispose(): void {
@@ -166,7 +220,7 @@ export class TeamStore {
       try {
         const [teams, invitations, notifications] = await Promise.all([
           this.client.listTeams(),
-          this.client.listMyTeamInvitations().catch(() => [] as TeamInvitation[]),
+          this.client.listMyTeamInvitations().catch(() => [] as TeamReceivedInvitation[]),
           this.client.getTeamNotifications().catch(() => null),
         ]);
         this.update({

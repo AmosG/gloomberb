@@ -84,7 +84,7 @@ export function WebButton({
         border: `1px solid ${palette.border}`,
         borderRadius: CONTROL_RADIUS,
         padding: compact ? "0 2px" : "0 8px",
-        boxShadow: controlShadow(active, colors),
+        boxShadow: variant === "plain" ? "none" : controlShadow(active, colors),
         cursor: disabled ? "default" : "pointer",
       }}
     >
