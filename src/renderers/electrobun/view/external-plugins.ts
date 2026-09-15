@@ -28,9 +28,17 @@ export async function loadDesktopExternalPlugin(bundle: DesktopExternalPluginBun
   };
   const fallback = {
     ...base,
-    plugin: { id: bundle.id, name: bundle.name, version: bundle.version } as GloomPlugin,
+    plugin: {
+      id: bundle.id,
+      name: bundle.name,
+      version: bundle.version,
+      ...(bundle.targets ? { targets: bundle.targets } : {}),
+    } as GloomPlugin,
   };
 
+  if (bundle.unsupportedTarget) {
+    return { ...fallback, unsupportedTarget: bundle.unsupportedTarget };
+  }
   if (bundle.error || !bundle.code) {
     return { ...fallback, error: bundle.error ?? "Plugin produced no bundle." };
   }

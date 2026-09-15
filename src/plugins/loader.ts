@@ -168,7 +168,7 @@ export async function loadExternalPlugin(
     if (!plugin || !plugin.id || !plugin.name) {
       return {
         ...base,
-        plugin: { id: directory, name: directory, version: "0.0.0" } as GloomPlugin,
+        plugin: { id: directory, name: directory, version: "" } as GloomPlugin,
         error: "Plugin did not export a valid GloomPlugin (missing id or name).",
       };
     }
@@ -182,7 +182,7 @@ export async function loadExternalPlugin(
     loaderLog.error(`Failed to load plugin from ${pluginDir}: ${err}`);
     return {
       ...base,
-      plugin: { id: directory, name: directory, version: "0.0.0" } as GloomPlugin,
+      plugin: { id: directory, name: directory, version: "" } as GloomPlugin,
       error: err instanceof Error ? err.message : String(err),
     };
   }

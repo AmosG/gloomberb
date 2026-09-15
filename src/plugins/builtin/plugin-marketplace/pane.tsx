@@ -138,7 +138,7 @@ function EntryDetail({ entry, width, host }: { entry: MarketplaceEntry; width: n
       <Box flexDirection="row" gap={2} height={1}>
         <Text fg={colors.textDim}>{entry.tier}</Text>
         {entry.categories.length > 0 ? <Text fg={colors.textDim}>{entry.categories.join(", ")}</Text> : null}
-        {versionLabel(entry) ? <Text fg={hasUpdate(entry) ? colors.textBright : colors.textDim}>{`v${versionLabel(entry)}`}</Text> : null}
+        {versionLabel(entry) ? <Text fg={hasUpdate(entry) ? colors.textBright : colors.textDim}>{versionLabel(entry)}</Text> : null}
         {!entry.bundled && entry.stars > 0 ? <Text fg={colors.textDim}>{`${entry.stars} star${entry.stars === 1 ? "" : "s"}`}</Text> : null}
         {status.text ? <Text fg={STATUS_COLORS[status.kind]}>{status.text}</Text> : null}
       </Box>
@@ -301,6 +301,14 @@ export function PluginMarketplacePane({ focused, width, height }: PaneProps) {
       await activeHost.activate(loaded).catch(() => {});
       return { ok: false, error: loaded.error };
     }
+    // Where data calls execute first, so a pane that renders can also fetch.
+    if (activeManager.activate && !loaded.unsupportedTarget) {
+      const backend = await activeManager.activate(directory);
+      if (!backend.ok) {
+        await activeHost.activate({ ...loaded, error: backend.error }).catch(() => {});
+        return { ok: false, error: backend.error };
+      }
+    }
     try {
       await activeHost.activate(loaded);
       return { ok: true, pluginId: loaded.plugin.id, name: loaded.plugin.name };
@@ -403,7 +411,8 @@ export function PluginMarketplacePane({ focused, width, height }: PaneProps) {
     if (!confirmed) return;
     setBusy({ id: entry.id, verb: "removing" });
     setLastError(null);
-    await host.deactivate(entry.id).catch(() => {});
+    await host.deactivate(entry.id, entry.directory).catch(() => {});
+    await manager.deactivate?.(entry.id).catch(() => {});
     const result = await manager.remove(entry.directory!);
     setBusy(null);
     bump();

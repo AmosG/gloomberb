@@ -37,8 +37,10 @@ import {
 import { MAIN_WINDOW_RPC_KEY } from "./window/focus";
 import { handleHttpFetch } from "./desktop/http-fetch";
 import {
+  activateExternalPlugin,
   bundleExternalPluginDirectory,
   collectExternalPluginBundles,
+  deactivateExternalPlugin,
   installExternalPlugin,
   removeExternalPlugin,
   updateExternalPlugin,
@@ -497,6 +499,10 @@ async function handleBackendRequest(
       return removeExternalPlugin(request.payload.directory);
     case "plugins.bundle":
       return bundleExternalPluginDirectory(request.payload.directory);
+    case "plugins.activate":
+      return activateExternalPlugin(requireServices().pluginRegistry, request.payload.directory);
+    case "plugins.deactivate":
+      return deactivateExternalPlugin(requireServices().pluginRegistry, request.payload.pluginId);
     case "host.restart":
     case "host.exit":
     case "host.windowControl":

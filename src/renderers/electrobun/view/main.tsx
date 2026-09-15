@@ -9,6 +9,7 @@ import { measurePerfAsync } from "../../../utils/perf-marks";
 import {
   backendRequest,
   initElectrobunBackend,
+  replaceElectrobunCapabilityManifests,
   setElectrobunRemoteRequestHandler,
 } from "./backend-rpc";
 import { installElectrobunAiHost } from "./ai-host";
@@ -133,6 +134,8 @@ async function boot() {
 
   // The view cannot run git or bun; every operation is the Bun process doing
   // it, and `load` is that process compiling the result for this renderer.
+  // `activate` registers the plugin over there too, where its capabilities and
+  // brokers actually run, and adopts the manifests that come back.
   setPluginManager({
     install: (repo, pin) => backendRequest("plugins.install", { ref: repo, ...(pin ? { pin } : {}) }),
     update: (directory, pin) => backendRequest("plugins.update", { directory, ...(pin ? { pin } : {}) }),
@@ -140,6 +143,16 @@ async function boot() {
     load: async (directory) => {
       const bundle = await backendRequest("plugins.bundle", { directory });
       return bundle ? loadDesktopExternalPlugin(bundle) : null;
+    },
+    activate: async (directory) => {
+      const result = await backendRequest("plugins.activate", { directory });
+      if (!result.ok) return result;
+      replaceElectrobunCapabilityManifests(result.capabilityManifests);
+      return { ok: true };
+    },
+    deactivate: async (pluginId) => {
+      const result = await backendRequest("plugins.deactivate", { pluginId });
+      replaceElectrobunCapabilityManifests(result.capabilityManifests);
     },
   });
 

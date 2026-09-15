@@ -99,10 +99,15 @@ export interface DesktopExternalPluginBundle {
   directory: string;
   commit?: string;
   linked?: boolean;
-  /** ES module source, absent when `error` is set. */
+  /** ES module source, absent when `error` or `unsupportedTarget` is set. */
   code?: string;
   targets?: readonly ("cli" | "tui" | "desktop" | "web")[];
   error?: string;
+  /**
+   * The plugin loaded but declares it does not run on the desktop. Not an
+   * error: the marketplace shows it as terminal-only rather than failed.
+   */
+  unsupportedTarget?: "desktop";
 }
 
 export interface DesktopPluginPin {
@@ -112,6 +117,15 @@ export interface DesktopPluginPin {
 
 export type DesktopPluginOperationResult =
   | { ok: true; directory: string }
+  | { ok: false; error: string };
+
+/**
+ * Outcome of registering a plugin in the Bun process after startup. The
+ * manifests are the full renderer-visible set afterwards, so the view can
+ * replace the snapshot it took at init and reach the new capabilities.
+ */
+export type DesktopPluginActivationResult =
+  | { ok: true; pluginId: string; capabilityManifests: CapabilityManifest[] }
   | { ok: false; error: string };
 
 export interface DesktopBackendRequestMap {
@@ -147,6 +161,12 @@ export interface DesktopBackendRequestMap {
   "plugins.remove": { request: { directory: string }; response: DesktopPluginOperationResult };
   /** Compiles one plugin directory, fresh, for activation in the view. */
   "plugins.bundle": { request: { directory: string }; response: DesktopExternalPluginBundle | null };
+  /**
+   * Loads and registers the plugin in the Bun process, where capabilities and
+   * brokers execute. The view registers its own copy for panes and commands.
+   */
+  "plugins.activate": { request: { directory: string }; response: DesktopPluginActivationResult };
+  "plugins.deactivate": { request: { pluginId: string }; response: { capabilityManifests: CapabilityManifest[] } };
   "host.restart": { request: DesktopRestartMessage; response: null };
   "host.exit": { request: null; response: null };
   "host.windowControl": { request: { action: DesktopWindowControlAction }; response: null };

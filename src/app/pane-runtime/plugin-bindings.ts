@@ -8,13 +8,11 @@ import { setLayoutManagerDispatch } from "../../plugins/builtin/layout-manager";
 import { setMarketplaceHost } from "../../plugins/builtin/plugin-marketplace/store";
 import type { InstalledPlugin } from "../../plugins/builtin/plugin-marketplace/model";
 import {
-  findExternalPlugin,
   listExternalPlugins,
   removeExternalPlugin,
   seedExternalPlugins,
   upsertExternalPlugin,
 } from "../../plugins/external-runtime";
-import { getCurrentPluginTarget } from "../../plugins/current-target";
 import { getPluginHealth } from "../../plugins/health";
 import type { LoadedExternalPlugin } from "../../plugins/loader";
 import { materializeMarketplaceLayout } from "../../layout-marketplace/payload";
@@ -305,7 +303,7 @@ export function bindAppPanePluginRegistry({
         installed.push({
           id: entry.plugin.id,
           name: entry.plugin.name,
-          version: entry.plugin.version ?? "0.0.0",
+          version: entry.plugin.version ?? "",
           ...(entry.plugin.description ? { description: entry.plugin.description } : {}),
           toggleable: true,
           enabled: !disabled.has(entry.plugin.id),
@@ -341,19 +339,13 @@ export function bindAppPanePluginRegistry({
       }
       try {
         await pluginRegistry.register(entry.plugin);
-        // The desktop view renders panes, but capability and broker calls run
-        // in the Bun process against the registry it built at startup. Those
-        // contributions are inert there until a relaunch, so say so rather
-        // than letting the first data call fail.
-        const bunSide = !!entry.plugin.broker || (entry.plugin.capabilities?.length ?? 0) > 0;
-        const needsRestart = bunSide && getCurrentPluginTarget() === "desktop";
-        upsertExternalPlugin(needsRestart ? { ...entry, needsRestart: true } : entry);
+        upsertExternalPlugin(entry);
       } catch (error) {
         upsertExternalPlugin({ ...entry, error: error instanceof Error ? error.message : String(error) });
         throw error;
       }
     },
-    deactivate: async (pluginId) => {
+    deactivate: async (pluginId, directory) => {
       if (isDetachedWindow) throw new Error("Manage plugins from the main window.");
       const paneIds = pluginRegistry.getPluginPaneIds(pluginId);
       for (const paneId of paneIds) pluginRegistry.hidePane(paneId);
@@ -366,7 +358,7 @@ export function bindAppPanePluginRegistry({
         persistLayout(next);
       }
       if (pluginRegistry.allPlugins.has(pluginId)) pluginRegistry.unregister(pluginId);
-      if (findExternalPlugin(pluginId)) removeExternalPlugin(pluginId);
+      removeExternalPlugin(pluginId, directory);
     },
     contributions: (pluginId) => {
       const panes = pluginRegistry.getPluginPaneIds(pluginId)

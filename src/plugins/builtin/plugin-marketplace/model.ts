@@ -120,6 +120,12 @@ function sectionOf(entry: { installed: boolean; bundled: boolean }): Marketplace
  * plugin can be installed but inert because this renderer cannot run it. The
  * merge keeps all three visible rather than showing whichever list is handy.
  */
+/** The folder `gloomberb install owner/repo` creates, which is the repository name. */
+function repoDirectory(repo: string | undefined): string | null {
+  const name = repo?.split("/")[1]?.replace(/\.git$/, "");
+  return name ? name.toLowerCase() : null;
+}
+
 export function mergeCatalog(options: {
   registry: readonly RegistryPlugin[];
   installed: readonly InstalledPlugin[];
@@ -129,9 +135,34 @@ export function mergeCatalog(options: {
   const installedById = new Map(installed.map((entry) => [entry.id, entry]));
   const entries: MarketplaceEntry[] = [];
 
+  // Ids first, so a plugin that reports one is never claimed by a different
+  // registry row that happens to share its folder name.
+  const localFor = new Map<string, InstalledPlugin>();
   for (const plugin of registry) {
-    const local = installedById.get(plugin.id);
+    const byId = installedById.get(plugin.id);
+    if (!byId) continue;
+    localFor.set(plugin.id, byId);
     installedById.delete(plugin.id);
+  }
+  // A plugin that failed to import has no id to report, so the loader falls
+  // back to its folder name. That folder is the registry's repository name,
+  // which is enough to put the failure on the row the user installed from
+  // rather than beside it as a second, unlisted plugin.
+  for (const plugin of registry) {
+    if (localFor.has(plugin.id)) continue;
+    const directory = repoDirectory(plugin.repo);
+    if (!directory) continue;
+    for (const [id, local] of installedById) {
+      if (local.source === "external" && (local.directory ?? id).toLowerCase() === directory) {
+        localFor.set(plugin.id, local);
+        installedById.delete(id);
+        break;
+      }
+    }
+  }
+
+  for (const plugin of registry) {
+    const local = localFor.get(plugin.id);
 
     const base = {
       // A bundled plugin is present whether or not the local catalog reports it,
