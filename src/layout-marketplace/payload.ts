@@ -155,6 +155,20 @@ export function isPrivateMarketplaceField(key: string): boolean {
     || normalized.endsWith("cookie");
 }
 
+const SCOPED_COLLECTION_FIELDS = new Set(["collectionid", "visiblecollectionids"]);
+
+/**
+ * Collection references are private because a personal id says nothing to
+ * anyone else and a broker id must not travel. A team-scoped reference
+ * (`team:<teamId>:<id>`) is the exception: it means the same thing on every
+ * member's machine, so it survives team publishing.
+ */
+export function isTeamScopedCollectionField(key: string, value: unknown): boolean {
+  if (!SCOPED_COLLECTION_FIELDS.has(normalizedKey(key))) return false;
+  const values = Array.isArray(value) ? value : [value];
+  return values.length > 0 && values.every((entry) => typeof entry === "string" && /^team:[^:]+:[^:]+$/.test(entry));
+}
+
 function parseJson(value: unknown, depth = 0): JsonValue | undefined {
   if (value === null || typeof value === "boolean") return value;
   if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
@@ -170,7 +184,7 @@ function parseJson(value: unknown, depth = 0): JsonValue | undefined {
   if (entries.length > MAX_JSON_KEYS) return undefined;
   const parsed: Record<string, JsonValue> = {};
   for (const [key, entry] of entries) {
-    if (isPrivateMarketplaceField(key)) return undefined;
+    if (isPrivateMarketplaceField(key) && !isTeamScopedCollectionField(key, entry)) return undefined;
     const next = parseJson(entry, depth + 1);
     if (next === undefined) return undefined;
     parsed[key] = next;
@@ -193,7 +207,7 @@ function sanitizeJson(value: unknown, depth = 0): JsonValue | undefined {
   if (entries.length > MAX_JSON_KEYS) return undefined;
   const sanitized: Record<string, JsonValue> = {};
   for (const [key, entry] of entries) {
-    if (isPrivateMarketplaceField(key)) continue;
+    if (isPrivateMarketplaceField(key) && !isTeamScopedCollectionField(key, entry)) continue;
     const next = sanitizeJson(entry, depth + 1);
     if (next !== undefined) sanitized[key] = next;
   }
@@ -216,7 +230,7 @@ function sanitizeRecord(
   const excluded = new Set(privateFields ?? []);
   const sanitized: Record<string, JsonValue> = {};
   for (const [key, entry] of Object.entries(value)) {
-    if (excluded.has(key) || isPrivateMarketplaceField(key)) continue;
+    if ((excluded.has(key) || isPrivateMarketplaceField(key)) && !isTeamScopedCollectionField(key, entry)) continue;
     const next = sanitizeJson(entry);
     if (next !== undefined) sanitized[key] = next;
   }

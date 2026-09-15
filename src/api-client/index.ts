@@ -24,6 +24,7 @@ import { CloudDataApi } from "./data";
 import { ApiRequestError } from "./errors";
 import { CloudApiRequestTransport } from "./request";
 import { CloudApiSocket } from "./socket";
+import { CloudCollectionsApi } from "./collections";
 import { CloudNotesApi } from "./notes";
 import { CloudTeamsApi } from "./teams";
 import type {
@@ -104,6 +105,7 @@ class GloomApiClient {
   });
   private readonly data: CloudDataApi = new CloudDataApi((path, options) => this.request(path, options));
   private readonly notes: CloudNotesApi = new CloudNotesApi((path, options) => this.request(path, options));
+  private readonly collections: CloudCollectionsApi = new CloudCollectionsApi((path, options) => this.request(path, options));
   readonly askg: CloudASKGApi = new CloudASKGApi({
     request: (path, options) => this.request(path, options),
     openStream: (path, options) => this.transport.openStream(path, options),
@@ -619,6 +621,13 @@ class GloomApiClient {
   getCloudNote = this.notes.getNote.bind(this.notes);
   putCloudNote = this.notes.putNote.bind(this.notes);
   deleteCloudNote = this.notes.deleteNote.bind(this.notes);
+  listTeamCollections = this.collections.listTeamCollections.bind(this.collections);
+  getTeamCollection = this.collections.getTeamCollection.bind(this.collections);
+  createTeamCollection = this.collections.createTeamCollection.bind(this.collections);
+  updateTeamCollection = this.collections.updateTeamCollection.bind(this.collections);
+  deleteTeamCollection = this.collections.deleteTeamCollection.bind(this.collections);
+  putTeamCollectionItem = this.collections.putTeamCollectionItem.bind(this.collections);
+  removeTeamCollectionItem = this.collections.removeTeamCollectionItem.bind(this.collections);
 
   /** Subscribes to a shared scanner feed; all panes of one kind share one upstream subscription. */
   subscribeScanner = this.socket.subscribeScanner.bind(this.socket);

@@ -1,4 +1,6 @@
 import type { Dispatch } from "react";
+import { apiClient } from "../../../api-client";
+import { teamCollectionLocalId } from "../../../plugins/builtin/cloud/team/collections";
 import type { DataProvider } from "../../../types/data-provider";
 import type { AppTickerRepositoryPort } from "../../../core/app-service-ports";
 import type { PluginRegistry } from "../../../plugins/registry";
@@ -27,8 +29,8 @@ export type CommandBarNotifyFn = (
 
 export interface CommandBarCollectionWorkflowActions {
   connectBrokerProfile: (brokerId: string, values: WorkflowStringValues) => Promise<void>;
-  createManualPortfolio: (name: string) => Promise<void>;
-  createWatchlist: (name: string) => Promise<void>;
+  createManualPortfolio: (name: string, owner?: CollectionOwner) => Promise<void>;
+  createWatchlist: (name: string, owner?: CollectionOwner) => Promise<void>;
   deletePortfolio: (portfolioId: string) => Promise<void>;
   deleteWatchlist: (watchlistId: string) => Promise<void>;
   disconnectBrokerInstance: (instanceId: string) => Promise<void>;
@@ -93,7 +95,13 @@ export function createCommandBarCollectionWorkflowActions(options: {
       notify("Connected! Positions will sync automatically.", { type: "success" });
     },
 
-    async createManualPortfolio(name) {
+    async createManualPortfolio(name, owner) {
+      if (owner?.kind === "team") {
+        const created = await createTeamCollectionAndWait(owner.teamId, "portfolio", name, getState().config.baseCurrency);
+        setActiveCollection(created);
+        notify(`Created team portfolio "${name.trim()}".`, { type: "success" });
+        return;
+      }
       const currentState = getState();
       const { config: nextConfig, portfolio } = createManualPortfolioConfig(
         currentState.config,
@@ -106,11 +114,17 @@ export function createCommandBarCollectionWorkflowActions(options: {
       notify(`Created portfolio "${portfolio.name}".`, { type: "success" });
     },
 
-    async createWatchlist(name) {
+    async createWatchlist(name, owner) {
       const currentState = getState();
       const trimmedName = name.trim();
       if (!trimmedName) {
         throw new Error("Watchlist name is required.");
+      }
+      if (owner?.kind === "team") {
+        const created = await createTeamCollectionAndWait(owner.teamId, "watchlist", trimmedName);
+        setActiveCollection(created);
+        notify(`Created team watchlist "${trimmedName}".`, { type: "success" });
+        return;
       }
 
       const id = slugifyName(trimmedName, "watchlist");
@@ -266,4 +280,25 @@ export function createCommandBarCollectionWorkflowActions(options: {
       notify(`Removed ${instance.label}.`, { type: "success" });
     },
   };
+}
+
+export type CollectionOwner = { kind: "user" } | { kind: "team"; teamId: string };
+
+/**
+ * Creates the collection on the server. The collection.updated frame brings
+ * it into the config; the local id is known up front so the pane can switch
+ * to it as soon as that lands.
+ */
+async function createTeamCollectionAndWait(
+  teamId: string,
+  kind: "watchlist" | "portfolio",
+  name: string,
+  currency?: string,
+): Promise<string> {
+  const created = await apiClient.createTeamCollection(teamId, {
+    kind,
+    name: name.trim(),
+    ...(kind === "portfolio" ? { currency: (currency || "USD").toUpperCase() } : {}),
+  });
+  return teamCollectionLocalId(teamId, created.id);
 }

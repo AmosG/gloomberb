@@ -13,6 +13,7 @@ import { bindAppActivity, useAppActive } from "./state/app/activity";
 import { Header } from "./components/layout/header";
 import { StatusBar } from "./components/layout/status-bar";
 import { useLinkedLayoutSync } from "./layout-marketplace/linked-sync";
+import { useTeamCollectionsSync } from "./plugins/builtin/cloud/team/collections-sync";
 import { Shell } from "./components/layout/shell";
 import { DetachedPaneShell } from "./components/layout/detached-pane-shell";
 import { TransientLayoutProvider } from "./components/layout/transient-layout";
@@ -322,6 +323,7 @@ function AppInner({
   const persistConfig = useCallback((nextConfig: AppState["config"]) => {
     scheduleConfigSave(nextConfig);
   }, []);
+  useTeamCollectionsSync({ persistConfig, tickerRepository });
 
   useAppPaneRuntime({
     dataProvider,
