@@ -25,6 +25,7 @@ import {
   canManageTeam,
   describeExpiry,
   normalizeTeamChannelName,
+  sortTeamChannels,
   teamAccentHex,
   teamChannelId,
   teamIdFromChannelId,
@@ -236,7 +237,9 @@ export function TeamPane({ focused, width, height, close }: PaneProps) {
   // through a subscription and copied into state only when something changed.
   const [chat, setChat] = useState<ChatChannel[]>(() => chatController.getChannels());
   const channels = useMemo(
-    () => (team ? chat.filter((channel) => channel.kind === "team" && teamIdFromChannelId(channel.id) === team.id) : []),
+    () => (team
+      ? sortTeamChannels(chat.filter((channel) => channel.kind === "team" && teamIdFromChannelId(channel.id) === team.id))
+      : []),
     [chat, team],
   );
   const [unreadByChannel, setUnreadByChannel] = useState<ReadonlyMap<string, number>>(() => new Map());

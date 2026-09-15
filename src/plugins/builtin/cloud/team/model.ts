@@ -32,6 +32,16 @@ export function teamIdFromChannelId(channelId: string): string | null {
   return teamId || null;
 }
 
+/** #general first, then the rest by name, whatever order the server used. */
+export function sortTeamChannels<T extends { id: string; name: string }>(channels: readonly T[]): T[] {
+  return [...channels].sort((a, b) => {
+    const aGeneral = a.id.split(":").length === 2;
+    const bGeneral = b.id.split(":").length === 2;
+    if (aGeneral !== bGeneral) return aGeneral ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+}
+
 export function isTeamChannelId(channelId: string): boolean {
   return channelId.startsWith(TEAM_CHANNEL_PREFIX);
 }

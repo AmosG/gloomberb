@@ -12,7 +12,7 @@ import { TextAttributes } from "../../../ui";
 import { colors } from "../../../theme/colors";
 import { t, tf } from "../../../i18n";
 import type { ChatChannel, TeamSummary } from "../../../api-client";
-import { teamAccentHex, teamPrefix } from "../cloud/team/model";
+import { sortTeamChannels, teamAccentHex, teamPrefix } from "../cloud/team/model";
 import { teamStore } from "../cloud/team/store";
 import type { ChatController } from "./controller";
 import {

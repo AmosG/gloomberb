@@ -11,6 +11,7 @@ import {
   isTeamChannelId,
   normalizeTeamChannelName,
   normalizeTeamShortName,
+  sortTeamChannels,
   teamChannelId,
   teamIdFromChannelId,
   teamLabel,
@@ -138,6 +139,15 @@ describe("team channels and names", () => {
     expect(teamIdFromChannelId("team:org-1")).toBe("org-1");
     expect(teamIdFromChannelId("everyone")).toBeNull();
     expect(isTeamChannelId("team:x")).toBe(true);
+  });
+
+  test("#general leads, the rest sort by name", () => {
+    const sorted = sortTeamChannels([
+      { id: "team:o:zeta", name: "zeta" },
+      { id: "team:o:alpha", name: "alpha" },
+      { id: "team:o", name: "general" },
+    ]);
+    expect(sorted.map((channel) => channel.name)).toEqual(["general", "alpha", "zeta"]);
   });
 
   test("channel names normalize the way the server keeps them", () => {
