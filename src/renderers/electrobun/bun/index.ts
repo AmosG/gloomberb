@@ -1,4 +1,5 @@
 import Electrobun, { ApplicationMenu, BrowserView, BrowserWindow, Utils } from "electrobun/bun";
+import { debugLog } from "../../../utils/debug-log";
 import {
   APP_SESSION_ID,
   APP_SESSION_SCHEMA_VERSION,
@@ -77,6 +78,11 @@ type DesktopRpc = ReturnType<typeof BrowserView.defineRPC<ElectrobunDesktopRpcSc
 console.log = (...args) => console.error(...args);
 console.info = (...args) => console.error(...args);
 console.warn = (...args) => console.error(...args);
+
+// The Bun process has no Debug pane. An error logged here, such as a plugin
+// that failed to import, would otherwise be invisible outside the view's
+// marketplace row; the launcher log is where a desktop user can look.
+debugLog.mirrorToConsole({ minLevel: "error" });
 
 setConfigStoreHost(nodeConfigStoreHost);
 
