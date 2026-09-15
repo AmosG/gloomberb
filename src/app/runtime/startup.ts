@@ -85,6 +85,7 @@ export function useAppStartupRuntime({
           tickerRepository,
           dataProvider,
           sessionSnapshot,
+          paneState: state.paneState,
           dispatch,
           primeCachedFinancials,
           refreshTicker,

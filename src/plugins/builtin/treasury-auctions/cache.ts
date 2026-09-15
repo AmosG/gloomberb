@@ -6,13 +6,12 @@ import type { TreasuryAuction } from "./types";
 
 const CACHE_KIND = "treasury-auctions";
 const CACHE_SOURCE = "treasury-fiscal-data";
-/** 2: rows carry a CUSIP, so reopenings no longer share an id with the original. */
-const CACHE_SCHEMA_VERSION = 2;
+/** 3: every reported page was validated before this board was cached. */
+const CACHE_SCHEMA_VERSION = 3;
 export const TREASURY_FISCAL_DATA_CONNECTION_ID = "treasury-fiscal-data";
 /**
- * Auctions settle a few times a week and results never change once published,
- * so an hour of freshness is plenty; the week-long expiry is what keeps an
- * offline start usable.
+ * Refresh the auction board hourly; the week-long expiry keeps an offline
+ * start usable without treating the cached observations as a current fetch.
  */
 const CACHE_POLICY = {
   staleMs: 60 * 60 * 1000,
@@ -24,6 +23,7 @@ export interface TreasuryAuctionsResult {
   fetchedAt: number;
   /** True when the network failed and expired cache was served instead. */
   stale: boolean;
+  refreshError?: string;
 }
 
 const cache = createPluginCache<TreasuryAuction[]>({
@@ -59,5 +59,8 @@ export async function loadTreasuryAuctions(
     if (auctions.length === 0) throw new Error("Treasury Fiscal Data returned no auctions");
     return auctions;
   }, { force });
-  return { auctions: result.data, fetchedAt: result.fetchedAt, stale: result.stale };
+  return {
+    auctions: result.data, fetchedAt: result.fetchedAt, stale: result.stale,
+    ...(result.refreshError ? { refreshError: result.refreshError } : {}),
+  };
 }

@@ -1,5 +1,40 @@
+import { ApiRequestError } from "../../../api-client/errors";
+
 const DATE_MARKER = "__gloomDate";
 const MAP_MARKER = "__gloomMap";
+const RESPONSE_MARKER = "__gloomRpcResponse";
+
+/** Electrobun serializes thrown errors as message strings, losing API status. */
+export async function encodeRpcResponse(load: () => unknown | Promise<unknown>): Promise<unknown> {
+  try {
+    return { [RESPONSE_MARKER]: 1, ok: true, value: encodeRpcValue(await load()) };
+  } catch (error) {
+    if (!(error instanceof ApiRequestError)) throw error;
+    return {
+      [RESPONSE_MARKER]: 1,
+      ok: false,
+      error: { message: error.message, status: error.status, retryAfterMs: error.retryAfterMs },
+    };
+  }
+}
+
+export function decodeRpcResponse<T = unknown>(value: unknown): T {
+  if (value && typeof value === "object" && RESPONSE_MARKER in value) {
+    const response = value as Record<string, unknown>;
+    if (response[RESPONSE_MARKER] !== 1) throw new Error("Unsupported desktop response");
+    if (response.ok === true) return decodeRpcValue<T>(response.value);
+    const error = response.error as Record<string, unknown> | null;
+    if (response.ok !== false || !error || typeof error !== "object"
+      || typeof error.message !== "string"
+      || (error.status !== undefined && (!Number.isInteger(error.status) || Number(error.status) < 100 || Number(error.status) > 599))
+      || (error.retryAfterMs !== undefined && (typeof error.retryAfterMs !== "number" || !Number.isFinite(error.retryAfterMs) || error.retryAfterMs < 0))) {
+      throw new Error("Invalid desktop response");
+    }
+    throw new ApiRequestError(error.message, error.status as number | undefined, error.retryAfterMs as number | undefined);
+  }
+  // Accept successful responses from the previous bridge format as well.
+  return decodeRpcValue<T>(value);
+}
 
 export function encodeRpcValue(value: unknown): unknown {
   if (value instanceof Date) {

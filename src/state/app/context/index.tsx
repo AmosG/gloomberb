@@ -24,6 +24,7 @@ import {
 import type { DesktopSharedStateSnapshot, DesktopThemePreviewState, DesktopWindowBridge } from "../../../types/desktop-window";
 import { setPaneSetting, updatePaneInstance } from "../../../pane-settings";
 import { useTickerFinancials } from "../../../market-data/hooks";
+import { hasAmbiguousTickerContracts, resolveInstrumentForPane, resolveListingForPane, tickerForInstrument } from "../../../core/state/app/instrument";
 import {
   APP_SESSION_ID,
   APP_SESSION_SCHEMA_VERSION,
@@ -215,39 +216,42 @@ export function usePaneTicker(paneId?: string) {
   const needsFocusedPane = paneId == null && paneContextId == null;
   const focusedPaneId = useAppSelector((state) => (needsFocusedPane ? state.focusedPaneId : null));
   const scopedPaneId = paneId ?? paneContextId ?? focusedPaneId;
+  return useScopedTicker(scopedPaneId);
+}
+
+function useScopedTicker(scopedPaneId: string | null) {
   const symbol = useAppSelector((state) => (
     scopedPaneId ? resolveTickerForPane(state, scopedPaneId) : null
   ));
-  const ticker = useAppSelector((state) => (
+  const savedTicker = useAppSelector((state) => (
     symbol ? state.tickers.get(symbol) ?? null : null
   ));
+  const contract = useAppSelector((state) => (
+    scopedPaneId ? resolveInstrumentForPane(state, scopedPaneId)?.instrument : undefined
+  ));
+  const listing = useAppSelector((state) => scopedPaneId ? resolveListingForPane(state, scopedPaneId) : undefined);
+  const ticker = useMemo(() => tickerForInstrument(savedTicker, contract, listing), [savedTicker, contract, listing]);
   const cachedFinancials = useAppSelector((state) => (
     symbol ? state.financials.get(symbol) ?? null : null
   ));
-  const marketFinancials = useTickerFinancials(symbol, ticker);
+  const marketFinancials = useTickerFinancials(contract === undefined ? null : symbol, contract === undefined ? null : ticker);
 
   return useMemo(() => {
-    if (!scopedPaneId) return { symbol: null, ticker: null, financials: null };
+    if (!scopedPaneId) return { symbol: null, ticker: null, financials: null, error: undefined };
     return {
       symbol,
       ticker,
-      financials: marketFinancials ?? cachedFinancials,
+      error: contract === undefined && hasAmbiguousTickerContracts(savedTicker) ? "Choose a contract in search." : undefined,
+      financials: marketFinancials ?? (cachedFinancials && (contract || contract === undefined || savedTicker?.metadata.broker_contracts?.length)
+        ? { ...cachedFinancials, quote: undefined, quoteContributions: undefined, quoteMetadata: undefined, priceHistory: [] }
+        : cachedFinancials),
     };
-  }, [cachedFinancials, marketFinancials, scopedPaneId, symbol, ticker]);
+  }, [cachedFinancials, contract, marketFinancials, savedTicker, scopedPaneId, symbol, ticker]);
 }
 
 export function useFocusedTicker() {
-  const symbol = useAppSelector((state) => getFocusedTickerSymbol(state));
-  const ticker = useAppSelector((state) => (symbol ? state.tickers.get(symbol) ?? null : null));
-  const cachedFinancials = useAppSelector((state) => (symbol ? state.financials.get(symbol) ?? null : null));
-  const marketFinancials = useTickerFinancials(symbol, ticker);
-  return useMemo(() => {
-    return {
-      symbol,
-      ticker,
-      financials: marketFinancials ?? cachedFinancials,
-    };
-  }, [cachedFinancials, marketFinancials, symbol, ticker]);
+  const paneId = useAppSelector((state) => state.focusedPaneId);
+  return useScopedTicker(paneId);
 }
 
 export function usePaneCollection(paneId?: string) {

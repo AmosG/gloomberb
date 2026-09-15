@@ -60,7 +60,9 @@ export class ProviderRouterBatchRoutes {
         ...this.deps.getProviderSourceKeys(),
       ];
       const rawCached = selectCachedResource<Quote>(this.deps.resources, "quote", entityKey, variantKeys, sourceKeys, false);
-      const cached = rawCached && !isQuoteStaleForCurrentSession(quoteWithFreshnessExchange(rawCached.value, target.exchange))
+      const cached = rawCached && (brokerSourceKeys.includes(rawCached.sourceKey)
+        ? !isQuoteStaleForCurrentSession(quoteWithFreshnessExchange(rawCached.value, target.exchange))
+        : isProviderQuoteUsableForCurrentSession(rawCached.value, target.exchange, target.symbol))
         ? rawCached
         : null;
       if (cached && !forceRefresh && !cached.stale) {
@@ -87,7 +89,7 @@ export class ProviderRouterBatchRoutes {
       const uniqueTargets = [...providerIndexes.values()].map((bucket) => bucket[0]!.target);
       const batchResults = await batchProvider.getQuotesBatch!(uniqueTargets, options).catch(() => []);
       for (const item of batchResults) {
-        if (!isProviderQuoteUsableForCurrentSession(item.quote, item.target.exchange)) continue;
+        if (!isProviderQuoteUsableForCurrentSession(item.quote, item.target.exchange, item.target.symbol)) continue;
         const key = this.quoteBatchKey(item.target);
         const sourceKey = this.deps.providerSourceKey(batchProvider);
         for (const entry of providerIndexes.get(key) ?? []) {

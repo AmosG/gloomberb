@@ -70,3 +70,18 @@ test("exports stale quote dates and rejected endpoints with the matching reason"
   expect(result.rows.find((row) => row.etf === "XLK")).toMatchObject({ lastReportedPrice: 117,
     quoteSessionDate: "2026-09-09", returnIntegrity: { "1Y": integrity } });
 });
+
+test("actual industry loader exports missing windows when the peer establishing their calendar loses its endpoint", async () => {
+  const provider = {
+    getQuote: async (symbol: string) => symbol === "GDX" ? { symbol, price: 150, currency: "USD", changePercent: 0,
+      changeSessionDate: "2026-09-10", lastUpdated: Date.parse("2026-09-10T18:00:00Z") } : null,
+    getPriceHistory: async (symbol: string) => symbol === "SMH"
+      ? [{ date: new Date("2025-09-10"), close: 100 }, { date: new Date("2026-08-10"), close: 100 }, { date: new Date("2026-09-09"), close: 110 }]
+      : symbol === "GDX" ? [{ date: new Date("2025-09-09"), close: 100 }, { date: new Date("2026-08-07"), close: 100 }, { date: new Date("2026-09-10"), close: 150 }] : [],
+  };
+  const result = await createSectorsHeadless().load(args("industries"), { marketData: provider } as unknown as HeadlessPaneContext);
+  expect(result.rows.find((row) => row.etf === "GDX")).toMatchObject({ price: 150, changePercent: 0, return1M: null, return1Y: null });
+  expect(result.unavailableSymbols).toContain("GDX");
+  expect(result.errors).toContain("GDX: 1M: history does not cover the shared window.");
+  expect(result.errors).toContain("GDX: 1Y: history does not cover the shared window.");
+});

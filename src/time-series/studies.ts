@@ -1,5 +1,6 @@
 import { alignTimeSeries, effectiveTimeSeriesPointTime, scalarPointValue } from "./alignment";
 import { mergePriceHistoryIntegrity } from "../utils/price-history-integrity";
+import { resolveCurrencyUnit } from "../utils/currency-units";
 import type {
   ChartStudyKind,
   ChartStudySpec,
@@ -323,11 +324,6 @@ interface PairedSample {
   right: number;
 }
 
-interface SeriesUnit {
-  currency: string | null;
-  dimension: string;
-}
-
 function seriesCurrency(series: ResolvedSeries): string | null {
   const grouped = series.unitGroup.match(/:([A-Z]{3})$/i)?.[1];
   if (grouped) return grouped.toUpperCase();
@@ -335,15 +331,33 @@ function seriesCurrency(series: ResolvedSeries): string | null {
   return series.unit.match(/^([A-Z]{3})(?:$|\/)/i)?.[1]?.toUpperCase() ?? null;
 }
 
-function seriesUnit(series: ResolvedSeries): SeriesUnit {
-  const currency = seriesCurrency(series);
+function unitFactorIdentity(value: string): string {
+  const token = value.trim();
+  if (/^[A-Za-z]{3}$/.test(token)) {
+    const { currency, divisor } = resolveCurrencyUnit(token);
+    return `${currency}:${divisor}`;
+  }
+  return token.toLowerCase().replace(/^shares$/, "share");
+}
+
+function knownUnitSignature(series: ResolvedSeries): string | null {
   const unit = series.unit.trim();
-  return {
-    currency,
-    dimension: currency && unit.toUpperCase().startsWith(currency)
-      ? `currency${unit.slice(currency.length).toLowerCase()}`
-      : unit.toLowerCase(),
-  };
+  if (!unit || /(?:^|\W)(?:currency|unknown|unspecified|n\/a)(?:$|\W)/i.test(unit)
+    || /^(?:units?|[-?]+)$/i.test(unit)) return null;
+  if (unit.split("/").some((part) => !part.trim() || /^[-?]+$/.test(part.trim()))) return null;
+
+  const monetary = series.unitGroup.match(/^(price|currency-total|per-share)(?::([^:]+))?$/);
+  const currency = unit.match(/^([A-Za-z]{3})(?:$|\/)/)?.[1];
+  if (monetary && (!currency || (monetary[2] && unitFactorIdentity(monetary[2]) !== unitFactorIdentity(currency)))) return null;
+
+  // Currency alone does not establish a price's physical/share basis. A scalar
+  // multiplier cannot establish it either. Explicit USD/share price and EPS
+  // units, however, match despite different groups.
+  if (monetary?.[1] === "price" && !unit.includes("/")) return null;
+  const basis = monetary && !unit.includes("/") ? monetary[1] : "";
+  // Keep currency scale and compound order: GBp/GBX are pence, not pounds;
+  // USD/EUR cannot subtract EUR/USD.
+  return `${basis ?? ""}|${unit.split("/").map(unitFactorIdentity).join("/")}`;
 }
 
 function unitFactors(unit: string): { numerator: string[]; denominator: string[] } {
@@ -363,13 +377,16 @@ function ratioUnit(left: ResolvedSeries, right: ResolvedSeries): {
   unit: string;
   unitGroup: string;
 } {
+  if (!knownUnitSignature(left) || !knownUnitSignature(right)) {
+    return { unit: "unknown", unitGroup: "derived-unit:unknown" };
+  }
   const leftFactors = unitFactors(left.unit);
   const rightFactors = unitFactors(right.unit);
   const numerator = [...leftFactors.numerator, ...rightFactors.denominator];
   const denominator = [...leftFactors.denominator, ...rightFactors.numerator];
   for (let index = numerator.length - 1; index >= 0; index -= 1) {
     const match = denominator.findIndex((factor) => (
-      factor.toLowerCase() === numerator[index]!.toLowerCase()
+      unitFactorIdentity(factor) === unitFactorIdentity(numerator[index]!)
     ));
     if (match < 0) continue;
     numerator.splice(index, 1);
@@ -378,9 +395,16 @@ function ratioUnit(left: ResolvedSeries, right: ResolvedSeries): {
   const unit = denominator.length === 0
     ? numerator.join("·") || "x"
     : `${numerator.join("·") || "1"}/${denominator.join("·")}`;
+  const groupFactor = (value: string) => {
+    const identity = unitFactorIdentity(value);
+    return (/^[A-Za-z]{3}$/.test(value.trim()) ? identity.replace(/:1$/, "") : identity).toLowerCase();
+  };
+  const groupNumerator = numerator.map(groupFactor).join("·");
+  const groupDenominator = denominator.map(groupFactor).join("·");
+  const group = groupDenominator ? `${groupNumerator || "1"}/${groupDenominator}` : groupNumerator;
   return {
     unit,
-    unitGroup: unit === "x" ? "ratio" : `derived-unit:${unit.toLowerCase()}`,
+    unitGroup: unit === "x" ? "ratio" : `derived-unit:${group}`,
   };
 }
 
@@ -620,6 +644,14 @@ export function resolveStudies(
       return;
     }
     const input = inputs[0]!;
+    if (spec.kind === "spread") {
+      const pairedInput = inputs[1]!;
+      const inputUnit = knownUnitSignature(input);
+      if (inputUnit === null || inputUnit !== knownUnitSignature(pairedInput)) {
+        errors.push(`${spec.id}: spread cannot subtract ${pairedInput.label} (${pairedInput.unit || "unit unknown"}) from ${input.label} (${input.unit || "unit unknown"}); inputs require matching known units, currencies and scales.`);
+        return;
+      }
+    }
     const color = spec.color ?? STUDY_COLORS[index % STUDY_COLORS.length]!;
     const interrupted = resolveInterruptedStudy(inputs as ResolvedSeries[], { ...spec, color });
     if (interrupted) {
@@ -642,19 +674,14 @@ export function resolveStudies(
     }
     else {
       const pairedInput = inputs[1]!;
-      const inputUnit = seriesUnit(input);
-      const pairedUnit = seriesUnit(pairedInput);
-      const sameDimension = inputUnit.dimension === pairedUnit.dimension;
-      const differentCurrencies = inputUnit.currency !== null
-        && pairedUnit.currency !== null
-        && inputUnit.currency !== pairedUnit.currency;
-      if (spec.kind === "spread" && !sameDimension) {
+      const inputCurrency = seriesCurrency(input);
+      const pairedCurrency = seriesCurrency(pairedInput);
+      const differentCurrencies = inputCurrency !== null
+        && pairedCurrency !== null
+        && inputCurrency !== pairedCurrency;
+      if (spec.kind === "ratio" && differentCurrencies) {
         warnings.push(
-          `${spec.id}: spread cannot subtract ${pairedInput.unit} from ${input.unit}; choose inputs with matching units.`,
-        );
-      } else if ((spec.kind === "ratio" || spec.kind === "spread") && differentCurrencies) {
-        warnings.push(
-          `${spec.id}: ${spec.kind} inputs use different currencies (${inputUnit.currency} and ${pairedUnit.currency}); raw values are not FX-converted.`,
+          `${spec.id}: ${spec.kind} inputs use different currencies (${inputCurrency} and ${pairedCurrency}); raw values are not FX-converted.`,
         );
       }
       if (spec.kind === "correlation" && input.nativeFrequency !== pairedInput.nativeFrequency) {

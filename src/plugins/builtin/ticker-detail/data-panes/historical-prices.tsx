@@ -15,7 +15,7 @@ import type { PaneProps } from "../../../../types/plugin";
 import type { PricePoint } from "../../../../types/financials";
 import { colors, priceColor } from "../../../../theme/colors";
 import { formatCompact, formatPercent } from "../../../../utils/format";
-import { formatMarketPrice } from "../../../../market-data/market/format";
+import { formatPriceObservation } from "../../../../market-data/market/format";
 import { pricePointValues, priceHistoryIntegrityNotice } from "../../../../utils/price-history-integrity";
 import {
   useAssetData,
@@ -44,7 +44,7 @@ function pricePointDate(point: PricePoint): Date | null {
 
 function formatMaybePrice(value: number | null | undefined, width: number): string {
   return value == null || !Number.isFinite(value) ? "-"
-    : formatMarketPrice(value, { minimumFractionDigits: 2, maxWidth: width });
+    : formatPriceObservation(value, { minimumFractionDigits: 2, maxWidth: width });
 }
 
 function formatMaybePercent(value: number | null): string {

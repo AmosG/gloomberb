@@ -364,7 +364,6 @@ export function ThirteenFPane({ focused, width, height }: PaneProps) {
         getItemKey={(row) => row.id}
         renderCell={renderBrowserCell}
         emptyStateTitle={emptyTitle}
-        showHorizontalScrollbar={false}
       />
     </Box>
   );
@@ -610,7 +609,6 @@ function FundDetailView({
           getItemKey={(row) => row.id}
           renderCell={renderTimelineCell}
           emptyStateTitle="No 13F filings."
-          showHorizontalScrollbar={false}
         />
       ) : (
         <DataTableView<FundHoldingRow, FundHoldingColumn>
@@ -652,7 +650,6 @@ function FundDetailView({
           }}
           renderCell={renderHoldingCell}
           emptyStateTitle="No 13F holdings."
-          showHorizontalScrollbar={false}
         />
       )}
     </Box>
@@ -830,7 +827,6 @@ function FilingDetailView({
         getItemKey={(row) => row.id}
         renderCell={renderFilingPositionCell}
         emptyStateTitle={emptyTitle}
-        showHorizontalScrollbar={false}
       />
     </Box>
   );

@@ -3,7 +3,7 @@ import { createTestDataProvider } from "../test-support/data-provider";
 import { createDefaultConfig } from "../types/config";
 import type { FinancialStatement, TickerFinancials } from "../types/financials";
 import { loadChartPaneModel } from "../plugins/builtin/chart-composer/headless";
-import { extractFundamentalSeries } from "./fundamentals";
+import { deriveQuarterlyStatements, extractFundamentalSeries } from "./fundamentals";
 import type { ChartSpec, SecuritySeriesSource } from "./types";
 
 const source = (period: SecuritySeriesSource["period"] = "annual", metric = "trailingPE"): SecuritySeriesSource => ({
@@ -29,12 +29,12 @@ test("Current valuation chooses the latest available statement before evaluating
     const data = fixture(); data.annualStatements[1]!.eps = earnings;
     const original = JSON.stringify(data);
     expect(extractFundamentalSeries(data, source()).map(({ value, periodLabel }) => [value, periodLabel]))
-      .toEqual([[5, "Year ended 2024-12-31"]]);
+      .toEqual([[5, "Year ended 2024-12-31"], [null, "Year ended 2025-12-31"]]);
     expect(JSON.stringify(data)).toBe(original);
   }
   // An unpublished loss does not replace the earnings known at this quote time.
   const future = fixture(); future.annualStatements[1]!.fieldAvailability = { eps: "2026-10-01" };
-  expect(extractFundamentalSeries(future, source()).at(-1)?.value).toBe(6);
+  expect(extractFundamentalSeries(future, source()).find(point => point.periodLabel === "Current")?.value).toBe(6);
   // A corrected positive latest observation resumes calculation on that period.
   future.annualStatements[1] = { ...future.annualStatements[1]!, eps: 3, fieldAvailability: { eps: "2026-03-01" } };
   expect(extractFundamentalSeries(future, source()).at(-1)?.value).toBe(20);
@@ -52,6 +52,154 @@ test("automatic valuation coverage does not substitute a profitable annual perio
   // automatic annual fallback; this is different from known unprofitable input.
   data.quarterlyStatements = data.quarterlyStatements.map(({ eps, ...row }) => row);
   expect(extractFundamentalSeries(data, source("auto")).at(-1)?.value).toBe(6);
+  expect(extractFundamentalSeries(data, source("ttm"))).toEqual([]);
+});
+
+test("finite reported EPS takes precedence over aggregate income and shares, including zero", () => {
+  for (const eps of [0, -0, -2, 2]) {
+    const data = fixture();
+    Object.assign(data.annualStatements[1]!, { eps, netIncome: 100, netIncomeCommonStockholders: eps * 10, dilutedShares: 10 });
+    const original = structuredClone(data);
+    const points = extractFundamentalSeries(data, source());
+    expect(points.map(({ value }) => value)).toEqual(eps > 0 ? [5, 27.5, 30] : [5, null]);
+    expect(data).toEqual(original);
+  }
+  // Only unavailable/nonfinite reported EPS keeps the existing derivation.
+  for (const eps of [undefined, NaN, Infinity]) {
+    const data = fixture();
+    Object.assign(data.annualStatements[1]!, { eps, netIncome: 100, dilutedShares: 10 });
+    expect(extractFundamentalSeries(data, source()).map(({ value }) => value)).toEqual([5, 5.5, 6]);
+  }
+});
+
+test("zero TTM reported EPS is coverage, not permission to use aggregate income or annual EPS", () => {
+  for (const earnings of [[0, 0, 0, 0], [1, -1, 2, -2]]) {
+    const data = fixture();
+    data.annualStatements = [data.annualStatements[0]!];
+    data.quarterlyStatements = ["2025-06-30", "2025-09-30", "2025-12-31", "2026-03-31"]
+      .map((date, index) => ({ date, currency: "USD", eps: earnings[index], netIncome: 25, dilutedShares: 10 }));
+    for (const period of ["auto", "ttm"] as const) {
+      expect(extractFundamentalSeries(data, source(period))).toEqual([]);
+    }
+    data.quarterlyStatements = data.quarterlyStatements.map(({ eps, ...row }) => row);
+    for (const period of ["auto", "ttm"] as const) {
+      expect(extractFundamentalSeries(data, source(period)).at(-1)?.value).toBe(6);
+    }
+  }
+});
+
+test("reported zero EPS uses its own availability; absent EPS uses income and shares availability", () => {
+  const data = fixture();
+  const latest = data.annualStatements[1]!;
+  Object.assign(latest, { eps: 0, netIncome: 200, dilutedShares: 10,
+    fieldAvailability: { eps: "2026-03-01", netIncome: "2026-10-01", dilutedShares: "2026-10-01" } });
+  // The known zero is effective even though alternative inputs are unpublished.
+  expect(extractFundamentalSeries(data, source()).map(({ value }) => value)).toEqual([5, null]);
+  latest.fieldAvailability = { eps: "2026-10-01", netIncome: "2026-03-01", dilutedShares: "2026-03-01" };
+  // Before reported EPS is available, the older published period remains current.
+  expect(extractFundamentalSeries(data, source()).map(({ value }) => value)).toEqual([5, 6, null]);
+  latest.eps = undefined;
+  expect(extractFundamentalSeries(data, source()).map(({ value }) => value)).toEqual([5, 2.75, 3]);
+  latest.fieldAvailability.dilutedShares = "2026-10-01";
+  expect(extractFundamentalSeries(data, source()).find(({ periodLabel }) => periodLabel === "Current")?.value).toBe(6);
+});
+
+test("missing EPS selects common income including zero and loss, without requiring aggregate income", () => {
+  for (const common of [60, 0, -20]) {
+    for (const netIncome of [100, undefined]) {
+      const data = fixture();
+      Object.assign(data.annualStatements[1]!, { eps: undefined, netIncome, netIncomeCommonStockholders: common, dilutedShares: 10, basicShares: 8 });
+      const original = structuredClone(data);
+      const points = extractFundamentalSeries(data, source());
+      expect(points.map(({ value }) => value)).toEqual(common > 0 ? [5, 55 / 6, 10] : [5, null]);
+      expect(points.every(({ provenance }) => provenance?.quality === "derived")).toBe(true);
+      expect(data).toEqual(original);
+    }
+  }
+  // Unusable common-income inputs do not manufacture a number or zero claim.
+  for (const common of [undefined, NaN, Infinity]) {
+    const data = fixture();
+    Object.assign(data.annualStatements[1]!, { eps: undefined, netIncome: 100, netIncomeCommonStockholders: common, dilutedShares: 10 });
+    expect(extractFundamentalSeries(data, source()).at(-1)?.value).toBe(6);
+  }
+});
+
+test("common-income fallback uses selected share and income availability, not aggregate publication time", () => {
+  const data = fixture();
+  const latest = data.annualStatements[1]!;
+  Object.assign(latest, { eps: undefined, netIncome: 100, netIncomeCommonStockholders: 60, dilutedShares: 10, basicShares: 8,
+    fieldAvailability: { netIncome: "2026-10-01", netIncomeCommonStockholders: "2026-03-01", dilutedShares: "2026-03-01", basicShares: "2026-03-01" } });
+  let points = extractFundamentalSeries(data, source());
+  expect(points.at(-1)?.value).toBe(10);
+  expect(points[1]?.availableAt?.toISOString()).toBe("2026-03-01T00:00:00.000Z");
+  latest.fieldAvailability!.netIncomeCommonStockholders = "2026-10-01";
+  expect(extractFundamentalSeries(data, source()).find(({ periodLabel }) => periodLabel === "Current")?.value).toBe(6);
+  latest.fieldAvailability!.netIncomeCommonStockholders = "2026-03-01";
+  latest.fieldAvailability!.dilutedShares = "2026-10-01";
+  expect(extractFundamentalSeries(data, source()).find(({ periodLabel }) => periodLabel === "Current")?.value).toBe(6);
+  for (const dilutedShares of [undefined, 0, -1, NaN, Infinity]) {
+    latest.dilutedShares = dilutedShares;
+    expect(extractFundamentalSeries(data, source()).at(-1)?.value).toBe(8);
+  }
+  latest.basicShares = undefined;
+  expect(extractFundamentalSeries(data, source()).map(({ value }) => value)).toEqual([5, null]);
+  latest.ordinarySharesNumber = 5;
+  latest.fieldAvailability!.ordinarySharesNumber = "2026-03-01";
+  expect(extractFundamentalSeries(data, source()).at(-1)?.value).toBe(5);
+  latest.ordinarySharesNumber = undefined;
+  latest.shareIssued = 4;
+  latest.fieldAvailability!.shareIssued = "2026-03-01";
+  expect(extractFundamentalSeries(data, source()).at(-1)?.value).toBe(4);
+  latest.dilutedShares = 10;
+  latest.fieldAvailability!.dilutedShares = "2026-03-01";
+  delete latest.fieldAvailability!.netIncomeCommonStockholders;
+  const undated = extractFundamentalSeries(data, source()).find(({ periodLabel }) => periodLabel === "Year ended 2025-12-31")!;
+  expect(undated.availableAt).toBeUndefined();
+  expect(undated.date.toISOString()).toBe("2025-12-31T00:00:00.000Z");
+});
+
+test("TTM keeps a complete common numerator and averaged shares; partial common coverage cannot become aggregate earnings", () => {
+  const data = fixture();
+  data.annualStatements = [data.annualStatements[0]!];
+  data.quarterlyStatements = ["2025-06-30", "2025-09-30", "2025-12-31", "2026-03-31"].map((date, index) => ({
+    date, currency: "USD", netIncome: 25, netIncomeCommonStockholders: [6, 12, 18, 24][index],
+    dilutedShares: [8, 10, 12, 10][index], basicShares: 5,
+    fieldAvailability: { netIncomeCommonStockholders: "2026-04-30", dilutedShares: "2026-05-01", netIncome: "2026-10-01" },
+  }));
+  for (const period of ["ttm", "auto"] as const) {
+    const points = extractFundamentalSeries(data, source(period));
+    expect(points.at(-1)?.value).toBe(10);
+    expect(points[0]?.availableAt?.toISOString()).toBe("2026-05-01T00:00:00.000Z");
+  }
+  data.quarterlyStatements[1]!.netIncomeCommonStockholders = undefined;
+  for (const period of ["ttm", "auto"] as const) expect(extractFundamentalSeries(data, source(period))).toEqual([]);
+  expect(extractFundamentalSeries(data, { ...source("ttm"), fieldId: "fundamental.netIncome" }).at(-1)?.value).toBe(100);
+  // Complete reported EPS overrides the fallback coverage guard, including zero.
+  for (const eps of [0, 0.5]) {
+    for (const quarter of data.quarterlyStatements) { quarter.eps = eps; quarter.fieldAvailability!.eps = "2026-04-30"; }
+    expect(extractFundamentalSeries(data, source("auto")).at(-1)?.value).toBe(eps === 0 ? undefined : 30);
+  }
+  for (const quarter of data.quarterlyStatements) {
+    delete quarter.eps; delete quarter.netIncomeCommonStockholders;
+    quarter.fieldAvailability!.netIncome = "2026-04-30";
+  }
+  expect(extractFundamentalSeries(data, source("auto")).at(-1)?.value).toBe(6);
+});
+
+test("derived Q4 common earnings preserve independent field provenance through TTM and unresolved EPS still blocks fallback", () => {
+  const annual: FinancialStatement = { date: "2025-12-31", currency: "USD", netIncome: 100, netIncomeCommonStockholders: 60, dilutedShares: 10,
+    fieldAvailability: { netIncome: "2026-03-01", netIncomeCommonStockholders: "2026-03-05", dilutedShares: "2026-03-06" } };
+  const quarters = ["2025-03-31", "2025-06-30", "2025-09-30"].map((date, index) => ({ date, currency: "USD", netIncome: 25,
+    netIncomeCommonStockholders: [10, 20, 15][index], dilutedShares: [8, 10, 12][index], availableAt: "2025-11-01" }));
+  const q4 = deriveQuarterlyStatements(quarters, [annual]).at(-1)!;
+  expect(q4).toMatchObject({ netIncomeCommonStockholders: 15, dilutedShares: 10,
+    fieldAvailability: { netIncomeCommonStockholders: "2026-03-05", dilutedShares: "2026-03-06" } });
+  const data = { ...fixture(), annualStatements: [annual], quarterlyStatements: quarters };
+  const points = extractFundamentalSeries(data, source("ttm"));
+  expect(points.at(-1)?.value).toBe(10);
+  expect(points[0]?.availableAt?.toISOString()).toBe("2026-03-06T00:00:00.000Z");
+  annual.epsBasis = { status: "unresolved", source: "sec", originalValue: 6, basisDate: "2026-03-01", evidence: [] };
+  expect(extractFundamentalSeries(data, source("annual"))).toEqual([]);
   expect(extractFundamentalSeries(data, source("ttm"))).toEqual([]);
 });
 
@@ -80,7 +228,7 @@ test("chart and headless export preserve historical P/E without a Current point 
     getQuote: async () => data.quote!, getPriceHistoryForResolution: async () => data.priceHistory }),
     apiClient: {} as any, config: createDefaultConfig("/tmp/valuation-denominator-test"), signal: new AbortController().signal };
   const model = await loadChartPaneModel(spec, context);
-  expect(model.series[0]?.points.map((point) => point.value)).toEqual([5]);
+  expect(model.series[0]?.points.map((point) => point.value)).toEqual([5, null]);
   expect(model.snapshot.financials[0]?.[1].annualStatements.at(-1)?.eps).toBe(-2);
   data.annualStatements[1]!.eps = 3;
   const recovered = await loadChartPaneModel(spec, context);

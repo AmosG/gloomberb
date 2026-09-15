@@ -2,6 +2,7 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { AppPersistence } from "../../data/app-persistence";
 import type { DataProvider } from "../../types/data-provider";
 import { AssetDataRouter } from "./index";
+import { getRouterEntityKey } from "./cache";
 import { mergeFinancials, sanitizeCachedFinancials } from "./financials";
 import {
   cleanupProviderRouterTestFiles,
@@ -376,7 +377,7 @@ describe("AssetDataRouter cached financials", () => {
     persistence.close();
   });
 
-  test("uses symbol provider cache for broker-linked startup targets", () => {
+  test("keeps contract-owned prices separate from symbol-only startup enrichment", () => {
     const dbPath = createTempDbPath("cached-symbol-fallback-for-contract");
     const persistence = new AppPersistence(dbPath);
     const now = Date.now();
@@ -414,7 +415,7 @@ describe("AssetDataRouter cached financials", () => {
       {
         namespace: "market",
         kind: "financials",
-        entityKey: "4092.T",
+        entityKey: getRouterEntityKey("4092.T"),
         variantKey: "exchange=JPX",
         sourceKey: "provider:yahoo",
       },
@@ -431,6 +432,7 @@ describe("AssetDataRouter cached financials", () => {
           exchangeName: "JPX",
           listingExchangeName: "JPX",
         }),
+        fundamentals: { revenue: 1234 },
       }),
       {
         schemaVersion: 4,
@@ -459,13 +461,20 @@ describe("AssetDataRouter cached financials", () => {
       },
     }], { allowExpired: true, includeStaleQuotes: true });
 
-    expect(cached.get("4092.T")?.quote?.price).toBe(3925);
-    expect(cached.get("4092.T")?.quote?.changePercent).toBe(0.51);
+    expect(cached.get("4092.T")?.quote?.price).toBe(3770);
+    expect(cached.get("4092.T")?.quote?.changePercent).toBe(4);
+    expect(cached.get("4092.T")?.quote?.lastUpdated).toBe(old);
+    expect(cached.get("4092.T")?.fundamentals?.revenue).toBe(1234);
+    const publicCached = router.getCachedFinancialsForTargets([{ symbol: "4092.T", exchange: "JPX" }], {
+      allowExpired: true, includeStaleQuotes: true,
+    });
+    expect(publicCached.get("4092.T")?.quote?.price).toBe(3925);
+    expect(publicCached.get("4092.T")?.quote?.changePercent).toBe(0.51);
 
     persistence.close();
   });
 
-  test("uses symbol provider quote reference for broker-linked snapshot reads", async () => {
+  test("requires exact contract identity for cached quote reference enrichment", async () => {
     const dbPath = createTempDbPath("cached-symbol-reference-for-contract-snapshot");
     const persistence = new AppPersistence(dbPath);
     const now = Date.now();
@@ -571,7 +580,7 @@ describe("AssetDataRouter cached financials", () => {
       },
     }], persistence.resources);
 
-    const financials = await router.getTickerFinancials("VICR", "NASDAQ", {
+    const context = {
       brokerId: "ibkr",
       brokerInstanceId: "ibkr-work",
       instrument: {
@@ -580,13 +589,27 @@ describe("AssetDataRouter cached financials", () => {
         conId: 275759,
         symbol: "VICR",
       },
-    });
+    };
+    const financials = await router.getTickerFinancials("VICR", "NASDAQ", context);
 
     expect(financials.quote?.providerId).toBe("gloomberb-cloud");
     expect(financials.quote?.price).toBe(292.83);
-    expect(financials.quote?.previousClose).toBe(282.95);
-    expect(financials.quote?.changePercent).toBeCloseTo(((292.83 - 282.95) / 282.95) * 100, 10);
-    expect(financials.quote?.provenance?.fields?.previousClose?.providerId).toBe("yahoo");
+    expect(financials.quote?.previousClose).toBe(380.07);
+    expect(financials.quote?.changePercent).toBeCloseTo(((292.83 - 380.07) / 380.07) * 100, 10);
+    expect(financials.quote?.provenance?.fields?.previousClose?.providerId).toBe("gloomberb-cloud");
+
+    // A reference captured for this exact target can still enrich its quote.
+    const referenceKey = { namespace: "market", kind: "financials", entityKey: "VICR",
+      variantKey: "exchange=NASDAQ", sourceKey: "provider:yahoo" };
+    const reference = persistence.resources.get<ReturnType<typeof makeFinancials>>(referenceKey)!.value;
+    persistence.resources.set({ ...referenceKey, entityKey: "contract:275759" }, reference, {
+      schemaVersion: 4, cachePolicy: { staleMs: 60_000, expireMs: 7 * 24 * 60 * 60_000 }, fetchedAt: now,
+    });
+    const exact = await router.getTickerFinancials("VICR", "NASDAQ", context);
+    expect(exact.quote?.price).toBe(292.83);
+    expect(exact.quote?.previousClose).toBe(282.95);
+    expect(exact.quote?.changePercent).toBeCloseTo(((292.83 - 282.95) / 282.95) * 100, 10);
+    expect(exact.quote?.provenance?.fields?.previousClose?.providerId).toBe("yahoo");
 
     persistence.close();
   });

@@ -1,13 +1,17 @@
-import type { DataProvider, CachedFinancialsTarget, TickerFinancialsBatchResult, QuoteBatchResult } from "../types/data-provider";
+import type { MarketDataRequestContext, DataProvider, CachedFinancialsTarget, TickerFinancialsBatchResult, QuoteBatchResult } from "../types/data-provider";
 import type { OptionsChain, PricePoint, Quote, TickerFinancials } from "../types/financials";
-import { canonicalTickerKey, parsePublicTickerKey } from "../utils/exchanges";
+import { canonicalExchange, canonicalTickerKey, parsePublicTickerKey } from "../utils/exchanges";
 import { clipPriceHistoryToRange } from "../time-series/history-window";
 import { getPresetResolution, normalizeChartResolutionSupport, TIME_RANGE_ORDER, type ManualChartResolution } from "../time-series/resolution";
+import type { InstrumentRef } from "./request-types";
+import { instrumentIdentityKey } from "../utils/instrument-identity";
 import { quoteMetadataFromQuote } from "./quotes/metadata";
 
 export interface SnapshotMarketData {
   financials: ReadonlyArray<readonly [string, TickerFinancials]>;
+  instrumentFinancials?: ReadonlyArray<{ instrument: InstrumentRef; financials: TickerFinancials }>;
   intradayHistories?: ReadonlyArray<{
+    target?: InstrumentRef;
     symbol: string;
     exchange: string;
     resolution: ManualChartResolution;
@@ -17,6 +21,16 @@ export interface SnapshotMarketData {
     quote?: Quote;
   }>;
   optionsChains?: ReadonlyArray<readonly [string, OptionsChain]>;
+}
+
+/** Exact captured identity, retaining the snapshot API's public venue alias matching. */
+export function snapshotInstrumentKey(instrument: InstrumentRef): string {
+  const parsed = parsePublicTickerKey(instrument.symbol);
+  return instrumentIdentityKey({ ...instrument, symbol: parsed.symbol,
+    exchange: canonicalExchange(parsed.exchange ?? instrument.exchange),
+    brokerId: instrument.brokerId ?? instrument.instrument?.brokerId,
+    brokerInstanceId: instrument.brokerInstanceId ?? instrument.instrument?.brokerInstanceId,
+  });
 }
 
 /** A captured result is authoritative; trying another interval cannot repair it. */
@@ -52,24 +66,43 @@ async function seededBatch<T, R>(targets: T[], find: (target: T) => R | undefine
 
 /** A captured dataset wins for its instruments; everything else uses the live provider. */
 export function createSnapshotDataProvider(snapshot: SnapshotMarketData, fallback: DataProvider): DataProvider {
-  const financials = lookup(snapshot.financials);
+  const publicFinancials = lookup(snapshot.financials);
+  const exactFinancials = new Map((snapshot.instrumentFinancials ?? []).map(entry => [snapshotInstrumentKey(entry.instrument), entry.financials]));
+  const financials = (symbol: string, exchange?: string, context?: MarketDataRequestContext) =>
+    exactFinancials.get(snapshotInstrumentKey({ symbol, exchange, ...context }))
+      ?? (context?.instrument ? undefined : publicFinancials(symbol, exchange));
   const options = lookup(snapshot.optionsChains ?? []);
-  const intraday = lookup((snapshot.intradayHistories ?? []).map((history) => [canonicalTickerKey(history.symbol, history.exchange), history]));
-  const history = (symbol: string, exchange?: string, resolution?: string) => {
-    const captured = intraday(symbol, exchange);
+  const publicIntraday = lookup((snapshot.intradayHistories ?? []).filter(history => !history.target?.instrument)
+    .map(history => [canonicalTickerKey(history.symbol, history.exchange), history]));
+  const exactIntraday = new Map((snapshot.intradayHistories ?? []).flatMap(history => history.target ? [[snapshotInstrumentKey(history.target), history] as const] : []));
+  const intraday = (symbol: string, exchange?: string, context?: MarketDataRequestContext) =>
+    exactIntraday.get(snapshotInstrumentKey({ symbol, exchange, ...context }))
+      ?? (context?.instrument ? undefined : publicIntraday(symbol, exchange));
+  const history = (symbol: string, exchange?: string, resolution?: string, context?: MarketDataRequestContext) => {
+    const captured = intraday(symbol, exchange, context);
     if (captured?.unavailableReason) throw new SnapshotHistoryUnavailableError(captured.unavailableReason);
     if (captured && resolution && captured.resolution !== resolution) return [];
-    return captured?.points ?? financials(symbol, exchange)?.priceHistory;
+    return captured?.points ?? financials(symbol, exchange, context)?.priceHistory;
   };
   const overrides: Partial<DataProvider> = {
     async getTickerFinancials(symbol, exchange, context) {
-      return (context?.statementHistory === "extended" ? undefined : financials(symbol, exchange)) ?? fallback.getTickerFinancials(symbol, exchange, context);
+      return (context?.statementHistory === "extended" ? undefined : financials(symbol, exchange, context)) ?? fallback.getTickerFinancials(symbol, exchange, context);
     },
     getCachedFinancialsForTargets(targets, settings) {
       const captured = new Map<string, TickerFinancials>();
       const missing: CachedFinancialsTarget[] = [];
+      // This legacy cache API returns one entry per symbol. Distinct targets
+      // cannot be represented there; the identity-bearing batch API can.
+      const identities = new Map<string, Set<string>>();
       for (const target of targets) {
-        const value = target.statementHistory === "extended" ? undefined : financials(target.symbol, target.exchange);
+        const symbol = target.symbol.trim().toUpperCase();
+        const keys = identities.get(symbol) ?? new Set<string>();
+        keys.add(snapshotInstrumentKey(target));
+        identities.set(symbol, keys);
+      }
+      for (const target of targets) {
+        if (identities.get(target.symbol.trim().toUpperCase())!.size > 1) continue;
+        const value = target.statementHistory === "extended" ? undefined : financials(target.symbol, target.exchange, target);
         if (value) captured.set(target.symbol.trim().toUpperCase(), value);
         else missing.push(target);
       }
@@ -79,54 +112,54 @@ export function createSnapshotDataProvider(snapshot: SnapshotMarketData, fallbac
     },
     getTickerFinancialsBatch(targets, settings) {
       return seededBatch(targets, (target): TickerFinancialsBatchResult | undefined => {
-        const value = target.statementHistory === "extended" ? undefined : financials(target.symbol, target.exchange);
+        const value = target.statementHistory === "extended" ? undefined : financials(target.symbol, target.exchange, target);
         return value ? { target, financials: value } : undefined;
       }, (missing) => fallback.getTickerFinancialsBatch?.(missing, settings) ?? Promise.all(missing.map(async (target) => ({
         target, financials: await fallback.getTickerFinancials(target.symbol, target.exchange, target),
       }))));
     },
     async getQuote(symbol, exchange, context) {
-      return intraday(symbol, exchange)?.quote ?? financials(symbol, exchange)?.quote ?? fallback.getQuote(symbol, exchange, context);
+      return intraday(symbol, exchange, context)?.quote ?? financials(symbol, exchange, context)?.quote ?? fallback.getQuote(symbol, exchange, context);
     },
     async getQuoteMetadata(symbol, exchange, context) {
-      const captured = financials(symbol, exchange);
+      const captured = financials(symbol, exchange, context);
       if (captured?.quoteMetadata) return captured.quoteMetadata;
-      const quote = intraday(symbol, exchange)?.quote ?? captured?.quote;
+      const quote = intraday(symbol, exchange, context)?.quote ?? captured?.quote;
       if (quote) return quoteMetadataFromQuote(quote);
       return fallback.getQuoteMetadata?.(symbol, exchange, context)
         ?? fallback.getQuote(symbol, exchange, context).then(quoteMetadataFromQuote);
     },
     getQuotesBatch(targets, settings) {
       return seededBatch(targets, (target): QuoteBatchResult | undefined => {
-        const quote = intraday(target.symbol, target.exchange)?.quote ?? financials(target.symbol, target.exchange)?.quote;
+        const quote = intraday(target.symbol, target.exchange, target.context)?.quote ?? financials(target.symbol, target.exchange, target.context)?.quote;
         return quote ? { target, quote } : undefined;
       }, (missing) => fallback.getQuotesBatch?.(missing, settings) ?? Promise.all(missing.map(async (target) => ({
         target, quote: await fallback.getQuote(target.symbol, target.exchange, target.context),
       }))));
     },
     async getOptionsChain(symbol, exchange, expirationDate, context) {
-      const captured = options(symbol, exchange);
+      const captured = context?.instrument ? undefined : options(symbol, exchange);
       if (captured) return captured;
       if (!fallback.getOptionsChain) throw new Error(`No options data available for ${symbol}.`);
       return fallback.getOptionsChain(symbol, exchange, expirationDate, context);
     },
     async getPriceHistory(symbol, exchange, range, context) {
-      const points = history(symbol, exchange);
+      const points = history(symbol, exchange, undefined, context);
       return points ? clipPriceHistoryToRange(points, range) : fallback.getPriceHistory(symbol, exchange, range, context);
     },
     async getPriceHistoryForResolution(symbol, exchange, range, resolution, context) {
-      const points = history(symbol, exchange, resolution);
+      const points = history(symbol, exchange, resolution, context);
       return points ? clipPriceHistoryToRange(points, range)
         : fallback.getPriceHistoryForResolution?.(symbol, exchange, range, resolution, context)
           ?? fallback.getPriceHistory(symbol, exchange, range, context);
     },
     async getDetailedPriceHistory(symbol, exchange, start, end, resolution, context) {
-      const points = history(symbol, exchange, resolution);
+      const points = history(symbol, exchange, resolution, context);
       if (!points) return fallback.getDetailedPriceHistory?.(symbol, exchange, start, end, resolution, context) ?? [];
       return points.filter((point) => point.date.getTime() >= start.getTime() && point.date.getTime() < end.getTime());
     },
     getChartResolutionSupport(symbol, exchange, context) {
-      return financials(symbol, exchange) || intraday(symbol, exchange) ? SNAPSHOT_RESOLUTIONS
+      return financials(symbol, exchange, context) || intraday(symbol, exchange, context) ? SNAPSHOT_RESOLUTIONS
         : fallback.getChartResolutionSupport?.(symbol, exchange, context) ?? SNAPSHOT_RESOLUTIONS;
     },
   };

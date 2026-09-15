@@ -99,7 +99,9 @@ export function InlineFieldView({
     if (parsed == null) return null;
     const nextValue = currentField.percent ? parsed / 100 : parsed;
     currentField.onValue?.(nextValue);
-    return formatInputNumber(nextValue, currentField.percent);
+    // Keep the submitted number visible while editing. Display rounding must
+    // not make the active input disagree with the value used by the model.
+    return String(parsed);
   }, []);
 
   const commitEditText = useCallback((nextText: string, fallbackText = displayValue) => {

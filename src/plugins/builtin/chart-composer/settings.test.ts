@@ -5,6 +5,7 @@ import {
   buildPriceChartPreset,
   getSelectedBuiltinStudies,
   getSelectedPairStudies,
+  setPairStudies,
 } from "./presets";
 import { CHART_SPEC_SETTING_KEY } from "./chart-spec";
 import {
@@ -23,6 +24,35 @@ function field(key: string, type: PaneSettingField["type"] = "text"): PaneSettin
 }
 
 describe("chart composer pane settings", () => {
+  test("changed ordered pairs and removed/re-added formulas receive fresh defaults", () => {
+    const original = setPairStudies(buildComparisonChartPreset(["TARGET", "ACQUIRER", "OTHER"]), ["spread", "correlation"]);
+    original.studies = original.studies.map((study) => ({ ...study, parameters: study.kind === "spread" ? { multiplier: 0.5 } : { period: 13, returns: 0 } }));
+    const apply = (spec: typeof original, selected: string[]) => applyChartComposerPaneSetting(
+      { chartSpec: spec }, field(CHART_SETTING_KEYS.formulas, "multi-select"), selected,
+    ).chartSpec as typeof original;
+    const defaults = (spec: typeof original) => {
+      expect(spec.studies.find(({ kind }) => kind === "spread")?.parameters).toEqual({ multiplier: 1 });
+      expect(spec.studies.find(({ kind }) => kind === "correlation")?.parameters).toEqual({ period: 20, returns: 1 });
+    };
+    for (const series of [
+      [original.series[1]!, original.series[0]!, original.series[2]!],
+      [original.series[0]!, original.series[2]!, original.series[1]!],
+    ]) {
+      const updated = apply({ ...original, series }, ["spread", "correlation"]);
+      defaults(updated);
+      expect(updated.studies.map(({ inputSeriesIds }) => inputSeriesIds)).toEqual([
+        series.slice(0, 2).map(({ id }) => id), series.slice(0, 2).map(({ id }) => id),
+      ]);
+    }
+    const removed = apply(original, []);
+    expect(removed.studies).toEqual([]);
+    defaults(apply(removed, ["spread", "correlation"]));
+    for (const edited of [
+      { ...original, studies: original.studies.map((study) => ({ ...study, id: `pair:other-${study.kind}` })) },
+      { ...original, studies: original.studies.map((study) => ({ ...study, kind: "ratio" as const })) },
+    ]) defaults(apply(edited, ["spread", "correlation"]));
+  });
+
   test("exposes every authored chart control through the native pane settings model", () => {
     const spec = buildPriceChartPreset("AAPL");
     const definition = buildChartComposerPaneSettingsDef({

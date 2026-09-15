@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
 import { CompositeChart } from "../../../components/chart/composite";
-import { ExternalLinkText } from "../../../components/ui";
 import { blendHex, colors } from "../../../theme/colors";
 import { Box, Text } from "../../../ui";
 import { formatNumber } from "../../../utils/format";
@@ -75,7 +74,7 @@ export function IndicatorDetail({
     <Box flexDirection="column" width={width} paddingX={1} gap={1}>
       {view.chart.points.length >= 2 ? (
         <Box flexDirection="column" gap={0}>
-          <Box flexDirection="row" width={chartWidth} overflow="hidden">
+          {view.current.ratio != null && view.zone && <Box flexDirection="row" width={chartWidth} overflow="hidden">
             <Text>{" ".repeat(AXIS_WIDTH)}</Text>
             <ZoneColorScale
               indicator={indicator}
@@ -83,7 +82,7 @@ export function IndicatorDetail({
               width={Math.max(1, chartWidth - AXIS_WIDTH)}
               markerColor={view.zone.color}
             />
-          </Box>
+          </Box>}
           <CompositeChart
             series={series}
             legendSeries={legendSeries}
@@ -106,8 +105,6 @@ export function IndicatorDetail({
           <Text fg={colors.textMuted}>Not enough chart data</Text>
         </Box>
       )}
-
-      <Text fg={colors.textDim} wrapMode="word" wrapText>{indicator.description}</Text>
 
       <Box flexDirection="column" gap={0} width={Math.max(1, width - 2)}>
         {levels && view.current.numeratorBillions != null
@@ -139,9 +136,6 @@ export function IndicatorDetail({
         </Box>
       </Box>
 
-      {indicator.link ? (
-        <ExternalLinkText url={indicator.link.url} label={indicator.link.label} color={colors.text} />
-      ) : null}
     </Box>
   );
 }

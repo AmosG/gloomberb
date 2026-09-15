@@ -20,6 +20,7 @@ import {
 import { withBrokerTimeout } from "./brokers";
 import {
   hasMeaningfulProfile,
+  isProviderQuoteUsableForCurrentSession,
   hasShallowStatementHistory,
   mergeCachedFinancialRecords,
   mergeFinancials,
@@ -195,7 +196,7 @@ export class ProviderRouterFinancialRoutes {
     const rawCached = selectCachedResource<Quote>(this.deps.resources, "quote", entityKey, variantKeys, sourceKeys, false);
     const cachedIsStale = rawCached && (brokerSourceKeys.includes(rawCached.sourceKey)
       ? isQuoteContributionStaleForCurrentSession(quoteWithFreshnessExchange(rawCached.value, exchange))
-      : isQuoteStaleForCurrentSession(quoteWithFreshnessExchange(rawCached.value, exchange)));
+      : !isProviderQuoteUsableForCurrentSession(rawCached.value, exchange, ticker));
     const cached = rawCached && !cachedIsStale
       ? rawCached
       : null;
@@ -246,7 +247,7 @@ export class ProviderRouterFinancialRoutes {
     includeStale = false,
   ): Quote | null {
     const entityKey = this.deps.getEntityKey(ticker, context?.instrument);
-    const entityKeys = [...new Set([entityKey, normalizeTicker(ticker)])];
+    const entityKeys = [entityKey];
     const variantKeys = this.deps.getTickerVariantCandidates(exchange);
     const sourceKeys = this.deps.getProviderSourceKeys();
     for (const candidateEntityKey of entityKeys) {
@@ -254,7 +255,7 @@ export class ProviderRouterFinancialRoutes {
       if (
         record
         && (includeStale || !record.stale)
-        && !isQuoteStaleForCurrentSession(quoteWithFreshnessExchange(record.value, exchange))
+        && isProviderQuoteUsableForCurrentSession(record.value, exchange, ticker)
       ) {
         return record.value;
       }
@@ -290,9 +291,10 @@ export class ProviderRouterFinancialRoutes {
       ? { ...brokerRecord, value: sanitizeCachedFinancials(brokerRecord.value, { ...options, allowIncompleteSession: true }) }
       : null;
     const providerSourceKeys = this.deps.getProviderSourceKeys();
+    const requiresContractPrice = context?.instrument != null;
     const includeSymbolProviderFallback = options.includeSymbolProviderFallback !== false;
-    const providerEntityKeys = includeSymbolProviderFallback
-      ? [...new Set([entityKey, normalizeTicker(ticker)])]
+    const providerEntityKeys = includeSymbolProviderFallback && requiresContractPrice
+      ? [...new Set([entityKey, this.deps.getEntityKey(ticker), normalizeTicker(ticker)])]
       : [entityKey];
     const providerRecords = sortCachedRecords(
       providerEntityKeys.flatMap((providerEntityKey) => listCachedResources<TickerFinancials>(
@@ -303,8 +305,12 @@ export class ProviderRouterFinancialRoutes {
         providerSourceKeys,
         allowExpired,
       ).map((record) => {
-        const value = sanitizeShellFinancialHistory(record.value, { symbol: ticker, exchange }, record.sourceKey);
-        return value === record.value ? record : { ...record, value, stale: true };
+        // Public-symbol enrichment cannot establish the declared contract's price.
+        const independentFields = requiresContractPrice && providerEntityKey !== entityKey
+          ? { ...record.value, quote: undefined, quoteContributions: undefined, quoteMetadata: undefined, priceHistory: [] }
+          : record.value;
+        const value = sanitizeShellFinancialHistory(independentFields, { symbol: ticker, exchange }, record.sourceKey);
+        return value === record.value ? record : { ...record, value, stale: value !== independentFields || record.stale };
       })),
       variantKeys,
       providerSourceKeys,
@@ -315,7 +321,7 @@ export class ProviderRouterFinancialRoutes {
     );
     const quoteSourceKeys = [...brokerSourceKeys, ...providerSourceKeys];
     const quoteRecords = sortCachedRecords(
-      providerEntityKeys.flatMap((quoteEntityKey) => listCachedResources<Quote>(
+      (requiresContractPrice ? [entityKey] : providerEntityKeys).flatMap((quoteEntityKey) => listCachedResources<Quote>(
         this.deps.resources,
         "quote",
         quoteEntityKey,

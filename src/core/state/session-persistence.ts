@@ -4,6 +4,11 @@ import type { TickerRecord } from "../../types/ticker";
 import { getDockedPaneIds } from "../../plugins/pane-manager";
 import { normalizeBuiltinPaneStatePluginOwners } from "../../plugins/ownership";
 import { canonicalExchange, normalizeSymbol } from "../../utils/exchanges";
+import { instrumentFromTicker } from "../../market-data/request-types";
+import { buildInstrumentKey } from "../../market-data/selectors";
+import { hasAmbiguousTickerContracts, resolveInstrumentForPane } from "./app/instrument";
+import { resolveCollectionForPane } from "./app/layout";
+import type { AppState } from "./app/types";
 
 export const APP_SESSION_SCHEMA_VERSION = 1;
 export const APP_SESSION_ID = "app";
@@ -49,40 +54,7 @@ function normalizeHydrationTarget(target: HydrationTarget): HydrationTarget {
 }
 
 function hydrationTargetKey(target: HydrationTarget): string {
-  const normalized = normalizeHydrationTarget(target);
-  const contractKey = normalized.instrument?.conId
-    ?? normalized.instrument?.localSymbol
-    ?? normalized.instrument?.symbol
-    ?? "";
-  return [
-    normalized.symbol,
-    normalized.exchange ?? "",
-    normalized.brokerId ?? "",
-    normalized.brokerInstanceId ?? "",
-    contractKey,
-  ].join("|");
-}
-
-function targetFromTicker(ticker: TickerRecord): HydrationTarget {
-  const instrument = ticker.metadata.broker_contracts?.[0] ?? null;
-  return normalizeHydrationTarget({
-    symbol: ticker.metadata.ticker,
-    exchange: ticker.metadata.exchange,
-    brokerId: instrument?.brokerId,
-    brokerInstanceId: instrument?.brokerInstanceId,
-    instrument,
-  });
-}
-
-function resolvePortfolioPaneCollectionId(
-  config: AppConfig,
-  paneState: Record<string, unknown> | undefined,
-  instance: AppConfig["layout"]["instances"][number],
-): string | null {
-  const stateCollectionId = typeof paneState?.collectionId === "string" ? paneState.collectionId : null;
-  if (stateCollectionId) return stateCollectionId;
-  if (typeof instance.params?.collectionId === "string") return instance.params.collectionId;
-  return config.portfolios[0]?.id ?? config.watchlists[0]?.id ?? null;
+  return buildInstrumentKey(normalizeHydrationTarget(target));
 }
 
 function tickerInCollection(ticker: TickerRecord, collectionId: string | null): boolean {
@@ -100,9 +72,10 @@ export function buildAppSessionSnapshot(state: SessionStateInput): AppSessionSna
       .filter(Boolean),
   )];
 
-  const pushTarget = (ticker: TickerRecord | null | undefined) => {
-    if (!ticker) return;
-    const target = targetFromTicker(ticker);
+  const pushTarget = (input: HydrationTarget | null | undefined) => {
+    if (!input) return;
+    const target = normalizeHydrationTarget(input);
+    if (!state.tickers.has(target.symbol)) return;
     const key = hydrationTargetKey(target);
     if (seen.has(key)) return;
     seen.add(key);
@@ -110,23 +83,20 @@ export function buildAppSessionSnapshot(state: SessionStateInput): AppSessionSna
   };
 
   for (const symbol of state.recentTickers) {
-    pushTarget(state.tickers.get(symbol));
+    const ticker = state.tickers.get(symbol);
+    if (ticker && !hasAmbiguousTickerContracts(ticker)) pushTarget(instrumentFromTicker(ticker));
   }
 
   for (const instance of state.config.layout.instances) {
-    const paneState = state.paneState[instance.instanceId];
-    const cursorSymbol = typeof paneState?.cursorSymbol === "string" ? paneState.cursorSymbol : null;
-    if (cursorSymbol) {
-      pushTarget(state.tickers.get(cursorSymbol));
-    }
-    if (instance.binding?.kind === "fixed") {
-      pushTarget(state.tickers.get(instance.binding.symbol));
-    }
+    pushTarget(resolveInstrumentForPane(state, instance.instanceId));
     if (instance.paneId === "portfolio-list") {
-      const collectionId = resolvePortfolioPaneCollectionId(state.config, paneState, instance);
+      const collectionId = resolveCollectionForPane(state as AppState, instance.instanceId);
       for (const ticker of state.tickers.values()) {
         if (tickerInCollection(ticker, collectionId)) {
-          pushTarget(ticker);
+          pushTarget(resolveInstrumentForPane({ ...state, paneState: {
+            ...state.paneState,
+            [instance.instanceId]: { ...state.paneState[instance.instanceId], cursorSymbol: ticker.metadata.ticker },
+          } }, instance.instanceId));
         }
       }
     }

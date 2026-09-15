@@ -68,7 +68,7 @@ export function mergeTickerSearchResultItems(
   const seen = new Set<string>();
   const addItem = (item: ResultItem) => {
     if (item.kind === "info") return;
-    const key = `${item.label.trim().toUpperCase()}:${(item.right || "").trim().toUpperCase()}`;
+    const key = `${item.label.trim().toUpperCase()}:${(item.right || "").trim().toUpperCase()}:${item.contractKey ?? ""}`;
     if (seen.has(key)) return;
     seen.add(key);
     merged.push(item);
@@ -109,7 +109,7 @@ export function mergePlainRootTickerResults(
   for (const item of providerItems) {
     if (!isInstrumentItem(item)) continue;
     const symbol = item.label.trim().toUpperCase();
-    const key = isExact(item) ? `${symbol}:${canonicalExchange(item.right)}` : symbol;
+    const key = (isExact(item) ? `${symbol}:${canonicalExchange(item.right)}` : symbol) + (item.contractKey ? `:${item.contractKey}` : "");
     if (seenSymbols.has(key)) continue;
     seenSymbols.add(key);
     instruments.push(item);

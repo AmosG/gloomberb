@@ -23,6 +23,7 @@ import {
   type OptionSide,
 } from "../options-calculator/model";
 import { buildChainCalcParams, resolveCalcSide } from "./calc-seed";
+import { useOptionsCatalogue } from "./expiry-catalogue";
 import { calculateOptionGreeks, calculateOptionsSummary, type OptionsSummary } from "./analytics";
 import {
   DEFAULT_OPTION_FIELD_IDS,
@@ -30,6 +31,7 @@ import {
   createOptionColumns,
   findNearestStrikeIndex,
   formatIv,
+  formatStrikeLabel,
   optionColumnColor,
   renderOptionCell,
   resolveDefaultStrikeTarget,
@@ -81,7 +83,7 @@ function OptionsSummaryStrip({ summary, secondary }: {
       <SummaryRow metrics={volatility} />
       {secondary && (
         <SummaryRow metrics={[
-          { label: "EXP VOL", value: summary ? formatCompact(summary.expirationVolume) : "—" },
+          { label: "EXP VOL", value: formatCompact(summary?.expirationVolume ?? undefined) },
           { label: "P/C VOL", value: formatRatio(summary?.putCallVolumeRatio) },
           { label: "P/C OI", value: formatRatio(summary?.putCallOpenInterestRatio) },
         ]} />
@@ -94,9 +96,12 @@ export function OptionsView({ width, height, focused, onCapture = () => {} }: Op
   const { ticker, financials } = usePaneTicker();
   const { createPaneFromTemplate } = usePluginAppActions();
   const liveStreaming = useLiveStreamingSetting();
-  const [expIdx, setExpIdx] = useState(0);
+  const [expirySelection, setExpirySelection] = useState<{ targetKey: string; expiration: number } | null>(null);
   const [calcSide, setCalcSide] = useState<OptionSide | null>(null);
   const [strikeIdx, setStrikeIdx] = useState(0);
+  const [contractSelection, setContractSelection] = useState<{
+    context: string; strike: number; side: OptionSide; contractSymbol: string;
+  } | null>(null);
   const [autoScrollVersion, setAutoScrollVersion] = useState(0);
   const [scrollToIndexAlign, setScrollToIndexAlign] = useState<"nearest" | "center">("nearest");
   const [visibleStrikeViewport, setVisibleStrikeViewport] = useState<{
@@ -105,7 +110,6 @@ export function OptionsView({ width, height, focused, onCapture = () => {} }: Op
   } | null>(null);
   const [interactive, setInteractive] = useState(false);
   const userSelectedStrikeRef = useRef(false);
-  const initializedExpiryTargetRef = useRef<string | null>(null);
   const quoteContextRowsRef = useRef(3);
   const onCaptureRef = useRef(onCapture);
   const target = resolveOptionsTarget(ticker);
@@ -144,8 +148,14 @@ export function OptionsView({ width, height, focused, onCapture = () => {} }: Op
   const optionFieldIds = useMemo(() => resolveOptionFieldIds(storedOptionFieldIds), [storedOptionFieldIds]);
   const initialChainEntry = useOptionsQuery(baseRequest);
   const initialChain = useResolvedEntryValue(initialChainEntry);
-  const selectedExpiration = initialChain?.expirationDates[expIdx];
+  const initialExpiration = initialChain?.expirationDates.reduce((best, expiration) => (
+    parsed && Math.abs(expiration - parsed.expTs) < Math.abs(best - parsed.expTs) ? expiration : best
+  ), initialChain.expirationDates[0]!);
+  const selectedExpiration = expirySelection?.targetKey === selectionTargetKey
+    ? expirySelection.expiration : initialExpiration;
   const viewportKey = `${effectiveTicker}:${selectedExpiration ?? "initial"}`;
+  const strikeSelectionKey = `${selectionTargetKey}|${selectedExpiration ?? "initial"}`;
+  const selectedContract = contractSelection?.context === strikeSelectionKey ? contractSelection : null;
   const expirationChainEntry = useOptionsQuery(
     baseRequest && selectedExpiration != null
       ? { ...baseRequest, expirationDate: selectedExpiration }
@@ -153,27 +163,40 @@ export function OptionsView({ width, height, focused, onCapture = () => {} }: Op
     { refreshIntervalMs: resolveChainRefreshIntervalMs(chainRefreshMinutes) },
   );
   const expirationChain = useResolvedEntryValue(expirationChainEntry);
-  // The expiration strip is expiry-independent, but strikes must never come from
-  // a different expiration than the selected one: the initial chain only covers
-  // whichever expiry the provider defaulted to.
-  const chain = expirationChain ?? initialChain;
-  const initialChainExpiration = initialChain?.calls[0]?.expiration ?? initialChain?.puts[0]?.expiration ?? null;
-  const strikeChain = expirationChain
-    ?? (selectedExpiration == null || initialChainExpiration === selectedExpiration ? initialChain : null);
-  const strikesLoading = strikeChain === null;
-  const expirationCount = chain?.expirationDates.length ?? 0;
+  // Either query can refresh the expiry catalogue. The selected date remains
+  // an identity even when an earlier date disappears or the catalogue reorders.
+  const { chain, expirationDates: availableExpirations } = useOptionsCatalogue(
+    selectionTargetKey, initialChainEntry, expirationChainEntry,
+  );
+  const selectedExpirationMissing = selectedExpiration != null && chain != null
+    && !availableExpirations.includes(selectedExpiration);
+  const matchesSelectedExpiration = (candidate: typeof initialChain) => candidate != null
+    && selectedExpiration != null
+    && [...candidate.calls, ...candidate.puts].every((contract) => contract.expiration === selectedExpiration);
+  const mismatchedExpiration = expirationChain != null && !matchesSelectedExpiration(expirationChain);
+  const expirationUnavailable = selectedExpirationMissing || mismatchedExpiration;
+  // A provider fallback or an old default-expiry response must not seed the
+  // table, export, Greeks or calculator for a different selected contract date.
+  const strikeChain = expirationUnavailable ? null : expirationChain
+    ?? (matchesSelectedExpiration(initialChain) ? initialChain : null);
+  const strikesLoading = strikeChain === null && !expirationUnavailable;
+  const expirationDates = useMemo(() => {
+    return selectedExpirationMissing
+      ? [...availableExpirations, selectedExpiration!].sort((left, right) => left - right) : availableExpirations;
+  }, [availableExpirations, selectedExpiration, selectedExpirationMissing]);
   // Keep the date strip stable while a mouse press focuses this pane. A new
   // tab list asks the web host to reveal the active tab and can move the date
   // being clicked before mouse-up, cancelling selection of an offscreen expiry.
-  const expirationTabs = useMemo(() => (chain?.expirationDates ?? []).map((ts, i) => ({
+  const expirationTabs = useMemo(() => expirationDates.map((ts) => ({
     label: formatExpDate(ts),
-    value: String(i),
-  })), [chain?.expirationDates]);
+    value: String(ts),
+  })), [expirationDates]);
   const loading = (initialChainEntry?.phase === "loading" || initialChainEntry?.phase === "refreshing") && !chain
     || (expirationChainEntry?.phase === "loading" || expirationChainEntry?.phase === "refreshing");
   // Refresh failures keep a ready entry with last-good data and an error.
   // Surface that warning even when the cached chain is still usable.
-  const error = initialChainEntry?.error?.message ?? expirationChainEntry?.error?.message
+  const error = (expirationUnavailable ? "Selected expiration unavailable." : null)
+    ?? initialChainEntry?.error?.message ?? expirationChainEntry?.error?.message
     ?? (initialChainEntry?.phase === "error" || expirationChainEntry?.phase === "error"
       ? "Failed to load options" : null);
 
@@ -195,39 +218,37 @@ export function OptionsView({ width, height, focused, onCapture = () => {} }: Op
     }
   }, [interactive]);
 
+  const selectExpiration = useCallback((expiration: number) => {
+    setExpirySelection({ targetKey: selectionTargetKey, expiration });
+  }, [selectionTargetKey]);
   const selectAdjacentExpiration = useCallback((offset: -1 | 1) => {
-    if (expirationCount === 0) return;
-    setExpIdx((index) => Math.max(0, Math.min(index + offset, expirationCount - 1)));
-  }, [expirationCount]);
+    if (expirationDates.length === 0) return;
+    const index = expirationDates.indexOf(selectedExpiration!);
+    selectExpiration(expirationDates[Math.max(0, Math.min(index + offset, expirationDates.length - 1))]!);
+  }, [expirationDates, selectExpiration, selectedExpiration]);
 
   useEffect(() => {
-    initializedExpiryTargetRef.current = null;
     userSelectedStrikeRef.current = false;
     setScrollToIndexAlign("nearest");
     setInteractive(false);
     onCaptureRef.current(false);
-    setExpIdx(0);
     setStrikeIdx(0);
     setCalcSide(null);
+    setContractSelection(null);
   }, [selectionTargetKey]);
 
   useEffect(() => {
-    if (initializedExpiryTargetRef.current === selectionTargetKey) return;
-    if (!initialChain || initialChain.expirationDates.length === 0) return;
-    initializedExpiryTargetRef.current = selectionTargetKey;
-    if (!parsed) return;
-    // The holding chooses the initial expiry only. Reapplying it after every
-    // selection or catalogue refresh prevents researching another expiry.
-    const bestExpIdx = initialChain.expirationDates.reduce((best, ts, i) =>
-      Math.abs(ts - parsed.expTs) < Math.abs(initialChain.expirationDates[best]! - parsed.expTs) ? i : best, 0);
-    setExpIdx(bestExpIdx);
-  }, [initialChain, parsed, selectionTargetKey]);
+    if (expirySelection?.targetKey === selectionTargetKey || selectedExpiration == null) return;
+    // The holding/default chooses the date only on entering a new context.
+    selectExpiration(selectedExpiration);
+  }, [expirySelection?.targetKey, selectExpiration, selectedExpiration, selectionTargetKey]);
 
   useEffect(() => {
     userSelectedStrikeRef.current = false;
-  }, [expIdx]);
+  }, [selectedExpiration]);
 
   const strikes = useMemo(() => strikeChain ? buildStrikeList(strikeChain) : [], [strikeChain]);
+  const selectedStrikeIdx = selectedContract ? strikes.indexOf(selectedContract.strike) : strikeIdx;
   const callsByStrike = useMemo(
     () => new Map(strikeChain?.calls.map((c) => [c.strike, c]) ?? []),
     [strikeChain],
@@ -247,7 +268,7 @@ export function OptionsView({ width, height, focused, onCapture = () => {} }: Op
         put,
         callGreeks: calculateOptionGreeks(call, "call", spot, dividendYield, now),
         putGreeks: calculateOptionGreeks(put, "put", spot, dividendYield, now),
-        isPositionStrike: !!parsed && Math.abs(strike - parsed.strike) < 0.01,
+        isPositionStrike: !!parsed && strike === parsed.strike,
       };
     });
   }, [callsByStrike, dividendYield, parsed, putsByStrike, spot, strikes]);
@@ -272,10 +293,10 @@ export function OptionsView({ width, height, focused, onCapture = () => {} }: Op
   const optionQuoteTargets = useMemo(
     () => buildOptionQuoteTargets(snapshotRows, {
       fallbackHeight: height,
-      selectedIndex: strikeIdx,
+      selectedIndex: selectedStrikeIdx,
       visibleRange: visibleStrikeRange,
     }),
-    [height, snapshotRows, strikeIdx, visibleStrikeRange],
+    [height, snapshotRows, selectedStrikeIdx, visibleStrikeRange],
   );
   const {
     entries: optionQuoteEntries,
@@ -309,9 +330,14 @@ export function OptionsView({ width, height, focused, onCapture = () => {} }: Op
     headerColor: optionColumnColor(column, colors.panel),
   })), [optionFieldIds]);
 
-  const selectedRow = rows[strikeIdx] ?? null;
-  const selectedSide = resolveCalcSide(calcSide, parsed?.side, selectedRow);
-  const selectedReference = optionMarketReference(selectedSide === "put" ? selectedRow?.put : selectedRow?.call);
+  const selectedRow = rows[selectedStrikeIdx] ?? null;
+  const selectedContractAvailable = !selectedContract || (selectedContract.side === "call"
+    ? selectedRow?.call : selectedRow?.put)?.contractSymbol === selectedContract.contractSymbol;
+  const selectedSide = selectedContract
+    ? selectedContractAvailable ? selectedContract.side : null
+    : resolveCalcSide(calcSide, parsed?.side, selectedRow);
+  const selectedReference = optionMarketReference(selectedSide === "put" ? selectedRow?.put
+    : selectedSide === "call" ? selectedRow?.call : undefined);
   const calcParams = useMemo(() => buildChainCalcParams({
     symbol: effectiveTicker,
     row: selectedRow,
@@ -332,6 +358,19 @@ export function OptionsView({ width, height, focused, onCapture = () => {} }: Op
     [calcParams, openCalculator],
   );
 
+  const selectContract = useCallback((row: OptionTableRow, index: number, side?: OptionSide, preservePointer = false) => {
+    userSelectedStrikeRef.current = true;
+    setScrollToIndexAlign("nearest");
+    setStrikeIdx(index);
+    const chosenSide = resolveCalcSide(side ?? calcSide, parsed?.side, row);
+    const contract = chosenSide === "put" ? row.put : chosenSide === "call" ? row.call : undefined;
+    if (contract && chosenSide) {
+      setContractSelection((current) => preservePointer && current?.context === strikeSelectionKey && current.strike === row.strike
+        ? current : { context: strikeSelectionKey, strike: row.strike,
+          side: chosenSide, contractSymbol: contract.contractSymbol });
+    }
+  }, [calcSide, parsed?.side, strikeSelectionKey]);
+
   const renderCell = useCallback((
     row: OptionTableRow,
     column: OptionColumn,
@@ -347,17 +386,17 @@ export function OptionsView({ width, height, focused, onCapture = () => {} }: Op
       ...cell,
       onMouseDown: () => {
         enterInteractive();
-        userSelectedStrikeRef.current = true;
-        setScrollToIndexAlign("nearest");
-        setStrikeIdx(index);
+        selectContract(row, index, side);
         setCalcSide(side);
       },
     };
-  }, [enterInteractive]);
+  }, [enterInteractive, selectContract]);
 
   useOptionsAccessFooter({
     chain,
     error: [error, underlyingStale ? "Underlying quote stale: Greeks and calculator unavailable" : null,
+      selectedContract && strikeChain && !selectedContractAvailable
+        ? `Selected ${formatStrikeLabel(selectedContract.strike)} ${selectedContract.side} unavailable` : null,
       summary?.historicalVolatilityUnavailableReason].filter(Boolean).join(" · ") || null,
     focused,
     hints: footerHints,
@@ -379,7 +418,7 @@ export function OptionsView({ width, height, focused, onCapture = () => {} }: Op
     setScrollToIndexAlign("center");
     setStrikeIdx(findNearestStrikeIndex(strikes, targetStrike));
     setAutoScrollVersion((version) => version + 1);
-  }, [expIdx, parsed?.strike, spot, strikes]);
+  }, [selectedExpiration, parsed?.strike, spot, strikes]);
 
   useShortcut((event) => {
     if (event.defaultPrevented || event.propagationStopped || event.targetEditable) return;
@@ -468,7 +507,7 @@ export function OptionsView({ width, height, focused, onCapture = () => {} }: Op
   }
   if (loading && !chain) return <Spinner label="Loading options chain..." />;
   if (error && !chain) return <EmptyState title="Options chain unavailable." message={error} />;
-  if (!chain || chain.expirationDates.length === 0) {
+  if (!chain || expirationDates.length === 0) {
     return <EmptyState title={`No options available for ${effectiveTicker}.`} />;
   }
 
@@ -485,7 +524,7 @@ export function OptionsView({ width, height, focused, onCapture = () => {} }: Op
   const quoteContextHeight = Math.min(maxContextHeight, quoteContextRowsRef.current);
   const tableHeight = Math.max(1, height - 1 - summaryRowCount - (isOpt && parsed ? 1 : 0) - quoteContextHeight);
   // The strip scrolls; without a marker a clipped last date reads as the last expiry.
-  const expirationStripOverflows = chain.expirationDates
+  const expirationStripOverflows = expirationDates
     .reduce((total, ts) => total + formatExpDate(ts).length + 2, 0) > expirationTabsWidth;
 
   return (
@@ -499,10 +538,10 @@ export function OptionsView({ width, height, focused, onCapture = () => {} }: Op
         <Box width={expirationTabsWidth} height={1} overflow="hidden">
           <Tabs
             tabs={expirationTabs}
-            activeValue={String(expIdx)}
+            activeValue={String(selectedExpiration)}
             onSelect={(value) => {
               enterInteractive();
-              setExpIdx(Number(value));
+              selectExpiration(Number(value));
             }}
             compact
             variant="bare"
@@ -530,13 +569,14 @@ export function OptionsView({ width, height, focused, onCapture = () => {} }: Op
       <DataTableView<OptionTableRow, OptionColumn>
         focused={focused}
         selection={{
-          kind: "index",
-          selectedIndex: strikeIdx,
-          onChange: (index) => {
-            userSelectedStrikeRef.current = true;
-            setScrollToIndexAlign("nearest");
+          kind: "id",
+          selectedId: selectedContract ? String(selectedContract.strike) : selectedRow ? String(selectedRow.strike) : null,
+          getId: (row) => String(row.strike),
+          onChange: (_id, row, index, reason) => {
             enterInteractive();
-            setStrikeIdx(index);
+            // A side-cell handler owns its precise contract choice. A later
+            // row pointer callback must not replace it with the prior side.
+            selectContract(row, index, undefined, reason === "pointer");
           },
         }}
         onCursorChange={() => {
@@ -565,7 +605,7 @@ export function OptionsView({ width, height, focused, onCapture = () => {} }: Op
         rootHeight={tableHeight}
         columnGap={0}
         horizontalPadding={0}
-        scrollToIndex={strikeIdx}
+        scrollToIndex={selectedStrikeIdx >= 0 ? selectedStrikeIdx : undefined}
         scrollToIndexAlign={scrollToIndexAlign}
         scrollToIndexVersion={autoScrollVersion}
       />

@@ -19,7 +19,7 @@ import {
   type DesktopRestartMessage,
   type ElectrobunDesktopRpcSchema,
 } from "../shared/protocol";
-import { decodeRpcValue, encodeRpcValue } from "../view/rpc-codec";
+import { decodeRpcValue, encodeRpcResponse, encodeRpcValue } from "../view/rpc-codec";
 import { contextMenuSelectionMessage } from "./context-menu/click";
 import type { DesktopWorkspace } from "./desktop/workspace";
 import { buildDesktopApplicationMenu } from "./application-menu";
@@ -576,7 +576,7 @@ function createWindowRpc(key: string): DesktopRpc {
             method,
             payload: decodeRpcValue(payload ?? null),
           } as DesktopBackendRequest;
-          return encodeRpcValue(await handleBackendRequest(rpc, request));
+          return encodeRpcResponse(() => handleBackendRequest(rpc, request));
         },
       },
       messages: {

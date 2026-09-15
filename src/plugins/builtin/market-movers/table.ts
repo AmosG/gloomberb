@@ -1,23 +1,23 @@
 import type { DataTableCell } from "../../../components";
 import { TextAttributes } from "../../../ui";
 import { colors, priceColor } from "../../../theme/colors";
-import { formatCurrency, formatCompact, formatPercentRaw } from "../../../utils/format";
+import { formatCompact, formatPercentRaw } from "../../../utils/format";
 import type { MarketMoverColumn, MarketMoverRow } from "./model";
-import { fiftyTwoWeekPositionPercent } from "./model";
+import { fiftyTwoWeekPositionPercent, formatMoverPrice } from "./model";
 
-function formatVolRatio(ratio: number): string {
-  if (ratio <= 0) return "—";
+function formatVolRatio(ratio: number | null): string {
+  if (ratio == null || !Number.isFinite(ratio) || ratio < 0) return "—";
   if (ratio >= 10) return `${Math.round(ratio)}x`;
   return `${ratio.toFixed(1)}x`;
 }
 
-function volRatioColor(ratio: number): string {
-  if (ratio >= 3) return colors.textBright;
-  if (ratio >= 1.5) return colors.text;
+function volRatioColor(ratio: number | null): string {
+  if (ratio != null && ratio >= 3) return colors.textBright;
+  if (ratio != null && ratio >= 1.5) return colors.text;
   return colors.textDim;
 }
 
-function fiftyTwoWeekPosition(price: number, low: number | undefined, high: number | undefined): string {
+function fiftyTwoWeekPosition(price: number | null, low: number | undefined, high: number | undefined): string {
   const pct = fiftyTwoWeekPositionPercent(price, low, high);
   return pct == null ? "—" : `${Math.round(pct)}%`;
 }
@@ -68,14 +68,14 @@ export function renderMarketMoverCell(
     case "name":
       return { text: row.name, color: selectedColor };
     case "price":
-      return { text: formatCurrency(row.price, row.currency), color: selectedColor };
+      return { text: formatMoverPrice(row.price, row.currency), color: selectedColor };
     case "changePercent":
       return {
-        text: formatPercentRaw(row.changePercent),
-        color: selectedColor ?? priceColor(row.changePercent),
+        text: formatPercentRaw(row.changePercent ?? undefined),
+        color: selectedColor ?? priceColor(row.changePercent ?? 0),
       };
     case "volume":
-      return { text: formatCompact(row.volume), color: selectedColor ?? colors.textDim };
+      return { text: formatCompact(row.volume ?? undefined), color: selectedColor ?? colors.textDim };
     case "volumeRatio":
       return {
         text: formatVolRatio(row.volumeRatio),

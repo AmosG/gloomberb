@@ -163,16 +163,18 @@ export async function loadYahooCorporateActions({
       const chart = chartResult.status === "fulfilled" ? chartResult.value : undefined;
       const result = summaryResult.status === "fulfilled" ? summaryResult.value : undefined;
       const dividendUnit = resolveCurrencyUnit(chart?.meta.currency);
+      const dividends = mapYahooDividends(chart?.events, chart?.meta);
+      const completeDividends = chart && dividends.length === Object.keys(chart.events?.dividends ?? {}).length;
 
       const actions: CorporateActionsData = {
         providerId,
         fetchedAt: new Date().toISOString(),
-        coverage: { dividends: chart ? "available" : "unavailable", splits: chart ? "available" : "unavailable", earnings: result?.calendarEvents || result?.earningsHistory ? "available" : "unavailable" },
+        coverage: { dividends: completeDividends ? "available" : "unavailable", splits: chart ? "available" : "unavailable", earnings: result?.calendarEvents || result?.earningsHistory ? "available" : "unavailable" },
         symbol: result?.price?.symbol ?? symbol,
         name: result?.price?.shortName ?? result?.price?.longName,
         currency: dividendUnit.currency || undefined,
         exchange: result?.price?.exchangeName ?? result?.quoteType?.exchange,
-        dividends: mapYahooDividends(chart?.events, chart?.meta).map((dividend) => ({ ...dividend, amount: dividend.amount / dividendUnit.divisor })),
+        dividends: dividends.map((dividend) => ({ ...dividend, amount: dividend.amount / dividendUnit.divisor })),
         splits: mapYahooSplits(chart?.events, chart?.meta),
         earnings: [
           ...mapYahooCalendarEarnings(result ?? {}),

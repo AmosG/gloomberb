@@ -1,3 +1,4 @@
+import { yahooSuffixExchange } from "../yahoo-finance/symbols";
 import type { CachedResourceRecord, ResourceStore } from "../../data/resource-store";
 import type { TimeRange } from "../../time-series/range";
 import type { BrokerContractRef } from "../../types/instrument";
@@ -6,6 +7,7 @@ import type { CachePolicy, CachePolicyMap } from "../../types/persistence";
 import { canonicalExchange, parsePublicTickerKey, resolveExchangeTimeZone } from "../../utils/exchanges";
 import { redactUnavailableFundamentals, RETRACTABLE_VALUATION_FIELDS } from "../../utils/fundamentals";
 import { isPriceHistoryStaleForCurrentWindow } from "../../utils/price-history";
+import { brokerContractIdentityKey } from "../../utils/instrument-identity";
 
 const MARKET_NAMESPACE = "market";
 const FINANCIALS_SCHEMA_VERSION = 7;
@@ -50,10 +52,12 @@ export function buildVariantKey(parts: Array<[string, string | number | undefine
 }
 
 export function getRouterEntityKey(ticker: string, instrument?: BrokerContractRef | null): string {
-  if (instrument?.conId != null) return `contract:${instrument.conId}`;
-  if (instrument?.localSymbol) return `contract:${instrument.localSymbol.toUpperCase()}`;
-  if (instrument?.symbol) return `contract:${instrument.symbol.toUpperCase()}`;
-  return normalizeTicker(ticker);
+  if (instrument) return `contract:${brokerContractIdentityKey(instrument)}`;
+  const target = parsePublicTickerKey(ticker);
+  const suffixExchange = !target.exchange && yahooSuffixExchange(target.symbol);
+  // Earlier bare-suffix caches may have parsed dates using unrelated exchange
+  // metadata or UTC. A qualified entity bypasses those records on upgrade.
+  return suffixExchange ? `${target.symbol}:${suffixExchange}` : normalizeTicker(ticker);
 }
 
 export function getTickerVariantCandidates(exchange?: string): string[] {

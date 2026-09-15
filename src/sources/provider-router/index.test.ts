@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { CloudApiRequestTransport } from "../../api-client/request";
 import { AppPersistence } from "../../data/app-persistence";
 import { AssetDataRouter } from "./index";
+import { getRouterEntityKey } from "./cache";
 import { assetDataProvider } from "../../capabilities";
 import type { BrokerAdapter } from "../../types/broker";
 import type { DataProvider, QuoteSubscriptionTarget } from "../../types/data-provider";
@@ -468,7 +469,18 @@ describe("AssetDataRouter", () => {
     const dbPath = createTempDbPath("option-session-transition");
     const persistence = new AppPersistence(dbPath);
     const optionSymbol = "IBIT  281215C00030000";
-    const entityKey = `contract:${optionSymbol}`;
+    const context = {
+      brokerId: "ibkr",
+      brokerInstanceId: "ibkr-work",
+      instrument: {
+        brokerId: "ibkr",
+        brokerInstanceId: "ibkr-work",
+        symbol: "IBIT",
+        localSymbol: optionSymbol,
+        secType: "OPT",
+      },
+    } as const;
+    const entityKey = getRouterEntityKey(optionSymbol, context.instrument);
     const providerSourceKey = "provider:yahoo";
     const cacheKey = {
       namespace: "market",
@@ -535,17 +547,6 @@ describe("AssetDataRouter", () => {
       const router = new AssetDataRouter(provider, [], persistence.resources);
       attachTestRegistry(router, { brokers: [["ibkr", broker]] });
       setBrokerInstances(router, [brokerInstance()]);
-      const context = {
-        brokerId: "ibkr",
-        brokerInstanceId: "ibkr-work",
-        instrument: {
-          brokerId: "ibkr",
-          brokerInstanceId: "ibkr-work",
-          symbol: "IBIT",
-          localSymbol: optionSymbol,
-          secType: "OPT",
-        },
-      } as const;
 
       const staleTransition = await router.getQuote(optionSymbol, "", context);
       expect(staleTransition.marketState).toBe("CLOSED");
@@ -971,7 +972,7 @@ describe("AssetDataRouter", () => {
       subscribeQuotes(targets, onQuote) {
         providerTargets.push(...targets);
         onQuote(targets[0]!, {
-          symbol: "MSFT",
+          symbol: targets[0]!.symbol,
           price: 456.78,
           currency: "USD",
           change: 2,

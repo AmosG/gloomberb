@@ -3,7 +3,7 @@ import { findPortfolio, isManualPortfolio } from "../mutations";
 
 export function parseFiniteNumber(rawValue: string | undefined, label: string): number {
   const value = Number(rawValue);
-  if (!Number.isFinite(value)) {
+  if (!rawValue?.trim() || !Number.isFinite(value)) {
     throw new Error(`${label} must be a valid number.`);
   }
   return value;

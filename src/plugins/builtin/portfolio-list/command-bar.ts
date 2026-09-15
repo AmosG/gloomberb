@@ -80,7 +80,7 @@ function buildManualPortfolioPositionWorkflow(
     ticker: options.ticker?.metadata.ticker ?? "",
     shares: preferredPosition ? String(preferredPosition.shares) : "",
     avgCost: preferredPosition
-      ? String(preferredPosition.avgCost)
+      ? Number.isFinite(preferredPosition.avgCost) ? String(preferredPosition.avgCost) : ""
       : Number.isFinite(options.defaultAvgCost)
         ? String(options.defaultAvgCost)
         : "",

@@ -29,6 +29,10 @@ export interface StatViewModel {
   low: StatPoint;
   visible: StatPoint[];
   observationStale: boolean;
+  fetchedAt: number | null;
+  cacheStale: boolean | null;
+  cacheSource: NonNullable<StatBuild["cache"]>["source"] | null;
+  refreshError: string | null;
 }
 
 export function sliceByRange(
@@ -88,6 +92,10 @@ export function projectStat(
     low: extreme(points, "low"),
     visible: sliceByRange(points, range),
     observationStale: nowMs - Date.parse(latest.date) > stat.staleAfterMs,
+    fetchedAt: build.cache?.fetchedAt ?? null,
+    cacheStale: build.cache?.stale ?? null,
+    cacheSource: build.cache?.source ?? null,
+    refreshError: build.cache?.refreshError ?? null,
   };
 }
 

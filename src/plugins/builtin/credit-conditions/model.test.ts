@@ -39,5 +39,6 @@ describe("normalizeCreditSeries", () => {
   test("rejects metadata that would make spread normalization misleading", () => {
     expect(() => normalizeCreditSeries(CREDIT_SERIES[0], payload({ units: "Index" }))).toThrow("unexpected FRED metadata");
     expect(() => normalizeCreditSeries(CREDIT_SERIES[0], payload({ title: "Corporate Effective Yield" }))).toThrow("unexpected FRED metadata");
+    expect(() => normalizeCreditSeries(CREDIT_SERIES[0], payload({ id: "BAMLH0A0HYM2" }))).toThrow("unexpected FRED metadata");
   });
 });

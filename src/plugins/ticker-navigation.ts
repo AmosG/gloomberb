@@ -7,6 +7,8 @@ import {
 } from "../types/config";
 import type { PaneDef } from "../types/plugin";
 import { isPaneInLayout } from "./pane-manager";
+import type { BrokerContractRef } from "../types/instrument";
+import { scopedBrokerContractIdentityKey } from "../utils/instrument-identity";
 
 /** Panes that publish a cursor symbol other panes can follow (`PaneDef.tickerSource`). */
 export function listVisibleTickerSourcePanes(
@@ -61,11 +63,14 @@ export function findFixedTickerPaneForSymbol(
   layout: LayoutConfig,
   paneId: string,
   symbol: string,
+  instrument?: BrokerContractRef | null,
 ): PaneInstanceConfig | null {
   return layout.instances.find((instance) =>
     instance.paneId === normalizePaneId(paneId)
     && instance.binding?.kind === "fixed"
     && instance.binding.symbol === symbol
+    && (instance.binding.instrument === undefined ? "unspecified" : instance.binding.instrument === null ? "public" : scopedBrokerContractIdentityKey(instance.binding.instrument))
+      === (instrument === undefined ? "unspecified" : instrument === null ? "public" : scopedBrokerContractIdentityKey(instrument))
     && isPaneInLayout(layout, instance.instanceId)
   ) ?? null;
 }

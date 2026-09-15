@@ -1,3 +1,8 @@
+import type { PriceBasis } from "../../types/instrument";
+import type { Quote } from "../../types/financials";
+import { resolvePriceBasis } from "./price-basis";
+import { formatCompact, formatCurrency } from "../../utils/format";
+
 export type AssetDisplayKind = "cash" | "crypto" | "equity" | "contract" | "other";
 
 export interface AssetDisplayContext {
@@ -5,6 +10,8 @@ export interface AssetDisplayContext {
   assetCategory?: string;
   contractSecType?: string;
   multiplier?: number;
+  priceBasis?: PriceBasis | null;
+  quantityCurrency?: string;
 }
 
 export interface MarketFormatOptions extends AssetDisplayContext {
@@ -13,6 +20,19 @@ export interface MarketFormatOptions extends AssetDisplayContext {
   precisionOffset?: number;
   priceRange?: number;
   fixedFractionDigits?: number;
+}
+
+/** Current price fields use the quote's source metadata; stored cost/mark
+ * conventions and independent history must not supply its missing basis. */
+export function quoteFormatOptions(
+  quote: Pick<Quote, "instrumentType" | "priceBasis"> | null | undefined,
+  fallbackAssetCategory?: string,
+  metadataInstrumentType?: string,
+): MarketFormatOptions {
+  // Separate metadata may identify a bond whose convention is unknown. It must
+  // never turn a saved bond into a monetary quote or supply a par declaration.
+  const fallback = metadataInstrumentType?.trim().toUpperCase() === "BOND" ? "BOND" : fallbackAssetCategory;
+  return { assetCategory: quote?.instrumentType?.trim() || fallback, priceBasis: quote?.priceBasis };
 }
 
 const CASH_TYPES = new Set(["CASH", "FX", "FOREX", "CCY", "CURRENCY", "CURRENCYPAIR"]);
@@ -116,7 +136,9 @@ function getBasePriceMaxFractionDigits(kind: AssetDisplayKind, value: number): n
     case "equity":
       return Math.abs(value) >= 1 ? 2 : 4;
     case "contract":
-      return 4;
+      // Currency futures include five- and seven-decimal prices. This is a
+      // display ceiling, not a declaration of the contract's minimum tick.
+      return 8;
     case "other":
     default:
       return Math.abs(value) >= 1 ? 2 : 4;
@@ -155,6 +177,16 @@ function formatPriceNumber(value: number, decimals: number, maxWidth: number | u
     if (fitsWidth(scientific, maxWidth)) return scientific;
   }
   return "…";
+}
+
+/** Dated OHLC values may have no instrument or unit metadata. Display their
+ * numeric precision without treating them as equity prices or assigning units. */
+export function formatPriceObservation(
+  value: number,
+  options: Pick<MarketFormatOptions, "maxWidth" | "minimumFractionDigits"> = {},
+): string {
+  if (!Number.isFinite(value)) return "—";
+  return formatPriceNumber(value, 8, options.maxWidth, Math.max(0, Math.min(8, options.minimumFractionDigits ?? 0)));
 }
 
 function getPriceMaxFractionDigits(
@@ -223,6 +255,14 @@ export function resolveAssetDisplayKind({
 
 export function formatMarketQuantity(value: number | undefined, options: MarketFormatOptions = {}): string {
   if (value === undefined || value === null || Number.isNaN(value)) return "—";
+  if (options.priceBasis === "percent-of-par") {
+    const suffix = `${options.quantityCurrency ? ` ${options.quantityCurrency}` : ""} face`;
+    const maxWidth = options.maxWidth == null ? undefined : Math.max(1, options.maxWidth - suffix.length);
+    const quantity = formatMarketQuantity(value, { ...options, priceBasis: "per-unit", maxWidth });
+    const compact = formatCompact(value);
+    const numeric = fitsWidth(quantity, maxWidth) ? quantity : fitsWidth(compact, maxWidth) ? compact : formatPriceNumber(value, 0, maxWidth);
+    return `${numeric}${suffix}`;
+  }
   const kind = resolveAssetDisplayKind(options);
   const maxFractionDigits = getQuantityMaxFractionDigits(kind, value);
   return formatVariableNumber(value, maxFractionDigits, options.maxWidth);
@@ -230,6 +270,12 @@ export function formatMarketQuantity(value: number | undefined, options: MarketF
 
 export function formatMarketPrice(value: number | undefined, options: MarketFormatOptions = {}): string {
   if (value === undefined || value === null || Number.isNaN(value)) return "—";
+  const basis = resolvePriceBasis(options.priceBasis, options.assetCategory);
+  if (basis === null) return "—";
+  if (basis === "percent-of-par") {
+    const maxWidth = options.maxWidth == null ? undefined : Math.max(1, options.maxWidth - 5);
+    return `${formatMarketPrice(value, { ...options, priceBasis: "per-unit", maxWidth })}% par`;
+  }
   const kind = resolveAssetDisplayKind(options);
   const fixedFractionDigits = options.fixedFractionDigits;
   if (fixedFractionDigits !== undefined) {
@@ -252,17 +298,36 @@ export function formatMarketPrice(value: number | undefined, options: MarketForm
 
 export function formatMarketCost(value: number | undefined, options: MarketFormatOptions = {}): string {
   if (value === undefined || value === null || Number.isNaN(value)) return "—";
+  const basis = resolvePriceBasis(options.priceBasis, options.assetCategory);
+  if (basis === null) return "—";
+  if (basis === "percent-of-par") {
+    const maxWidth = options.maxWidth == null ? undefined : Math.max(1, options.maxWidth - 5);
+    return `${formatMarketCost(value, { ...options, priceBasis: "per-unit", maxWidth })}% par`;
+  }
   const kind = resolveAssetDisplayKind(options);
   return formatVariableNumber(value, getCostMaxFractionDigits(kind), options.maxWidth);
 }
 
 export function formatSignedMarketPrice(value: number | undefined, options: MarketFormatOptions = {}): string {
   if (value === undefined || value === null || Number.isNaN(value)) return "—";
+  if (resolvePriceBasis(options.priceBasis, options.assetCategory) === null) return "—";
   if (value > 0) {
     const maxWidth = options.maxWidth == null ? undefined : Math.max(1, options.maxWidth - 1);
     return `+${formatMarketPrice(value, { ...options, maxWidth })}`;
   }
   return formatMarketPrice(value, options);
+}
+
+/** Preserve ordinary monetary change formatting while retaining declared par units. */
+export function formatMarketChangeWithCurrency(value: number | undefined, currency: string, options: MarketFormatOptions = {}): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  if (resolvePriceBasis(options.priceBasis, options.assetCategory) !== "per-unit") return formatSignedMarketPrice(value, options);
+  if (resolveAssetDisplayKind(options) === "contract") {
+    return `${value > 0 ? "+" : ""}${formatMarketPriceWithCurrency(value, currency, {
+      ...options, minimumFractionDigits: Math.max(2, options.minimumFractionDigits ?? 0),
+    })}`;
+  }
+  return `${value > 0 ? "+" : ""}${formatCurrency(value, currency)}`;
 }
 
 export function formatMarketPriceWithCurrency(
@@ -271,6 +336,7 @@ export function formatMarketPriceWithCurrency(
   options: MarketFormatOptions = {},
 ): string {
   if (value === undefined || value === null || Number.isNaN(value)) return "—";
+  if (resolvePriceBasis(options.priceBasis, options.assetCategory) !== "per-unit") return formatMarketPrice(value, options);
   const normalizedCurrency = currency.trim().toUpperCase() || "USD";
   const sign = value < 0 ? "-" : "";
   const symbol = getCurrencySymbol(normalizedCurrency);
@@ -287,6 +353,7 @@ export function formatMarketCostWithCurrency(
   options: MarketFormatOptions = {},
 ): string {
   if (value === undefined || value === null || Number.isNaN(value)) return "—";
+  if (resolvePriceBasis(options.priceBasis, options.assetCategory) !== "per-unit") return formatMarketCost(value, options);
   const normalizedCurrency = currency.trim().toUpperCase() || "USD";
   const sign = value < 0 ? "-" : "";
   const symbol = getCurrencySymbol(normalizedCurrency);

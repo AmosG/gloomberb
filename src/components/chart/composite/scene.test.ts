@@ -447,6 +447,87 @@ describe("composite chart scene", () => {
     expect(betweenDaily?.cursorValues.find((entry) => entry.seriesId === "quarterly")?.value).toBe(100);
   });
 
+  for (const style of ["line", "step"] as const) {
+    test(`${style} cursor stops at an explicit gap until a finite observation recovers`, () => {
+      const known = point("2026-09-01", 0.45);
+      const gap = { ...point("2026-09-02", 0), value: null, provenance: { quality: "derived" as const } };
+      const recovery = point("2026-09-04", 0);
+      const interrupted = series({
+        id: "interrupted", style, points: [known, gap, recovery],
+      });
+      const sparse = series({ id: "sparse", style, points: [known, recovery] });
+      const clock = series({
+        id: "clock", points: [1, 2, 3, 4, 5].map((day) => point(`2026-09-0${day}`, 100)),
+      });
+      const options = { width: 80, height: 10 };
+      const base = buildCompositeChartScene([interrupted, sparse, clock], [{ id: "main" }], options)!;
+      for (const [day, expected, expectedPoint] of [
+        [1, 0.45, known], [2, null, gap], [3, null, gap], [4, 0, recovery], [5, 0, recovery],
+      ] as const) {
+        const cursorDate = new Date(`2026-09-0${day}`);
+        const moved = applyCompositeChartCursor(base, cursorDate);
+        const rebuilt = buildCompositeChartScene([interrupted, sparse, clock], [{ id: "main" }], {
+          ...options, cursorDate,
+        })!;
+        for (const scene of [moved, rebuilt]) {
+          const inspected = scene.cursorValues.find((entry) => entry.seriesId === "interrupted");
+          expect(inspected?.value).toBe(expected);
+          expect(inspected?.point).toBe(expectedPoint);
+          expect(scene.cursorValues.find((entry) => entry.seriesId === "sparse")?.value).toBe(day < 4 ? 0.45 : 0);
+        }
+        expect(moved.panels).toBe(base.panels);
+      }
+    });
+  }
+
+  test("the idle and released cursor retain an explicit latest gap and its source date", () => {
+    const known = point("2026-09-01", 0.45);
+    const gap = { ...point("2026-09-02", 0), value: null };
+    const interrupted = series({ id: "ratio", style: "step", points: [known, gap] });
+    const clock = series({ id: "clock", points: [point("2026-09-01", 100), point("2026-09-03", 102)] });
+    const idle = buildCompositeChartScene([interrupted, clock], [{ id: "main" }], { width: 80, height: 10 })!;
+    expect(idle.cursorValues[0]?.value).toBeNull();
+    expect(idle.cursorValues[0]?.point).toBe(gap);
+    const inspected = applyCompositeChartCursor(idle, new Date("2026-09-03"));
+    expect(inspected.cursorValues[0]?.value).toBeNull();
+    expect(inspected.cursorValues[0]?.point).toBe(gap);
+    const released = applyCompositeChartCursor(inspected, null);
+    expect(released.cursorValues).toEqual(idle.cursorValues);
+  });
+
+  test("a missing latest market bar withholds the price marker until a finite close returns", () => {
+    const known = point("2026-09-01", 100);
+    const gap = { ...point("2026-09-02", 0), value: null };
+    const market = series({ id: "price", unitGroup: "price:USD", timeBasis: { kind: "market", timeZone: "America/New_York" }, points: [known, gap] });
+    const missing = buildCompositeChartScene([market], [{ id: "main" }], { width: 80, height: 10 })!;
+    expect(missing.panels[0]!.lastPrice).toBeUndefined();
+    expect(missing.cursorValues[0]!.value).toBeNull();
+    expect(missing.dates.map(date => date.toISOString().slice(0, 10))).toContain("2026-09-02");
+    const recovered = buildCompositeChartScene([{ ...market, points: [known, gap, point("2026-09-03", 0)] }], [{ id: "main" }], { width: 80, height: 10 })!;
+    expect(recovered.panels[0]!.lastPrice?.value).toBe(0);
+    expect(recovered.cursorValues[0]!.value).toBe(0);
+  });
+
+  test("a publication gap blocks a market cursor only once the missing observation is available", () => {
+    const known = { ...point("2024-09-30", 500), availableAt: new Date("2024-10-15") };
+    const gap = { ...point("2024-12-31", 0), value: null, availableAt: new Date("2025-01-06") };
+    const filing = series({ id: "filing", style: "step", points: [known, gap] });
+    const price = series({
+      id: "price", timeBasis: { kind: "market", timeZone: "UTC", cadenceMs: 24 * 60 * 60 * 1_000 },
+      points: [point("2025-01-03", 100), point("2025-01-06", 102), point("2025-01-07", 103)],
+    });
+    const scene = buildCompositeChartScene([price, filing], [{ id: "main" }], {
+      width: 80, height: 10, viewport: { start: new Date("2025-01-03"), end: new Date("2025-01-07") },
+    })!;
+    for (const [date, value, sourcePoint] of [
+      ["2025-01-03", 500, known], ["2025-01-06", null, gap], ["2025-01-07", null, gap],
+    ] as const) {
+      const inspected = applyCompositeChartCursor(scene, new Date(date)).cursorValues.find((entry) => entry.seriesId === "filing");
+      expect(inspected?.value).toBe(value);
+      expect(inspected?.point).toBe(sourcePoint);
+    }
+  });
+
   test("places a filing on its first eligible market slot without changing source timestamps", () => {
     const price = series({
       id: "price",

@@ -17,8 +17,8 @@ import {
   formatMarketQuantity,
 } from "../../../../market-data/market/format";
 import type { PositionTableRow, StatField } from "./types";
-import { getPortfolioPositionMetrics, signedPositionDirection } from "../../portfolio-list/position-metrics";
-import { resolveCurrencyUnit } from "../../../../utils/currency-units";
+import { getPortfolioPositionMetrics, getPortfolioQuoteDisplay, resolvePortfolioMarketValue, resolvePortfolioPositionPnl, portfolioPnlPercent, signedPositionDirection } from "../../portfolio-list/position-metrics";
+import { formatReportedMoney } from "../../../../utils/reported-money";
 
 type CurrencyConverter = (value: number, fromCurrency: string) => number;
 
@@ -48,17 +48,7 @@ export function buildOverviewStats({
   marketCapExchangeRates?: ReadonlyMap<string, number>;
 }): StatField[] {
   const stats: StatField[] = [];
-  const financialCurrency = fundamentals?.financialCurrency?.trim();
-  const money = (value: number, perShare = false) => {
-    if (!Number.isFinite(value)) return "—";
-    const amount = perShare ? formatNumber(value, 2) : formatCompact(value);
-    if (!financialCurrency) return `${amount} (ccy?)`;
-    // Intl uppercases currency codes: GBp must not become GBP without scaling.
-    if (perShare && resolveCurrencyUnit(financialCurrency).divisor === 1) {
-      return formatCurrency(value, financialCurrency);
-    }
-    return `${amount} ${financialCurrency}`;
-  };
+  const money = (value: number, perShare = false) => formatReportedMoney(value, fundamentals?.financialCurrency, perShare);
 
   if (quote?.volume != null) {
     stats.push({ label: "Volume", value: formatCompact(quote.volume) });
@@ -131,45 +121,48 @@ export function buildPositionRows({
   baseCurrency: string;
   toBase: CurrencyConverter;
 }): PositionTableRow[] {
-  return ticker.metadata.positions.map((position) => {
-    const positionCurrency = position.currency || quoteCurrency;
+  return ticker.metadata.positions.filter((position) => position.shares !== 0).map((position) => {
+    const positionCurrency = getPortfolioPositionMetrics(
+      { ...ticker, metadata: { ...ticker.metadata, positions: [position] } }, undefined, quoteCurrency, undefined, quote,
+    ).positionCurrency;
     const metrics = getPortfolioPositionMetrics(
       { ...ticker, metadata: { ...ticker.metadata, positions: [position] } },
       undefined,
       quoteCurrency,
       { currency: baseCurrency, convert: toBase },
+      quote,
     );
+    const activeQuote = getPortfolioQuoteDisplay(metrics, quote);
+    const currentPrice = activeQuote?.price ?? null;
     const finiteValue = (value: number | null): number | null => value != null && Number.isFinite(value) ? value : null;
     const costBasisBase = finiteValue(metrics.totalCost);
-    const hasBrokerMark = Number.isFinite(position.markPrice);
-    const fallbackMarkPrice = hasBrokerMark ? position.markPrice : quote?.price;
-    const fallbackMarkCurrency = hasBrokerMark ? positionCurrency : quoteCurrency;
-    const marketValueBase = finiteValue(metrics.hasBrokerMktValue
-      ? metrics.brokerMktValue
-      : Number.isFinite(quote?.price)
-        ? toBase(metrics.grossPriceUnits * quote!.price, quoteCurrency)
-        : null);
-    const pnlValue = finiteValue(metrics.hasBrokerPnl
-      ? metrics.brokerPnl
-      : marketValueBase != null
-        ? signedPositionDirection(position) * marketValueBase - metrics.signedCost
-        : null);
-    const returnPercent = pnlValue != null && costBasisBase != null && costBasisBase !== 0
-      ? formatPercentRaw((pnlValue / Math.abs(costBasisBase)) * 100)
-      : "—";
-    const unit = metrics.multiplierHint > 1 ? " ct" : " sh";
+    const hasBrokerMark = metrics.brokerMarkPrice != null && Number.isFinite(metrics.brokerMarkPrice);
+    const fallbackMarkPrice = currentPrice ?? (hasBrokerMark ? position.markPrice : undefined);
+    const fallbackMarkCurrency = currentPrice != null ? quoteCurrency : positionCurrency;
+    const marketValueBase = resolvePortfolioMarketValue(metrics, currentPrice != null ? toBase(currentPrice, quoteCurrency) : null)?.gross ?? null;
+    const selectedPnl = resolvePortfolioPositionPnl(metrics,
+      currentPrice != null ? toBase(currentPrice, quoteCurrency) : null);
+    const pnlValue = selectedPnl.value;
+    const percent = portfolioPnlPercent(pnlValue, costBasisBase != null ? Math.abs(costBasisBase) : Number.NaN);
+    const returnPercent = percent === null ? "—" : formatPercentRaw(percent);
+    const unit = metrics.priceBasis === "percent-of-par" ? "" : ticker.metadata.assetCategory === "BOND" ? " units" : metrics.multiplierHint > 1 ? " ct" : " sh";
 
     return {
       account: compactPositionAccount(position),
-      qty: `${formatMarketQuantity(metrics.totalShares, { assetCategory: ticker.metadata.assetCategory, multiplier: position.multiplier })}${unit}`,
+      qty: `${formatMarketQuantity(metrics.totalShares, { assetCategory: ticker.metadata.assetCategory, multiplier: position.multiplier, priceBasis: metrics.priceBasis, quantityCurrency: positionCurrency, maxWidth: metrics.priceBasis === "percent-of-par" ? 11 : undefined })}${unit}`,
+      quantityUnit: metrics.priceBasis === "percent-of-par" ? "face" : undefined,
       avg: formatMarketCostWithCurrency(position.avgCost, positionCurrency, {
         assetCategory: ticker.metadata.assetCategory,
         multiplier: position.multiplier,
+        priceBasis: metrics.priceBasis,
+        maxWidth: metrics.priceBasis === "percent-of-par" ? 9 : undefined,
       }),
       mark: fallbackMarkPrice != null && Number.isFinite(fallbackMarkPrice)
         ? formatMarketPriceWithCurrency(fallbackMarkPrice, fallbackMarkCurrency, {
             assetCategory: ticker.metadata.assetCategory,
             multiplier: position.multiplier,
+            priceBasis: currentPrice != null ? quote?.priceBasis : metrics.priceBasis,
+            maxWidth: (currentPrice != null ? quote?.priceBasis : metrics.priceBasis) === "percent-of-par" ? 9 : undefined,
           })
         : "—",
       cost: costBasisBase != null ? formatCurrency(costBasisBase, baseCurrency) : "—",
@@ -177,6 +170,7 @@ export function buildPositionRows({
       pnl: pnlValue != null ? `${pnlValue >= 0 ? "+" : ""}${formatCurrency(pnlValue, baseCurrency)}` : "—",
       ret: returnPercent,
       pnlValue,
+      pnlBasis: selectedPnl.basis,
     };
   });
 }

@@ -189,8 +189,8 @@ export async function loadYahooTickerFinancials(
       ? latest("annualOperatingIncome")! / revenue
       : undefined,
     profitMargin: revenue && netIncome != null ? netIncome / revenue : undefined,
-    return1Y: computeYahooReturn(history, 365),
-    return3Y: computeYahooReturn(history, 3 * 365),
+    return1Y: computeYahooReturn(history, 1),
+    return3Y: computeYahooReturn(history, 3),
     sharesOutstanding: latest("annualDilutedAverageShares"),
   };
 

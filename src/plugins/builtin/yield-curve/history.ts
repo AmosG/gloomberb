@@ -1,5 +1,5 @@
 import { apiClient, type CloudFredSeriesPayload } from "../../../api-client";
-import { TREASURY_MATURITIES, type YieldPoint } from "./treasury-data";
+import { isYieldObservationDate, TREASURY_MATURITIES, type YieldPoint } from "./treasury-data";
 
 const DAY_MS = 86_400_000;
 export type TreasurySeriesLoader = (seriesId: string, options: {
@@ -13,9 +13,7 @@ export function yieldCurveDate(value: unknown, now = new Date()): string {
   if (value == null) return "";
   const date = typeof value === "string" ? value.trim() : "";
   if (typeof value === "string" && (date === "" || date.toLowerCase() === "latest")) return "";
-  const timestamp = Date.parse(date);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(timestamp)
-    || new Date(timestamp).toISOString().slice(0, 10) !== date) {
+  if (!isYieldObservationDate(date)) {
     throw new Error("Use an as-of date in YYYY-MM-DD format, or latest.");
   }
   if (date > now.toISOString().slice(0, 10)) throw new Error("A Treasury curve cannot use a future date.");
@@ -26,7 +24,9 @@ export function completeYieldCurve(points: readonly YieldPoint[]): YieldPoint[] 
   return TREASURY_MATURITIES.map(({ maturity, years }) => {
     const found = points.find((point) => point.maturity === maturity);
     return found && found.yield != null && Number.isFinite(found.yield)
-      ? { ...found, maturityYears: years }
+      ? { ...found, maturityYears: years,
+        ...(found.asOf != null && !isYieldObservationDate(found.asOf)
+          ? { asOf: null, error: `Invalid Treasury observation date: ${found.asOf}` } : {}) }
       : { ...found, maturity, maturityYears: years, yield: null, asOf: null };
   });
 }
@@ -42,20 +42,34 @@ export async function loadHistoricalYieldCurve(
   const startDate = new Date(Date.parse(endDate) - 10 * DAY_MS).toISOString().slice(0, 10);
   const results = await Promise.allSettled(TREASURY_MATURITIES.map(async ({ seriesId }) => {
     const payload = await loader(seriesId, { startDate, endDate, limit: 10, sortOrder: "desc" });
+    if (payload.info && payload.info.id !== seriesId) {
+      throw new Error(`Expected ${seriesId}, received ${payload.info.id || "unknown series"}`);
+    }
     // These fixed DGS series are daily percentages. A metadata endpoint outage
     // can retain usable observations; contradictory metadata must not be used.
     if (payload.info && (payload.info.units?.toLowerCase() !== "percent" || payload.info.frequency?.toLowerCase() !== "daily")) {
       throw new Error(`${seriesId}: unexpected Treasury units or frequency`);
     }
+    const invalidDate = payload.observations.find((point) =>
+      point.value != null && Number.isFinite(point.value) && !isYieldObservationDate(point.date));
     const observations = payload.observations.filter((point): point is { date: string; value: number } =>
-      /^\d{4}-\d{2}-\d{2}$/.test(point.date) && point.date >= startDate && point.date <= endDate
+      isYieldObservationDate(point.date) && point.date >= startDate && point.date <= endDate
       && point.value != null && Number.isFinite(point.value));
-    return { payload, observations };
+    return { payload, observations,
+      error: invalidDate ? `Invalid Treasury observation date: ${invalidDate.date}` : undefined };
   }));
   const dates = results.flatMap((result) => result.status === "fulfilled"
     ? result.value.observations.map((point) => point.date) : []);
   const asOf = dates.sort().at(-1);
-  if (!asOf) throw new Error(`No Treasury observations available on or within 10 days before ${endDate}.`);
+  const errors = results.flatMap((result, index) => {
+    const error = result.status === "rejected"
+      ? result.reason instanceof Error ? result.reason.message : String(result.reason)
+      : result.value.error;
+    return error ? [`${TREASURY_MATURITIES[index]!.maturity}: ${error}`] : [];
+  });
+  if (!asOf) throw new Error(errors.length
+    ? `Treasury curve unavailable: ${errors.join("; ")}`
+    : `No Treasury observations available on or within 10 days before ${endDate}.`);
   return TREASURY_MATURITIES.map(({ maturity, years }, index) => {
     const result = results[index]!;
     const data = result.status === "fulfilled" ? result.value : null;
@@ -67,6 +81,9 @@ export async function loadHistoricalYieldCurve(
       asOf: point ? asOf : null,
       stale: data?.payload.stale ?? false,
       fetchedAt: data?.payload.fetchedAt,
+      error: result.status === "rejected"
+        ? result.reason instanceof Error ? result.reason.message : String(result.reason)
+        : data?.error,
     };
   });
 }

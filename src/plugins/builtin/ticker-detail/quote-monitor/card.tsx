@@ -7,7 +7,7 @@ import { resolveEntryData } from "../../../../market-data/selectors";
 import { useDoubleClickActivation } from "../../../../components/use-double-click-activation";
 import { colors, priceColor } from "../../../../theme/colors";
 import { formatPercentRaw } from "../../../../utils/format";
-import { formatMarketPriceWithCurrency, formatSignedMarketPrice } from "../../../../market-data/market/format";
+import { formatMarketPriceWithCurrency, quoteFormatOptions, formatSignedMarketPrice } from "../../../../market-data/market/format";
 import { getActiveQuoteDisplay } from "../../../../market-data/market/status";
 import { isQuoteStaleForCurrentSession } from "../../../../market-data/quotes/freshness";
 import { useQuoteFlashDirection } from "../../../../components/quote-flash";
@@ -94,10 +94,10 @@ export function QuoteMonitorCard({
   const stacked = width < 31;
   const compactQuoteFailure = quoteFailed && stacked && height <= 3;
   const priceText = display
-    ? formatMarketPriceWithCurrency(display.price, currency, { assetCategory })
+    ? formatMarketPriceWithCurrency(display.price, currency, quoteFormatOptions(quote, assetCategory, cachedFinancials?.quoteMetadata?.instrumentType))
     : "";
   const changePercentText = display ? formatPercentRaw(display.changePercent) : "";
-  const changeValueText = display ? formatSignedMarketPrice(display.change, { assetCategory }) : "";
+  const changeValueText = display ? formatSignedMarketPrice(display.change, quoteFormatOptions(quote, assetCategory, cachedFinancials?.quoteMetadata?.instrumentType)) : "";
   const priceColumnWidth = Math.max(priceText.length, changePercentText.length + changeValueText.length + 1);
   const nameMaxWidth = Math.max(10, width - priceColumnWidth - (nativePaneChrome ? 5 : 3));
   const sparklineRange = resolvePriceSparklineRange(priceHistory, chartPeriod);

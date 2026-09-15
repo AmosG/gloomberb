@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CloudFilingEventPayload } from "../../../api-client";
 import { apiClient } from "../../../api-client";
 import {
   EmptyState,
@@ -22,7 +21,7 @@ import {
 } from "../../../ui";
 import { truncateToDisplayWidth } from "../../../utils/format";
 import { isPlainKey } from "../../../utils/keyboard";
-import { useBoundTicker } from "../shared/ticker-request";
+import { useBoundTicker, useTickerRequest } from "../shared/ticker-request";
 import {
   buildFilingEventsFeed,
   resolveFeedScrollTop,
@@ -32,6 +31,7 @@ import {
 export const FILING_EVENTS_PANE_ID = "filing-events";
 
 const MAX_PROSE_WIDTH = 100;
+const loadFilingEvents = (symbol: string) => apiClient.getFilingEvents(symbol, 100);
 
 /** One filing: when it was filed, what it was about, and what it said. */
 function FilingEntry({
@@ -108,44 +108,20 @@ export function FilingEventsPane({
   width: number;
   height: number;
 }) {
-  const { symbol } = useBoundTicker();
+  const { symbol, exchange } = useBoundTicker();
   const ticker = symbol ? symbol.toUpperCase() : null;
   const nativePaneChrome = useUiCapabilities().nativePaneChrome === true;
   const rendererHost = useRendererHost();
 
-  const [events, setEvents] = useState<CloudFilingEventPayload[]>([]);
-  const [status, setStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
-  const [error, setError] = useState<string | null>(null);
+  const { data, loading, error, reload } = useTickerRequest(loadFilingEvents, ticker, exchange);
+  const events = data?.events ?? [];
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const scrollRef = useRef<ScrollBoxRenderable | null>(null);
 
   useEffect(() => {
-    if (!ticker) return;
-    let cancelled = false;
-    setStatus("loading");
-    apiClient
-      .getFilingEvents(ticker, 100)
-      .then((payload) => {
-        if (cancelled) return;
-        setEvents(payload.events);
-        // The feed leads with what was read rather than what was filed last,
-        // so the opening selection is resolved against it, not this order.
-        setSelectedId(null);
-        setStatus("loaded");
-      })
-      .catch((caught: unknown) => {
-        if (cancelled) return;
-        setError(caught instanceof Error ? caught.message : String(caught));
-        setStatus("error");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [ticker]);
-
-  useEffect(() => {
     const scrollBox = scrollRef.current;
     if (scrollBox) scrollBox.scrollTop = 0;
+    setSelectedId(null);
   }, [ticker]);
 
   const bodyWidth = Math.max(12, width - 2);
@@ -186,7 +162,8 @@ export function FilingEventsPane({
 
   useShortcut(
     (event) => {
-      if (isPlainKey(event, "o")) openFiling();
+      if (isPlainKey(event, "r")) void reload();
+      else if (isPlainKey(event, "o")) openFiling();
       else if (isPlainKey(event, "j", "down")) moveSelection(1);
       else if (isPlainKey(event, "k", "up")) moveSelection(-1);
     },
@@ -195,20 +172,21 @@ export function FilingEventsPane({
 
   usePaneFooter(FILING_EVENTS_PANE_ID, () => {
     const info: PaneFooterSegment[] = [];
-    if (status === "loading") {
+    if (loading) {
       info.push({ id: "loading", parts: [{ text: "loading", tone: "muted" }] });
     }
+    if (error && ticker) info.push({ id: "error", parts: [{ text: error, tone: "warning" }] });
     const hints = selected
       ? [{ id: "open", key: "o", label: "pen filing", onPress: openFiling }]
       : [];
     return { info, hints };
-  }, [status, selected, openFiling]);
+  }, [loading, error, ticker, selected, openFiling]);
 
   if (!ticker) return <EmptyState title="Pick a ticker to see its 8-K filings." />;
-  if (status === "loading" && events.length === 0) {
+  if (loading && !data) {
     return <PaneStatusBody loading align="center" loadingLabel="Loading 8-Ks..." />;
   }
-  if (status === "error") {
+  if (error && !data) {
     return (
       <PaneStatusBody
         error={error ?? "Could not load 8-K filings."}
@@ -216,7 +194,7 @@ export function FilingEventsPane({
       />
     );
   }
-  if (status === "loaded" && events.length === 0) {
+  if (data && events.length === 0) {
     return (
       <EmptyState title={`No 8-K on file for ${ticker} in the last six months.`} />
     );
@@ -267,12 +245,7 @@ export function FilingEventsPane({
               ))}
             </Box>
           ))}
-          <Box height={1} marginTop={1}>
-            <Text fg={colors.textDim}>
-              Headlines and points are read from the filing by a model; names are
-              checked against its text.
-            </Text>
-          </Box>
+
         </Box>
       </ScrollBox>
     </Box>

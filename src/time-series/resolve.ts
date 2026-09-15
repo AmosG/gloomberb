@@ -4,7 +4,7 @@ import { SnapshotHistoryUnavailableError } from "../market-data/snapshot-provide
 import { financialPeriodCoverage, financialPeriodCoverageWarnings, limitSeriesObservations } from "./financial-period-coverage";
 import { HistoryCoverageError, historyCoverageNotice, isShellLondonTarget } from "../sources/history-coverage";
 import { FINANCIAL_VINTAGE_NOTICE, SEC_EPS_BASIS_NOTICE } from "../utils/financial-statements";
-import { appendLiveQuotePoint } from "./chart-data";
+import { appendLiveQuotePoint, hasUnknownBondHistoryBasis } from "./chart-data";
 import {
   getTimeRangeForDateWindow,
   isDateWindowWithinTimeRange,
@@ -622,10 +622,12 @@ function mergeHistory(
   liveBarResolution?: ManualChartResolution,
   exchange?: string,
   appendQuote = true,
+  assetCategory?: string,
 ): TickerFinancials {
   const base = financials ?? emptyFinancials();
   const quote = latestQuote(base.quote, quoteOverride);
-  const priceHistory = appendQuote ? appendLiveQuotePoint(history, quote, liveBarResolution
+  const unknownHistoryBasis = hasUnknownBondHistoryBasis(quote, assetCategory, base.quoteMetadata?.instrumentType);
+  const priceHistory = appendQuote && !unknownHistoryBasis ? appendLiveQuotePoint(history, quote, liveBarResolution
     ? { now, mode: "ohlc", resolution: liveBarResolution, exchange }
     : { now }) : history;
   return { ...base, quote, priceHistory };
@@ -738,16 +740,19 @@ function baseSecuritySeries(
     ? reportingCurrencySeries(points, financials.financialCurrency) : null;
   const currency = statementCurrency ? statementCurrency.currency : financials.quote?.currency || quoteMetadata?.currency;
   const assetKind = resolveAssetDisplayKind({ assetCategory: financials.quote?.instrumentType || quoteMetadata?.instrumentType });
-  const volumeUnit = assetKind === "equity" ? "shares" as const : assetKind === "contract" ? "contracts" as const : undefined;
+  const unknownBondBasis = hasUnknownBondHistoryBasis(financials.quote,
+    spec.source.instrument.instrument?.secType, quoteMetadata?.instrumentType);
+  const volumeUnit = unknownBondBasis ? undefined : assetKind === "equity" ? "shares" as const : assetKind === "contract" ? "contracts" as const : undefined;
   // A price quote establishes its currency, but only instrument metadata can
   // establish a per-share or per-crypto-unit basis. This does not establish the
   // provider's volume denomination or a derivative's contract multiplier.
   const unitTemplate = field.unitGroup === "price" && isMarketFieldId(field.id)
-    ? `currency${assetKind === "equity" ? "/share" : assetKind === "crypto" ? "/unit" : ""}`
+    ? unknownBondBasis ? "unknown" : `currency${assetKind === "equity" ? "/share" : assetKind === "crypto" ? "/unit" : ""}`
     : field.unit;
   const unit = field.id === "market.volume" ? volumeUnit ?? ""
     : unitTemplate.startsWith("currency") && currency ? unitTemplate.replace("currency", currency) : unitTemplate;
-  const currencyUnitGroup = field.unit.startsWith("currency") && currency
+  const currencyUnitGroup = unknownBondBasis && field.unitGroup === "price" ? "price:unknown"
+    : field.unit.startsWith("currency") && currency
     ? `${field.unitGroup}:${currency}`
     : field.unitGroup;
   const marketExchange = spec.source.instrument.exchange
@@ -759,6 +764,7 @@ function baseSecuritySeries(
     ? resolveExchangeTimeZone(marketExchange)
     : null;
   const latestChangePercent = marketField && field.unit.startsWith("currency")
+    && !unknownBondBasis
     && financials.quote && hasValidQuoteObservationTime(financials.quote)
     ? financials.quote.changePercent
     : undefined;
@@ -769,7 +775,7 @@ function baseSecuritySeries(
     color: spec.color ?? SERIES_COLORS[index % SERIES_COLORS.length]!,
     unit,
     unitGroup: currencyUnitGroup,
-    priceAssetCategory: marketField && field.unitGroup === "price"
+    priceAssetCategory: marketField && field.unitGroup === "price" && !unknownBondBasis
       ? financials.quote?.instrumentType || quoteMetadata?.instrumentType : undefined,
     volumeUnit,
     ...(priceIssues.length ? { valuationPriceIssues: priceIssues } : {}),
@@ -1272,16 +1278,8 @@ export async function resolveChartSpecData(
       // The viewport's initial reference stays fixed while a source request
       // runs. Validate a newly arrived quote against the elapsed clock.
       const observationNow = referenceNow.getTime() + Math.max(0, Date.now() - resolutionStartedAt);
-      let merged = history
-        // A streamed quote may update only one leg, even inside the same weekly
-        // bar. Comparison endpoints therefore use source history observations;
-        // quotes still provide currency/type without rewriting their prices.
-        ? mergeHistory(financials, history, quoteOverride,
-          observationNow,
-          liveBarResolution, resolvedSource.instrument.exchange, !comparedSeriesIds.has(seriesSpec.id))
-        : quoteOverride && financials
-          ? { ...financials, quote: latestQuote(financials.quote, quoteOverride) }
-          : financials;
+      let merged = financials ?? (history ? emptyFinancials() : null);
+      if (merged && quoteOverride) merged = { ...merged, quote: latestQuote(merged.quote, quoteOverride) };
       if (!merged) throw new Error(`No financial data is available for ${instrumentLabel(source)}.`);
       // Historical labels can retain listing facts after the live price is
       // unavailable. Reuse existing facts before requesting a price-free snapshot.
@@ -1293,6 +1291,15 @@ export async function resolveChartSpecData(
       );
       const quoteMetadata = mergeQuoteMetadata(existingMetadata, needsMetadata ? await loadQuoteMetadata(resolvedSource) : null);
       if (quoteMetadata || merged.quoteMetadata) merged = { ...merged, quoteMetadata };
+      if (history) {
+        // Classification must be available before combining observations. A
+        // quote cannot establish the price basis of independent bond history.
+        // Comparison endpoints also retain source history: a streamed quote
+        // could otherwise update only one leg within a shared weekly bar.
+        merged = mergeHistory(merged, history, undefined, observationNow,
+          liveBarResolution, resolvedSource.instrument.exchange,
+          !comparedSeriesIds.has(seriesSpec.id), resolvedSource.instrument.instrument?.secType);
+      }
       if ((source.fieldId === "fundamental.eps" || source.fieldId === "valuation.trailingPE")
         && [...merged.annualStatements, ...merged.quarterlyStatements].some((row) => row.epsBasis)) {
         warnings.push(SEC_EPS_BASIS_NOTICE);

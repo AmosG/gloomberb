@@ -212,9 +212,9 @@ export class CloudApiRequestTransport {
     );
   }
 
-  async request<T>(path: string, options?: RequestInit): Promise<T> {
+  async request<T>(path: string, options?: RequestInit, canApplySession: () => boolean = () => true): Promise<T> {
     if (!path.startsWith("/market/")) {
-      return this.performRequest<T>(path, options);
+      return this.performRequest<T>(path, options, canApplySession);
     }
 
     const controller = new AbortController();
@@ -230,7 +230,7 @@ export class CloudApiRequestTransport {
       const request = this.performRequest<T>(path, {
         ...options,
         signal: controller.signal,
-      });
+      }, canApplySession);
       return await withDeadline(
         request,
         this.marketRequestTimeoutMs,
@@ -244,7 +244,8 @@ export class CloudApiRequestTransport {
 
   private async performRequest<T>(
     path: string,
-    options?: RequestInit,
+    options: RequestInit | undefined,
+    canApplySession: () => boolean,
   ): Promise<T> {
     throwIfRequestAborted(options?.signal);
     const headers = new Headers(options?.headers);
@@ -270,9 +271,9 @@ export class CloudApiRequestTransport {
         },
       );
       throwIfRequestAborted(options?.signal);
-      if (this.sessionToken === sessionTokenAtRequestStart) {
-        this.extractSessionCookie(res);
-      }
+      const ownsCredential = canApplySession() && this.sessionToken === sessionTokenAtRequestStart;
+      if (ownsCredential) this.extractSessionCookie(res);
+      const sessionTokenAfterHeaders = this.sessionToken;
       const text = await res.text();
       throwIfRequestAborted(options?.signal);
 
@@ -287,7 +288,8 @@ export class CloudApiRequestTransport {
 
       if (!text) return undefined as T;
       const parsed = JSON.parse(text) as T & { token?: string };
-      if (typeof parsed?.token === "string" && parsed.token.length > 0) {
+      if (ownsCredential && canApplySession() && this.sessionToken === sessionTokenAfterHeaders
+        && typeof parsed?.token === "string" && parsed.token.length > 0) {
         this.websocketToken = parsed.token;
       }
       return parsed as T;

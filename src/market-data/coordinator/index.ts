@@ -20,7 +20,7 @@ import {
 } from "../selectors";
 import { resolveTickerFinancialsQuoteState } from "../quotes/resolution";
 import { hasLikelyQuoteUnitMismatch } from "../../utils/currency-units";
-import { normalizePriceHistory } from "../../utils/price-history";
+import { hasUsablePriceHistory, normalizePriceHistory } from "../../utils/price-history";
 import {
   createBaselineChartRequest,
   createChartLoadingEntry,
@@ -35,6 +35,7 @@ import {
   errorEntry,
   hasFreshEntryData,
   readyEntry,
+  readyChartEntry,
   readyQuoteEntry,
 } from "./entries";
 import {
@@ -239,7 +240,7 @@ export class MarketDataCoordinator {
     if (!options.forceRefresh && currentData.length > 0 && hasFreshEntryData(current, CHART_CACHE_TTL_MS)) {
       if (currentData !== resolveEntryData(current)) {
         return this.chartStore.update(key, (entry) =>
-          readyEntry(entry, currentData, entry.source ?? this.dataProvider.id, entry.attempts, { keepLastGoodOnEmpty: true })
+          readyChartEntry(entry, currentData, entry.source ?? this.dataProvider.id, entry.attempts)
         );
       }
       return current;
@@ -290,9 +291,9 @@ export class MarketDataCoordinator {
               },
             ),
         );
-        const status = data.length > 0 ? "success" : "empty";
-        const attempts = [createAttempt(this.dataProvider.id, startedAt, status, data.length === 0 ? "NO_DATA" : undefined)];
-        return this.chartStore.update(key, (current) => readyEntry(current, data.length > 0 ? data : null, this.dataProvider.id, attempts, { keepLastGoodOnEmpty: true }));
+        const status = hasUsablePriceHistory(data) ? "success" : "empty";
+        const attempts = [createAttempt(this.dataProvider.id, startedAt, status, status === "empty" ? "NO_DATA" : undefined)];
+        return this.chartStore.update(key, (current) => readyChartEntry(current, data.length > 0 ? data : null, this.dataProvider.id, attempts));
       } catch (error) {
         const classified = classifyError(error);
         const attempt = createAttempt(this.dataProvider.id, startedAt, EXPECTED_EMPTY.test(classified.message) ? "empty" : "fatal_error", classified.reasonCode, classified.message);
@@ -314,8 +315,9 @@ export class MarketDataCoordinator {
     });
   }
 
-  async loadSecFilings(request: SecFilingsRequest): Promise<QueryEntry<SecFilingItem[]>> {
-    return this.loadCachedQuery("getSecFilings", [request.instrument.symbol, request.count ?? 50, request.instrument.exchange, toMarketDataContext(request.instrument)], buildSecFilingsKey(request), this.secFilingsStore, false, (value) => value.length === 0) ?? loadSecFilingsEntry({
+  async loadSecFilings(request: SecFilingsRequest, options: { forceRefresh?: boolean } = {}): Promise<QueryEntry<SecFilingItem[]>> {
+    return this.loadCachedQuery("getSecFilings", [request.instrument.symbol, request.count ?? 50, request.instrument.exchange, toMarketDataContext(request.instrument)], buildSecFilingsKey(request), this.secFilingsStore, options.forceRefresh, (value) => value.length === 0) ?? loadSecFilingsEntry({
+      forceRefresh: options.forceRefresh,
       dataProvider: this.dataProvider,
       request,
       store: this.secFilingsStore,
@@ -323,8 +325,9 @@ export class MarketDataCoordinator {
     });
   }
 
-  async loadSecFilingContent(filing: SecFilingItem): Promise<QueryEntry<string | null>> {
-    return this.loadCachedQuery("getSecFilingContent", [filing], buildSecContentKey(filing.accessionNumber), this.secContentStore) ?? loadSecFilingContentEntry({
+  async loadSecFilingContent(filing: SecFilingItem, options: { forceRefresh?: boolean } = {}): Promise<QueryEntry<string | null>> {
+    return this.loadCachedQuery("getSecFilingContent", [filing], buildSecContentKey(filing.accessionNumber), this.secContentStore, options.forceRefresh) ?? loadSecFilingContentEntry({
+      forceRefresh: options.forceRefresh,
       dataProvider: this.dataProvider,
       filing,
       store: this.secContentStore,
@@ -332,8 +335,9 @@ export class MarketDataCoordinator {
     });
   }
 
-  async loadSecFilingDocuments(filing: SecFilingItem): Promise<QueryEntry<SecFilingDocument[]>> {
-    return this.loadCachedQuery("getSecFilingDocuments", [filing], buildSecDocumentsKey(filing.accessionNumber), this.secDocumentsStore, false, (value) => value.length === 0) ?? loadSecFilingDocumentsEntry({
+  async loadSecFilingDocuments(filing: SecFilingItem, options: { forceRefresh?: boolean } = {}): Promise<QueryEntry<SecFilingDocument[]>> {
+    return this.loadCachedQuery("getSecFilingDocuments", [filing], buildSecDocumentsKey(filing.accessionNumber), this.secDocumentsStore, options.forceRefresh, (value) => value.length === 0) ?? loadSecFilingDocumentsEntry({
+      forceRefresh: options.forceRefresh,
       dataProvider: this.dataProvider,
       filing,
       store: this.secDocumentsStore,
@@ -375,7 +379,10 @@ export class MarketDataCoordinator {
     const update = () => {
       const { result, loading, error } = query.getSnapshot();
       const current = store.get(key);
-      const value = result && !isEmpty(result.value) ? result.value : null;
+      const empty = result != null && isEmpty(result.value);
+      // An empty options catalogue is itself a successful observation. Retain
+      // it through errors so old expirations cannot return via lastGoodData.
+      const value = result && (!empty || method === "getOptionsChain") ? result.value : null;
       const classified = error ? classifyError(error) : null;
       store.set(key, {
         phase: loading ? (result ? "refreshing" : "loading") : result ? "ready" : "error",
@@ -385,10 +392,11 @@ export class MarketDataCoordinator {
         lastGoodData: value ?? (method === "getExchangeRate" ? null : current.lastGoodData),
         source: result?.source ?? null,
         fetchedAt: result?.fetchedAt ?? null,
+        responseSequence: result?.responseSequence,
         asOf: result?.asOf,
         staleAt: result?.staleAt ?? null,
-        error: classified ?? (!loading && result && value == null ? { reasonCode: "NO_DATA", message: "No data available" } : null),
-        attempts: result ? [createAttempt(result.source, result.fetchedAt, error ? "fatal_error" : value == null ? "empty" : "success", classified?.reasonCode, classified?.message)] : [],
+        error: classified ?? (!loading && empty ? { reasonCode: "NO_DATA", message: "No data available" } : null),
+        attempts: result ? [createAttempt(result.source, result.fetchedAt, error ? "fatal_error" : empty ? "empty" : "success", classified?.reasonCode, classified?.message)] : [],
       });
     };
     const existing = this.cachedQueries.get(key);

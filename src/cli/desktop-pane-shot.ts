@@ -6,6 +6,8 @@ import type { AppConfig } from "../types/config";
 import type { ChartResolutionResult } from "../time-series/types";
 import type { OptionsChain, PricePoint, TickerFinancials } from "../types/financials";
 import type { ManualChartResolution } from "../time-series/resolution";
+import type { SnapshotMarketData } from "../market-data/snapshot-provider";
+import type { InstrumentRef } from "../market-data/request-types";
 import type { TickerRecord } from "../types/ticker";
 import type { PaneRuntimeState } from "../core/state/app/state";
 import type { RemoteUiNodeSnapshot } from "../remote/types";
@@ -17,6 +19,7 @@ import {
 } from "../renderers/electrobun/view/build-assets";
 
 export interface DesktopPaneShotIntradayHistory {
+  target?: InstrumentRef;
   symbol: string;
   exchange: string;
   rangePreset: "1D" | "1W";
@@ -42,6 +45,7 @@ export interface DesktopPaneShotPayload {
   watermark?: string | null;
   tickers: TickerRecord[];
   financials: Array<[string, TickerFinancials]>;
+  instrumentFinancials?: SnapshotMarketData["instrumentFinancials"];
   intradayHistories: DesktopPaneShotIntradayHistory[];
   optionsChains: Array<[string, OptionsChain]>;
   valuationSeries: Array<[string, DatedObservation[]]>;
@@ -131,7 +135,13 @@ const SHOT_MODE_CSS = [
   "[data-gloom-role='composite-chart-toolbar']",
   "[data-gloom-role='chart-series-quick-add']",
   "[data-gloom-role='pane-close']",
+  "[data-gloom-role='resize-handle']",
 ].join(", ") + " { display: none !important; }\n"
+  // The pane fills the viewport and has rounded corners. With the page painted
+  // in the theme background, the PNG carried square theme-coloured corners
+  // that showed on any other backdrop; a transparent page keeps only the pane.
+  + "html, body, #root { background: transparent !important; }\n"
+  + "[data-gloom-role='pane-window'][data-floating='true'] { box-shadow: none !important; }\n"
   // Sits where the hidden close button was: one cell high, right-aligned in the title bar.
   + "[data-gloom-role='shot-watermark'] { position: fixed; top: 1px; right: 10px; height: var(--cell-h);"
   + " line-height: var(--cell-h); font-size: 12px; letter-spacing: 0.02em; color: var(--gloom-text-dim, #888);"
@@ -440,6 +450,9 @@ async function capturePageScreenshot({
       height: heightPx,
       deviceScaleFactor,
       mobile: false,
+    });
+    await session.send("Emulation.setDefaultBackgroundColorOverride", {
+      color: { r: 0, g: 0, b: 0, a: 0 },
     });
     await waitForShotReady(session);
     const rendered = await readRenderedPaneState(session);

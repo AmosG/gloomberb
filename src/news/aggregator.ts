@@ -10,6 +10,7 @@ import {
   filterNewsArticlesForQuery,
   markDetailCapableArticle,
   mergeNewsArticle,
+  newsArticleRevision,
   normalizeNewsCategory,
   normalizeNewsFeed,
   normalizeNewsQuery,
@@ -37,6 +38,7 @@ interface SourceFetchResult {
   articles: NewsArticle[];
   sourceIds: string[];
   failedSourceIds: string[];
+  errors: string[];
   nextCursor: string | null;
 }
 
@@ -216,6 +218,17 @@ export class NewsService {
     const sources = this.enabledSources({ feed: "latest" })
       .filter((source) => !!source.provider.fetchNewsStory);
 
+    const requestedRevisions = new Map<NewsQueryEntry, string>();
+    for (const entry of this.queries.values()) {
+      const article = entry.state.articles.find((article) => article.id === storyId);
+      if (article) requestedRevisions.set(entry, newsArticleRevision(article));
+    }
+    let failed = false;
+    let olderDetail: NewsArticle | null = null;
+    const commitDetail = (article: NewsArticle) => {
+      this.mergeStoryDetail(article, requestedRevisions);
+      return this.articles.find((current) => current.id === storyId) ?? article;
+    };
     for (const source of sources) {
       try {
         const article = await this.trackSourceRequest(
@@ -224,13 +237,23 @@ export class NewsService {
           () => source.provider.fetchNewsStory?.(storyId) ?? Promise.resolve(null),
         );
         if (!article) continue;
-        this.mergeStoryDetail(article);
-        return article;
+        if (article.id !== storyId) throw new Error("Story detail identity mismatch.");
+        const current = this.articles.find((current) => current.id === storyId);
+        if (current && article.publishedAt < current.publishedAt) {
+          if (!olderDetail || article.publishedAt > olderDetail.publishedAt) olderDetail = article;
+          continue;
+        }
+        return commitDetail(article);
       } catch {
+        failed = true;
         // Continue to lower-priority sources.
       }
     }
 
+    // A newer fallback is preferred. Otherwise older, explicitly dated source
+    // items can enrich the timeline without rolling back the known headline.
+    if (olderDetail) return commitDetail(olderDetail);
+    if (failed) throw new Error("Story detail unavailable.");
     return null;
   }
 
@@ -283,9 +306,12 @@ export class NewsService {
           articles,
           // A partial failure still has stories, so it stays ready and reports
           // the gap instead of pretending the feed is complete.
-          error: result.failedSourceIds.length > 0
-            ? `${result.failedSourceIds.length} of ${result.failedSourceIds.length + result.sourceIds.length} news sources unavailable.`
-            : null,
+          error: [
+            result.failedSourceIds.length > 0
+              ? `${result.failedSourceIds.length} of ${result.failedSourceIds.length + result.sourceIds.length} news sources unavailable.`
+              : null,
+            ...result.errors,
+          ].filter(Boolean).join(" ") || null,
           updatedAt: this.now(),
           sourceIds: result.sourceIds,
           nextCursor: hasOlderPages ? entry.state.nextCursor : result.nextCursor,
@@ -378,7 +404,7 @@ export class NewsService {
   private async readSourcePage(
     source: NewsCapability,
     query: NewsQuery,
-  ): Promise<{ articles: NewsArticle[]; nextCursor: string | null }> {
+  ): Promise<{ articles: NewsArticle[]; nextCursor: string | null; error?: string | null }> {
     if (source.provider.fetchNewsPage) {
       const page = await this.trackSourceRequest(
         source,
@@ -388,6 +414,7 @@ export class NewsService {
       return {
         articles: page.articles.map((article) => markDetailCapableArticle(source, article)),
         nextCursor: page.nextCursor ?? null,
+        error: page.error,
       };
     }
     const articles = (await this.trackSourceRequest(
@@ -408,6 +435,7 @@ export class NewsService {
           articles: page.articles,
           sourceIds: [newsCapabilitySourceId(source)],
           failedSourceIds,
+          errors: page.error ? [page.error] : [],
           nextCursor: page.nextCursor,
         };
         if (page.articles.length > 0) return result;
@@ -416,7 +444,7 @@ export class NewsService {
         failedSourceIds.push(newsCapabilitySourceId(source));
       }
     }
-    return firstEmpty ?? { articles: [], sourceIds: [], failedSourceIds, nextCursor: null };
+    return firstEmpty ?? { articles: [], sourceIds: [], failedSourceIds, errors: [], nextCursor: null };
   }
 
   private async fetchMergedNews(query: NewsQuery, sources: NewsCapability[]): Promise<SourceFetchResult> {
@@ -427,6 +455,7 @@ export class NewsService {
       })),
     );
     const articles: NewsArticle[] = [];
+    const errors: string[] = [];
     const sourceIds: string[] = [];
     const failedSourceIds: string[] = [];
     let nextCursor: string | null = null;
@@ -437,10 +466,11 @@ export class NewsService {
         return;
       }
       articles.push(...result.value.page.articles);
+      if (result.value.page.error) errors.push(result.value.page.error);
       sourceIds.push(newsCapabilitySourceId(result.value.source));
       nextCursor ??= result.value.page.nextCursor;
     });
-    return { articles, sourceIds, failedSourceIds, nextCursor };
+    return { articles, sourceIds, failedSourceIds, errors, nextCursor };
   }
 
   private trackSourceRequest<T>(
@@ -486,12 +516,12 @@ export class NewsService {
     this.articles = dedupeNewsArticles([...this.queries.values()].flatMap((entry) => entry.state.articles));
   }
 
-  private mergeStoryDetail(article: NewsArticle): void {
+  private mergeStoryDetail(article: NewsArticle, requestedRevisions: Map<NewsQueryEntry, string>): void {
     let changed = false;
     for (const entry of this.queries.values()) {
       let stateChanged = false;
       const nextArticles = entry.state.articles.map((existing) => {
-        if (existing.id !== article.id) return existing;
+        if (existing.id !== article.id || requestedRevisions.get(entry) !== newsArticleRevision(existing)) return existing;
         stateChanged = true;
         changed = true;
         return mergeNewsArticle(existing, article);

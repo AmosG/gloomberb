@@ -13,14 +13,14 @@ import { EarningsCallsPane } from "./pane";
 import { TranscriptView, type ReaderTab } from "./transcript-view";
 
 let setup: Awaited<ReturnType<typeof testRender>> | undefined;
-let setSymbol: (symbol: string) => void;
+let setSymbol: (symbol: string | null) => void;
 const runtime = createTestPluginRuntime();
 const restorers: Array<() => void> = [];
-function Harness({ width = 80 }: { width?: number }) {
-  const [symbol, set] = useState("FIRST");
+function Harness({ width = 80, initialSymbol = "FIRST" }: { width?: number; initialSymbol?: string | null }) {
+  const [symbol, set] = useState<string | null>(initialSymbol);
   setSymbol = set;
   const config = createTestPaneConfig("/tmp/gloom-transcript-pane-test/unused-data", {
-    instanceId: "calls:test", paneId: "earnings-calls", binding: { kind: "fixed", symbol },
+    instanceId: "calls:test", paneId: "earnings-calls", binding: symbol ? { kind: "fixed", symbol } : { kind: "none" },
   });
   const state = createInitialState(config);
   state.focusedPaneId = "calls:test";
@@ -41,8 +41,8 @@ function signIn() {
 async function frames() {
   for (let i = 0; i < 6; i++) await act(async () => { await Bun.sleep(5); await setup!.renderOnce(); });
 }
-async function mount(width = 80) {
-  await act(async () => { setup = await testRender(<Harness width={width} />, { width, height: 21 }); });
+async function mount(width = 80, initialSymbol: string | null = "FIRST") {
+  await act(async () => { setup = await testRender(<Harness width={width} initialSymbol={initialSymbol} />, { width, height: 21 }); });
   await frames();
 }
 async function destroy() {
@@ -288,3 +288,148 @@ test("opening another quarter never displays the previous quarter's transcript",
   expect(setup!.captureCharFrame()).toContain("Q1 NEW SUMMARY");
   expect(setup!.captureCharFrame()).not.toContain("Q2 ONLY OLD SUMMARY");
 });
+
+async function findInPane(query: string) {
+  await press("/");
+  await act(async () => { await setup!.mockInput.typeText(query); });
+  await act(async () => { await Bun.sleep(100); });
+  await frames();
+  await emitKeypress(setup!, { name: "down", sequence: "\u001b[B" });
+  await frames();
+}
+
+for (const width of [48, 80, 120]) {
+  test(`a transcript search preserves subsequent summary keyboard and mouse selection at ${width}`, async () => {
+    signIn();
+    setCloudApiFetchTransport(async url => new URL(String(url)).pathname.includes("FIRST-call")
+      ? Response.json(transcript("FIRST")) : Response.json({ calls: [call("FIRST")] }));
+    await mount(width);
+    await press("return");
+    await findInPane("margin");
+    expect(setup!.captureCharFrame()).toContain("Margin outlook remains available");
+    await press("s");
+    expect(setup!.captureCharFrame()).toContain("FIRST CONTROLLED SUMMARY");
+    await press("t");
+    expect(setup!.captureCharFrame()).toContain("Margin outlook remains available");
+    const lines = setup!.captureCharFrame().split("\n");
+    const row = lines.findIndex(line => line.includes("Summary"));
+    await act(async () => { await setup!.mockMouse.click(lines[row]!.indexOf("Summary") + 1, row); });
+    await frames();
+    expect(setup!.captureCharFrame()).toContain("FIRST CONTROLLED SUMMARY");
+    expect(setup!.captureCharFrame()).toContain('/ margin');
+  });
+}
+
+for (const alreadyOnShelf of [true, false]) {
+  test(`exact shelf search loads older quarters and updated calls when company is already present=${alreadyOnShelf}`, async () => {
+    signIn();
+    const q2 = call("FIRST");
+    const q1 = { ...q2, id: "FIRST-q1", fiscalQuarter: 1, callAt: "2026-05-01T20:00:00Z" };
+    const requested: Array<string | null> = [];
+    setCloudApiFetchTransport(async url => {
+      const request = new URL(String(url));
+      if (request.pathname.includes(q1.id)) return Response.json({ ...transcript("FIRST"), ...q1, summary: "EARLIER QUARTER GUIDANCE" });
+      const ticker = request.searchParams.get("ticker");
+      requested.push(ticker);
+      return Response.json({ calls: ticker ? [q2, q1]
+        : alreadyOnShelf ? [{ ...q2, hasTranscript: false, status: "failed" }, call("OTHER")]
+          : [call("OTHER")] });
+    });
+    await mount(80, null);
+    await findInPane("FIRST");
+    await act(async () => { await Bun.sleep(600); });
+    await frames();
+    expect(requested).toEqual([null, "FIRST"]);
+    const frame = setup!.captureCharFrame();
+    expect(frame).toContain("FQ2 26");
+    expect(frame).toContain("FQ1 26");
+    expect(frame).not.toContain("queued");
+    await press("j");
+    await press("return");
+    expect(setup!.captureCharFrame()).toContain("EARLIER QUARTER GUIDANCE");
+  });
+}
+
+
+test("shelf refresh reloads the active company and a slower older lookup cannot override refreshed global rows", async () => {
+  signIn();
+  let refreshed = false;
+  const q2 = call("FIRST");
+  const requests: Array<string | null> = [];
+  let completeLookup!: (response: Response) => void;
+  setCloudApiFetchTransport(async url => {
+    const ticker = new URL(String(url)).searchParams.get("ticker");
+    requests.push(ticker);
+    if (refreshed && ticker) return new Promise(resolve => { completeLookup = resolve; });
+    return Response.json({ calls: [refreshed ? q2 : { ...q2, hasTranscript: false, status: "failed" }] });
+  });
+  await mount(80, null);
+  await findInPane("FIRST");
+  await act(async () => { await Bun.sleep(600); });
+  await frames();
+  expect(setup!.captureCharFrame()).toContain("queued");
+  refreshed = true;
+  await press("r");
+  expect(requests).toEqual([null, "FIRST", null, "FIRST"]);
+  expect(setup!.captureCharFrame()).not.toContain("queued");
+  await act(async () => completeLookup(Response.json({ calls: [q2] })));
+  await frames();
+  expect(setup!.captureCharFrame()).not.toContain("queued");
+});
+
+test("stale company fallback retains older quarters and its failure without replacing fresh global calls", async () => {
+  signIn();
+  const q2 = call("FIRST");
+  const q1 = { ...q2, id: "FIRST-q1", fiscalQuarter: 1, callAt: "2026-05-01T20:00:00Z" };
+  const store = new MemoryPluginPersistence();
+  attachEarningsCallsPersistence(store);
+  store.seedResource("calls", JSON.stringify(["FIRST", 50]), {
+    calls: [{ ...q2, hasTranscript: false, status: "failed" }, q1],
+  }, { sourceKey: "earnings-calls", schemaVersion: 2, stale: true, expired: true });
+  let fail = true;
+  setCloudApiFetchTransport(async url => {
+    const ticker = new URL(String(url)).searchParams.get("ticker");
+    return ticker && fail ? Response.json({ error: "Controlled company outage" }, { status: 503 })
+      : Response.json({ calls: ticker ? [q2, q1] : [q2] });
+  });
+  await mount(120, null);
+  await findInPane("FIRST");
+  await act(async () => { await Bun.sleep(600); });
+  await frames();
+  const staleFrame = setup!.captureCharFrame();
+  expect(staleFrame).not.toContain("queued");
+  expect(staleFrame).toContain("FQ1 26");
+  expect(staleFrame).toContain("FIRST stale cache");
+  expect(staleFrame).toContain("Controlled company outage");
+  fail = false;
+  await press("r");
+  const freshFrame = setup!.captureCharFrame();
+  expect(freshFrame).toContain("FQ1 26");
+  expect(freshFrame).not.toContain("stale cache");
+  expect(freshFrame).not.toContain("Controlled company outage");
+});
+
+for (const status of [503, 403]) {
+  test(`company reload ${status} retains in-memory rows only for transient failures`, async () => {
+    signIn();
+    const q2 = call("FIRST");
+    const q1 = { ...q2, id: "FIRST-q1", fiscalQuarter: 1, callAt: "2026-05-01T20:00:00Z" };
+    let fail = false;
+    setCloudApiFetchTransport(async url => {
+      const ticker = new URL(String(url)).searchParams.get("ticker");
+      return ticker && fail ? Response.json({ error: "Controlled lookup failure" }, { status })
+        : Response.json({ calls: ticker ? [q2, q1] : [q2] });
+    });
+    await mount(120, null);
+    await findInPane("FIRST");
+    await act(async () => { await Bun.sleep(600); });
+    await frames();
+    expect(setup!.captureCharFrame()).toContain("FQ1 26");
+    fail = true;
+    await press("r");
+    const frame = setup!.captureCharFrame();
+    expect(frame.includes("FQ1 26")).toBe(status === 503);
+    expect(frame.includes("stale cache")).toBe(status === 503);
+    expect(frame).toContain("Controlled lookup failure");
+  });
+}

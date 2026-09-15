@@ -22,11 +22,16 @@ import {
 import { useSecFilingContentCache } from "../sec/filing-content";
 import {
   buildInsiderSummary,
+  buildInsiderDisclosureText,
+  matchesInsiderOwner,
   insiderTransactionId,
+  insiderReportedName,
   parseInsiderFiling,
   type ParsedInsiderFiling as ParsedFiling,
 } from "./model";
 import { insiderHeadless } from "./headless";
+import { isInsiderForm } from "./insider-data";
+import { isAmendedInsiderFiling, relevantInsiderAmendments } from "./amendments";
 
 export { insiderHeadless } from "./headless";
 
@@ -39,37 +44,43 @@ function toFeedItems(parsed: ParsedFiling[]): FeedDataTableItem[] {
   return parsed.map((entry) => {
     const { filing, transaction, isLoading } = entry;
     const id = insiderTransactionId(entry);
+    const amendment = isAmendedInsiderFiling(entry);
+    const disclosureText = buildInsiderDisclosureText(entry);
     const filingMeta = [
       `Filed ${formatFilingShortDate(filing.filingDate)}`,
       `Accession ${filing.accessionNumber}`,
       formatFilingFormLabel(filing.form),
+      ...(amendment ? ["Unreconciled amendment"] : []),
+      ...(entry.disclosure?.originalFilingDate ? [`Original filed ${entry.disclosure.originalFilingDate}`] : []),
     ];
 
     if (!transaction) {
+      const title = isLoading ? `Loading ${formatFilingFormLabel(filing.form)} filing...`
+        : amendment && entry.disclosure ? "Form 4/A disclosure" : "Form 4 transaction unavailable";
       return {
         id,
-        eyebrow: formatFilingFormLabel(filing.form),
-        title: isLoading ? "Loading Form 4 filing..." : "Form 4 transaction unavailable",
+        eyebrow: insiderReportedName(entry) ?? formatFilingFormLabel(filing.form),
+        title,
         timestamp: filing.filingDate,
-        detailTitle: isLoading ? "Loading Form 4 filing..." : "Form 4 transaction unavailable",
+        detailTitle: insiderReportedName(entry) ?? title,
         detailMeta: filingMeta,
         detailBody: isLoading
           ? "Loading filing content..."
-          : "This Form 4 filing could not be parsed into a transaction summary.",
+          : disclosureText || (amendment && entry.disclosure ? "No transaction lines reported." : "This Form 4 filing could not be parsed into a transaction summary."),
       };
     }
 
     return {
       id,
       eyebrow: transaction.reportedName,
-      title: buildInsiderTransactionTitle(transaction),
+      title: `${amendment ? "4/A · " : ""}${buildInsiderTransactionTitle(transaction)}`,
       timestamp: transaction.filingDate ?? filing.filingDate,
       detailTitle: transaction.reportedName,
       detailMeta: [
         ...(transaction.title ? [transaction.title] : []),
         ...filingMeta,
       ],
-      detailBody: buildInsiderTransactionDetailBody(transaction),
+      detailBody: [disclosureText, buildInsiderTransactionDetailBody(transaction)].filter(Boolean).join("\n\n"),
     };
   });
 }
@@ -88,7 +99,7 @@ function InsiderView({ width, height, focused }: { width: number; height: number
   );
   const allFilings = useResolvedEntryValue(filingsEntry) ?? [];
   const form4Filings = useMemo(
-    () => allFilings.filter((f) => f.form.trim() === "4"),
+    () => allFilings.filter((f) => isInsiderForm(f.form)),
     [allFilings],
   );
   const [visibleCount, setVisibleCount] = useState(FORM4_PAGE_SIZE);
@@ -128,12 +139,13 @@ function InsiderView({ width, height, focused }: { width: number; height: number
   // Apply name filter
   const parsed = useMemo(() => (
     nameFilter
-      ? allParsed.filter((p) => p.transaction?.reportedName === nameFilter)
+      ? allParsed.filter((entry) => matchesInsiderOwner(entry, nameFilter))
       : allParsed
   ), [allParsed, nameFilter]);
   const feedItems = useMemo(() => toFeedItems(parsed), [parsed]);
-  const summary = useMemo(() => buildInsiderSummary(parsed), [parsed]);
-  const selectedTransaction = parsed[selectedIdx]?.transaction ?? null;
+  const summary = useMemo(() => buildInsiderSummary(parsed, Date.now(), allParsed), [parsed, allParsed]);
+  const amendments = useMemo(() => relevantInsiderAmendments(parsed, allParsed), [parsed, allParsed]);
+  const selectedFilterName = parsed[selectedIdx] ? insiderReportedName(parsed[selectedIdx]!) : null;
   const openFiling = openItemId
     ? parsed.find((entry) => insiderTransactionId(entry) === openItemId)?.filing ?? null
     : null;
@@ -146,6 +158,12 @@ function InsiderView({ width, height, focused }: { width: number; height: number
     setNameFilter(null);
     setSelectedIdx(0);
   }, [setNameFilter, setSelectedIdx]);
+  const filterActionRef = useRef<() => void>(() => {});
+  filterActionRef.current = () => {
+    if (nameFilter) clearNameFilter();
+    else if (selectedFilterName) toggleNameFilter(selectedFilterName);
+  };
+  const handleFilterPress = useCallback(() => filterActionRef.current(), []);
 
   const handleRootKeyDown = useCallback((event: {
     name?: string;
@@ -153,38 +171,35 @@ function InsiderView({ width, height, focused }: { width: number; height: number
     stopPropagation?: () => void;
   }) => {
     if (event.name !== "f") return false;
-    if (!selectedTransaction) return false;
+    if (!selectedFilterName) return false;
     event.stopPropagation?.();
     event.preventDefault?.();
-    toggleNameFilter(selectedTransaction.reportedName);
+    toggleNameFilter(selectedFilterName);
     return true;
-  }, [selectedTransaction, toggleNameFilter]);
+  }, [selectedFilterName, toggleNameFilter]);
 
-  const selectedFilterName = selectedTransaction?.reportedName ?? null;
   const pendingLabel = pendingCount > 0 ? `loading ${pendingCount}...` : "";
   const footerInfo = useMemo(() => [
-    ...(summary ? [{ id: "summary", parts: [{ text: truncateText(summary, Math.max(24, width - 20)), tone: "muted" as const }] }] : []),
+    ...(amendments.length ? [{ id: "amendment", parts: [{ text: "4/A unreconciled", tone: "warning" as const }] }] : []),
+    ...(!amendments.length && summary ? [{ id: "summary", parts: [{ text: truncateText(summary, Math.max(24, width - 20)), tone: "muted" as const }] }] : []),
     ...(nameFilter ? [{ id: "filter", parts: [{ text: `filter: ${truncateText(nameFilter, 24)}`, tone: "warning" as const }] }] : []),
     ...(pendingLabel ? [{ id: "pending", parts: [{ text: pendingLabel, tone: "muted" as const }] }] : []),
-  ], [nameFilter, pendingLabel, summary, width]);
+  ], [amendments.length, nameFilter, pendingLabel, summary, width]);
   const footerHints = useMemo(() => (
     selectedFilterName || nameFilter
       ? [{
           id: "filter",
           key: "f",
           label: "ilter",
-          onPress: () => {
-            if (nameFilter) clearNameFilter();
-            else if (selectedFilterName) toggleNameFilter(selectedFilterName);
-          },
+          onPress: handleFilterPress,
         }]
       : []
-  ), [clearNameFilter, nameFilter, selectedFilterName, toggleNameFilter]);
+  ), [handleFilterPress, nameFilter, selectedFilterName]);
   useExternalLinkFooter({
     registrationId: "insider",
     focused,
     url: error ? null : openFiling?.filingUrl,
-    source: openFiling?.form ? formatFilingFormLabel(openFiling.form) : null,
+    source: openFiling?.form && !amendments.length ? formatFilingFormLabel(openFiling.form) : null,
     info: footerInfo,
     hints: footerHints,
     label: "filing",

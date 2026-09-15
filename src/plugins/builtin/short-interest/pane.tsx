@@ -8,7 +8,6 @@ import {
   usePaneFooter,
   usePaneTicker,
   type DataTableCell,
-  type DataTableKeyEvent,
 } from "../../../components";
 import type { ProjectedChartPoint } from "../../../components/chart/core/data";
 import { resolveChartPalette } from "../../../components/chart/core/palette";
@@ -77,7 +76,7 @@ function ShortInterestView({ width, height, focused }: { width: number; height: 
 
   const rows = useMemo(() => buildRows(records), [records]);
   const sortedRows = useMemo(() => sortRows(rows, sortPreference), [rows, sortPreference]);
-  const columns = useMemo(() => buildColumns(width, records), [records, width]);
+  const columns = useMemo(() => buildColumns(records), [records]);
   const chartPoints = useMemo(() => recordsToChartPoints(records), [records]);
 
   const boundedSelectedIdx = sortedRows.length > 0
@@ -87,16 +86,6 @@ function ShortInterestView({ width, height, focused }: { width: number; height: 
   const handleHeaderClick = useCallback((columnId: string) => {
     setSortPreference((current) => nextSortPreference(current, columnId));
   }, [setSortPreference]);
-
-  const handleKeyDown = useCallback((event: DataTableKeyEvent) => {
-    if (event.name === "r") {
-      event.preventDefault?.();
-      event.stopPropagation?.();
-      refresh();
-      return true;
-    }
-    return false;
-  }, [refresh]);
 
   useShortcut((event) => {
     if (!focused) return;
@@ -195,10 +184,10 @@ function ShortInterestView({ width, height, focused }: { width: number; height: 
             selectedIndex: boundedSelectedIdx,
             onChange: (index) => setSelectedIdx(index),
           }}
-          onRootKeyDown={handleKeyDown}
           rootWidth={width}
           rootHeight={tableHeight}
           columns={columns}
+          freezeFirstColumn
           items={sortedRows}
           sortColumnId={sortPreference.columnId}
           sortDirection={sortPreference.direction}

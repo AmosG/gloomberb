@@ -1,6 +1,17 @@
 import type { FinancialStatement } from "../../../../types/financials";
+import { completeAvailability, statementFieldAvailability } from "../../../../utils/financial-statements";
 
 export type FinancialPeriod = "annual" | "quarterly";
+
+export interface FinancialTableStatement extends FinancialStatement {
+  aggregation?: {
+    kind: "trailing-four-quarters";
+    periodEnd: string;
+    sourcePeriods: Array<Pick<FinancialStatement,
+      "date" | "currency" | "dateSource" | "providerDate" | "dateEvidence" | "availableAt" | "fieldAvailability"
+    >>;
+  };
+}
 
 const FLOW_KEYS = new Set<string>([
   "totalRevenue",
@@ -144,7 +155,7 @@ const BALANCE_KEYS = new Set<string>([
 function aggregateQuarterlyStatements(
   statements: FinancialStatement[],
   date: string,
-): FinancialStatement | null {
+): FinancialTableStatement | null {
   if (statements.length !== 4) return null;
   // A provider may return semiannual reports or skip a quarter. Four rows do
   // not necessarily cover twelve months; never label those sums as TTM.
@@ -155,13 +166,34 @@ function aggregateQuarterlyStatements(
   const currencies = new Set(statements.map((statement) => statement.currency));
   if (currencies.size > 1) return null;
 
-  const aggregate: FinancialStatement = { date, currency: [...currencies][0] };
+  const aggregate: FinancialTableStatement = {
+    date,
+    currency: [...currencies][0],
+    aggregation: {
+      kind: "trailing-four-quarters",
+      periodEnd: statements.at(-1)!.date,
+      sourcePeriods: statements.map(({ date, currency, dateSource, providerDate, dateEvidence, availableAt, fieldAvailability }) => ({
+        date, currency, dateSource, providerDate,
+        ...(dateEvidence ? { dateEvidence: { ...dateEvidence } } : {}),
+        availableAt,
+        ...(fieldAvailability ? { fieldAvailability: { ...fieldAvailability } } : {}),
+      })),
+    },
+  };
+  const availability: Record<string, string> = {};
+  const includedFields: string[] = [];
+  const retainAvailability = (key: string, sources: FinancialStatement[]) => {
+    includedFields.push(key);
+    const availableAt = completeAvailability(sources.map((source) => statementFieldAvailability(source, key)));
+    if (availableAt) availability[key] = availableAt;
+  };
   for (const key of FLOW_KEYS) {
     const values = statements
       .map((statement) => (statement as unknown as Record<string, unknown>)[key])
       .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
     if (values.length === 4) {
       (aggregate as unknown as Record<string, unknown>)[key] = values.reduce((left, right) => left + right, 0);
+      retainAvailability(key, statements);
     }
   }
 
@@ -170,19 +202,27 @@ function aggregateQuarterlyStatements(
     const value = (latest as unknown as Record<string, unknown>)[key];
     if (typeof value === "number" && Number.isFinite(value)) {
       (aggregate as unknown as Record<string, unknown>)[key] = value;
+      retainAvailability(key, [latest]);
     }
   }
 
   const openingCash = statements[0]!.beginningCashPosition;
-  if (openingCash != null && Number.isFinite(openingCash)) aggregate.beginningCashPosition = openingCash;
+  if (openingCash != null && Number.isFinite(openingCash)) {
+    aggregate.beginningCashPosition = openingCash;
+    retainAvailability("beginningCashPosition", [statements[0]!]);
+  }
 
   // These are average shares over each quarter, unlike balance-sheet shares.
   for (const key of ["basicShares", "dilutedShares"] as const) {
     const values = statements.map((statement) => statement[key]);
     if (values.every((value): value is number => value != null && Number.isFinite(value))) {
       aggregate[key] = values.reduce((sum, value) => sum + value, 0) / 4;
+      retainAvailability(key, statements);
     }
   }
+  if (Object.keys(availability).length > 0) aggregate.fieldAvailability = availability;
+  const availableAt = completeAvailability(includedFields.map((key) => availability[key]));
+  if (availableAt) aggregate.availableAt = availableAt;
   return aggregate;
 }
 
@@ -219,7 +259,6 @@ export function buildPreviousStatementMap(
     const days = (Date.parse(current.date) - Date.parse(previous.date)) / 86_400_000;
     const [minimum, maximum] = period === "annual" ? [300, 430] : [60, 120];
     if (days < minimum! || days > maximum! || !Number.isFinite(days)) continue;
-    if (current.currency && previous.currency && current.currency !== previous.currency) continue;
     previousMap.set(current.date, previous);
   }
 
@@ -228,7 +267,7 @@ export function buildPreviousStatementMap(
     const latest = quarterlyStatements.at(-1);
     const prior = quarterlyStatements.at(-5);
     const days = latest && prior ? (Date.parse(latest.date) - Date.parse(prior.date)) / 86_400_000 : NaN;
-    if (previousTtm && days >= 300 && days <= 430 && (!ttm.currency || !previousTtm.currency || ttm.currency === previousTtm.currency)) {
+    if (previousTtm && days >= 300 && days <= 430) {
       previousMap.set("TTM", previousTtm);
     }
   }

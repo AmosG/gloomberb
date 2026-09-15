@@ -9,10 +9,14 @@ import { loadParsedInsiderFilings } from "./client";
 import {
   buildInsiderRows,
   buildInsiderSummary,
+  buildInsiderDisclosureText,
+  matchesInsiderOwner,
   type ParsedInsiderFiling,
 } from "./model";
+import { relevantInsiderAmendments } from "./amendments";
 
 const INSIDER_COLUMNS: HeadlessPaneColumn[] = [
+  { key: "form", header: "Form" },
   {
     key: "filingDate",
     header: "Filed",
@@ -85,7 +89,7 @@ export function createInsiderHeadless(
       {
         key: "limit",
         aliases: ["count", "rows"],
-        description: "Maximum Form 4 filings to parse.",
+        description: "Maximum Form 4 and Form 4/A filings to parse.",
         type: "integer",
         defaultValue: 20,
         minimum: 1,
@@ -100,23 +104,32 @@ export function createInsiderHeadless(
       const parsed = await dependencies.loadParsed(symbol, limit, args, ctx);
       const name = String(args.options.name ?? "").trim().toLocaleLowerCase();
       const filtered = name
-        ? parsed.filter(({ transaction }) => transaction?.reportedName.toLocaleLowerCase() === name
-          || transaction?.reportingOwners?.some((owner) => owner.name.toLocaleLowerCase() === name))
+        ? parsed.filter((entry) => matchesInsiderOwner(entry, name))
         : parsed;
+      const amendments = relevantInsiderAmendments(filtered, parsed);
       const incomplete = [...new Set(buildInsiderRows(parsed)
-        .filter((row) => row.status !== "parsed")
+        .filter((row) => row.status !== "parsed" && row.status !== "disclosure")
         .map((row) => row.accessionNumber))];
       return {
-        rows: buildInsiderRows(filtered),
-        errors: incomplete.map((accessionNumber) => `${accessionNumber}: Form 4 transactions are unavailable or incomplete.`),
+        rows: buildInsiderRows(filtered, parsed),
+        errors: [
+          ...incomplete.map((accessionNumber) => `${accessionNumber}: Form 4 transactions are unavailable or incomplete.`),
+          ...amendments.map((scope) => `${scope.accessionNumber}: Form 4/A is unreconciled; affected transaction totals are unavailable.`),
+        ],
         metadata: {
           symbol,
-          summary: buildInsiderSummary(filtered),
+          summary: buildInsiderSummary(filtered, Date.now(), parsed),
+          amendments,
+          notices: amendments.map((scope) => {
+            const entry = parsed.find(({ filing }) => filing.accessionNumber === scope.accessionNumber)!;
+            return [`Form 4/A ${scope.accessionNumber}${scope.originalFilingDate ? ` | Original filed ${scope.originalFilingDate}` : ""}`,
+              buildInsiderDisclosureText(entry)].filter(Boolean).join("\n");
+          }),
           parsed: new Set(parsed.filter(({ transaction }) => transaction != null).map(({ filing }) => filing.accessionNumber)).size,
           transactions: filtered.filter(({ transaction }) => transaction != null).length,
           requested: limit,
           name: name || null,
-          limitations: ["Only loaded Form 4 filings are summarized; amendments are not reconciled."],
+          limitations: ["Loaded Form 4 and Form 4/A rows are as filed, not reconciled transactions; affected aggregates are withheld."],
         },
       };
     },

@@ -14,7 +14,7 @@ import type {
   PersistedAuthUser,
 } from "./types";
 
-type CloudApiRequest = <T>(path: string, options?: RequestInit) => Promise<T>;
+type CloudApiRequest = <T>(path: string, options?: RequestInit, canApplySession?: () => boolean) => Promise<T>;
 
 interface CloudAuthApiOptions {
   getCurrentUser(): AuthUser | null;
@@ -131,7 +131,7 @@ export class CloudAuthApi {
     }
   }
 
-  async getSession(): Promise<AuthUser | null> {
+  async getSession(isCurrent: () => boolean): Promise<{ user: AuthUser | null; validated: boolean }> {
     // The answer describes whichever credential was on the wire when the
     // request left. On boot a check can go out before the persisted token is
     // installed; by the time "no session" comes back, the token and the cached
@@ -139,6 +139,8 @@ export class CloudAuthApi {
     // credential that exists now instead of trusting an answer about one that
     // no longer does.
     const credential = this.options.getSessionToken();
+    const previousUser = this.options.getCurrentUser();
+    const retainedSession = () => ({ user: this.options.getCurrentUser(), validated: false });
     const credentialChanged = () =>
       this.options.getSessionToken() !== credential;
     try {
@@ -147,19 +149,24 @@ export class CloudAuthApi {
         {
           method: "GET",
         },
+        () => isCurrent() && this.options.getCurrentUser() === previousUser,
       );
-      if (credentialChanged()) return this.getSession();
+      if (!isCurrent()) return retainedSession();
+      if (credentialChanged()) return this.getSession(isCurrent);
+      if (this.options.getCurrentUser() !== previousUser) return retainedSession();
       const user = result?.user ?? null;
       this.options.setCurrentUser(user);
-      return user;
+      return { user, validated: true };
     } catch (error) {
-      if (credentialChanged()) return this.getSession();
+      if (!isCurrent()) return retainedSession();
+      if (credentialChanged()) return this.getSession(isCurrent);
+      if (this.options.getCurrentUser() !== previousUser) return retainedSession();
       if (
         error instanceof ApiRequestError &&
         isHardSessionInvalidMessage(error.message)
       ) {
         this.options.setSessionToken(null);
-        return null;
+        return { user: null, validated: true };
       }
       throw error;
     }
@@ -204,12 +211,14 @@ export class CloudAuthApi {
     );
   }
 
-  async getAccountProfile(): Promise<AccountProfile> {
+  async getAccountProfile(isCurrent: () => boolean = () => true): Promise<AccountProfile> {
+    const previousUser = this.options.getCurrentUser();
     const result = await this.options.request<{ profile: AccountProfile }>(
       "/account/profile",
       {
         method: "GET",
       },
+      () => isCurrent() && this.options.getCurrentUser() === previousUser,
     );
     return result.profile;
   }

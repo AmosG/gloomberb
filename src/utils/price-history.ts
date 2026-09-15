@@ -47,8 +47,28 @@ export function getPricePointTimestamp(point: PricePoint): number {
   return new Date(value).getTime();
 }
 
-function hasValidClose(point: PricePoint): boolean {
-  return Number.isFinite(point.close) && point.close > 0;
+function hasFiniteClose(point: PricePoint): boolean {
+  return Number.isFinite(point.close);
+}
+
+/** Observation dates and usable price coverage are independent. */
+export function hasUsablePriceHistory(points: readonly PricePoint[]): boolean {
+  return points.some((point) => Number.isFinite(getPricePointTimestamp(point)) && hasFiniteClose(point));
+}
+
+/** A usable alternate source may recover a gap; uncovered reported dates remain gaps. */
+export function preservePriceHistoryGaps(points: PricePoint[], unavailable: readonly PricePoint[][]): PricePoint[] {
+  const times = new Set(points.map(getPricePointTimestamp));
+  const gaps: PricePoint[] = [];
+  for (const history of unavailable) {
+    for (const point of history) {
+      const time = getPricePointTimestamp(point);
+      if (!Number.isFinite(time) || hasFiniteClose(point) || times.has(time)) continue;
+      times.add(time);
+      gaps.push(point);
+    }
+  }
+  return gaps.length ? normalizePriceHistory([...points, ...gaps]) : points;
 }
 
 function comparePricePointsByDate(left: PricePoint, right: PricePoint): number {
@@ -75,7 +95,8 @@ export function normalizePriceHistory(points: PricePoint[]): PricePoint[] {
   for (const point of points) {
     const time = getPricePointTimestamp(point);
     if (!Number.isFinite(time)) continue;
-    if (!hasValidClose(point)) continue;
+    // Keep dated unavailable closes so downstream returns/charts cannot join
+    // their neighbors, including when the entire response is unavailable.
 
     if (firstTimestamp === null) {
       firstTimestamp = time;
@@ -106,7 +127,7 @@ export function isPriceHistoryStaleForCurrentWindow(
   options: PriceHistoryFreshnessOptions = {},
 ): boolean {
   const normalized = normalizePriceHistory(points);
-  const latest = normalized.at(-1);
+  const latest = normalized.findLast(hasFiniteClose);
   if (!latest) return false;
 
   const intervalMs = options.intervalMs ?? inferredHistoryIntervalMs(normalized);

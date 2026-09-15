@@ -25,6 +25,8 @@ import {
 import { AmbiguousTickerError, findExactTickerSearchMatch } from "../../tickers/search";
 import { parsePublicTickerKey } from "../../utils/exchanges";
 import { tickerHasYahooSuffix } from "../../sources/yahoo-finance/symbols";
+import { instrumentFromTicker } from "../../market-data/request-types";
+import { tickerInstrumentLabel } from "../../tickers/instrument-label";
 
 interface UseAppTickerOpenRuntimeOptions {
   activatePane: (paneId: string, layout?: LayoutConfig) => void;
@@ -55,10 +57,10 @@ export function useAppTickerOpenRuntime({
   stateRef,
   tickerRepository,
 }: UseAppTickerOpenRuntimeOptions) {
-  const resolveOpenTickerTarget = useCallback(async (rawSymbol: string): Promise<TickerOpenTarget | null> => {
+  const resolveOpenTickerTarget = useCallback(async (rawSymbol: string, publicOnly = false): Promise<TickerOpenTarget | null> => {
     try {
       const target = await resolveTickerOpenTarget({
-        query: rawSymbol,
+        query: rawSymbol, publicOnly,
         tickers: stateRef.current.tickers,
         dataProvider,
         tickerRepository,
@@ -95,14 +97,21 @@ export function useAppTickerOpenRuntime({
 
     publishTickerOpenTarget(target);
     const symbol = target.symbol;
+    const instrument = options?.instrument !== undefined ? options.instrument
+      : target.instrument !== undefined ? target.instrument : instrumentFromTicker(target.ticker)?.instrument ?? undefined;
+    const listing = options?.listing ?? target.listing;
+    const binding = { kind: "fixed" as const, symbol, ...(instrument !== undefined ? { instrument } : {}), ...(listing ? { listing } : {}) };
     const currentState = stateRef.current;
     const currentLayout = currentState.config.layout;
     let existing = options?.forceNewPane
       ? null
-      : findFixedTickerPaneForSymbol(currentLayout, paneType, symbol);
-    if (!options?.forceNewPane && !existing && (parsePublicTickerKey(symbol).exchange || tickerHasYahooSuffix(symbol))) {
+      : findFixedTickerPaneForSymbol(currentLayout, paneType, symbol, instrument);
+    if (!options?.forceNewPane && !existing && instrument === null && !target.ticker.metadata.broker_contracts?.length) {
+      existing = findFixedTickerPaneForSymbol(currentLayout, paneType, symbol);
+    }
+    if (!options?.forceNewPane && !existing && !instrument && (parsePublicTickerKey(symbol).exchange || tickerHasYahooSuffix(symbol))) {
       existing = currentLayout.instances.find((instance) => {
-        if (instance.paneId !== paneType || instance.binding?.kind !== "fixed" || !isPaneInLayout(currentLayout, instance.instanceId)) return false;
+        if (instance.paneId !== paneType || instance.binding?.kind !== "fixed" || instance.binding.instrument || !isPaneInLayout(currentLayout, instance.instanceId)) return false;
         const ticker = currentState.tickers.get(instance.binding.symbol);
         return !!ticker?.metadata.exchange && !!findExactTickerSearchMatch([
           { label: instance.binding.symbol, right: ticker.metadata.exchange },
@@ -114,12 +123,12 @@ export function useAppTickerOpenRuntime({
       // verified same listing, retaining its pane identity and its followers.
       const previousSymbol = existing.binding?.kind === "fixed" ? existing.binding.symbol : null;
       let nextLayout = currentLayout;
-      if (previousSymbol && previousSymbol !== symbol) {
+      if (previousSymbol && (previousSymbol !== symbol || JSON.stringify(existing.binding) !== JSON.stringify(binding))) {
         const existingId = existing.instanceId;
         nextLayout = { ...currentLayout, instances: currentLayout.instances.map((instance) => (
           instance.instanceId === existingId ? {
             ...instance,
-            binding: { kind: "fixed" as const, symbol },
+            binding,
             title: !instance.title || instance.title === previousSymbol ? symbol : instance.title,
           } : instance
         )) };
@@ -133,8 +142,8 @@ export function useAppTickerOpenRuntime({
     }
 
     const instance = buildPaneInstance(paneType, {
-      title: symbol,
-      binding: { kind: "fixed", symbol },
+      title: tickerInstrumentLabel(symbol, instrument),
+      binding,
     });
     if (!instance) return;
 
@@ -169,10 +178,13 @@ export function useAppTickerOpenRuntime({
   ]);
 
   const openPinnedTicker = useCallback(async (rawSymbol: string, options?: PinTickerOptions) => {
-    const target = await resolveOpenTickerTarget(rawSymbol);
+    const selectedTicker = options?.instrument !== undefined && (options.instrument || options.listing) ? await tickerRepository.loadTicker(rawSymbol) : null;
+    const target = selectedTicker
+      ? { symbol: selectedTicker.metadata.ticker, ticker: selectedTicker, created: false, instrument: options?.instrument, listing: options?.listing }
+      : await resolveOpenTickerTarget(rawSymbol, options?.instrument === null);
     if (!target) return;
     placePinnedTickerTarget(target, options);
-  }, [placePinnedTickerTarget, resolveOpenTickerTarget]);
+  }, [placePinnedTickerTarget, resolveOpenTickerTarget, tickerRepository]);
 
   return {
     openPinnedTicker,

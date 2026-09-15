@@ -1,10 +1,9 @@
 import type { AppConfig } from "../../../types/config";
 import type { TickerFinancials } from "../../../types/financials";
 import type { TickerRecord } from "../../../types/ticker";
-import { getActiveQuoteDisplay } from "../../../market-data/market/status";
 import { convertCurrency } from "../../../utils/format";
 import { getCollectionTypeFromConfig } from "../portfolio-list/pane/data";
-import { getPortfolioPositionMetrics, resolveBrokerFallbackMarketValue } from "../portfolio-list/position-metrics";
+import { getPortfolioPositionMetrics, getPortfolioQuoteDisplay, resolvePortfolioMarketValue } from "../portfolio-list/position-metrics";
 
 export function getPortfolioPositionValue({
   ticker,
@@ -30,18 +29,16 @@ export function getPortfolioPositionValue({
       }
     : ticker;
   const quote = financials?.quote;
-  const activeQuote = getActiveQuoteDisplay(quote);
+
   const quoteCurrency = quote?.currency || ticker.metadata.currency || baseCurrency;
   const metrics = getPortfolioPositionMetrics(scopedTicker, undefined, quoteCurrency, {
     currency: baseCurrency, convert: (value, currency) => convertCurrency(value, currency, baseCurrency, exchangeRates),
-  });
+  }, quote);
+  const activeQuote = getPortfolioQuoteDisplay(metrics, quote);
 
-  if (activeQuote && metrics.grossPriceUnits !== 0) {
-    return convertCurrency(metrics.grossPriceUnits * activeQuote.price, quoteCurrency, baseCurrency, exchangeRates);
-  }
-
-  const brokerFallback = resolveBrokerFallbackMarketValue(metrics);
-  return brokerFallback ?? (metrics.positionCount > 0 ? Number.NaN : 0);
+  return resolvePortfolioMarketValue(metrics, activeQuote
+    ? convertCurrency(activeQuote.price, quoteCurrency, baseCurrency, exchangeRates) : null)?.gross
+    ?? (metrics.positionCount > 0 ? Number.NaN : 0);
 }
 
 export function resolveActivePortfolioId({

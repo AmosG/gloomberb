@@ -1,4 +1,5 @@
 import type { FinancialStatement, TickerFinancials } from "../../../../types/financials";
+import { formatPerShareNumber } from "../../../../utils/reported-money";
 import {
   formatGrowthShort,
   formatNumber,
@@ -10,6 +11,7 @@ import {
   buildPreviousStatementMap,
   computeTTM,
   type FinancialPeriod,
+  type FinancialTableStatement,
 } from "./aggregation";
 import { FINANCIAL_SUB_TABS } from "./schema";
 
@@ -93,7 +95,28 @@ const FINANCIAL_VALUE_W = FINANCIAL_COL_W - FINANCIAL_GROWTH_W;
 
 export function computeGrowth(current: number | undefined, previous: number | undefined): number | undefined {
   if (current == null || previous == null || !Number.isFinite(current) || !Number.isFinite(previous) || previous === 0) return undefined;
-  return (current - previous) / Math.abs(previous);
+  const direct = (current - previous) / Math.abs(previous);
+  const growth = Number.isFinite(direct) ? direct : current / Math.abs(previous) - Math.sign(previous);
+  return Number.isFinite(growth) ? growth : undefined;
+}
+
+const SHARE_COUNT_FIELDS = new Set<keyof FinancialStatement>([
+  "basicShares", "dilutedShares", "shareIssued", "ordinarySharesNumber", "treasurySharesNumber",
+]);
+
+/** Currency changes affect monetary comparisons, not counts of reported shares. */
+export function canCompareFinancialRow(
+  row: FinancialTableRow,
+  current: FinancialStatement,
+  previous: FinancialStatement | undefined,
+  financialCurrency?: string,
+): boolean {
+  if (!previous) return false;
+  const key = row.kind === "group" ? row.summaryKey : row.key;
+  if (key && SHARE_COUNT_FIELDS.has(key)) return true;
+  const currentCurrency = (current.currency ?? financialCurrency)?.trim();
+  const previousCurrency = (previous.currency ?? financialCurrency)?.trim();
+  return !!currentCurrency && currentCurrency === previousCurrency;
 }
 
 export function semanticGrowthValue(
@@ -107,11 +130,30 @@ export function semanticGrowthValue(
 }
 
 export function formatFinancialCell(value: string, growth: number | undefined) {
-  const growthText = growth != null ? formatGrowthShort(growth) : "";
+  const growthText = growth != null && Number.isFinite(growth) ? formatFinancialGrowth(growth) : "";
   return {
     valueText: padTo(value, FINANCIAL_VALUE_W, "right"),
     growthText: padTo(growthText ? ` ${growthText}` : "", FINANCIAL_GROWTH_W, "right"),
   };
+}
+
+function formatFinancialGrowth(growth: number): string {
+  const plain = formatGrowthShort(growth);
+  const budget = FINANCIAL_GROWTH_W - 1;
+  if (plain.length <= budget) return plain;
+  const percent = growth * 100;
+  if (!Number.isFinite(percent)) return growth < 0 ? "<-99T%" : ">99T%";
+  const sign = percent < 0 ? "-" : "+";
+  const magnitude = Math.abs(percent);
+  for (const [scale, suffix] of [[1e3, "k"], [1e6, "M"], [1e9, "B"], [1e12, "T"]] as const) {
+    if (magnitude < scale) continue;
+    const scaled = magnitude / scale;
+    const digits = scaled < 10 ? 1 : 0;
+    const compact = `${sign}${scaled.toFixed(digits).replace(/\.0$/, "")}${suffix}%`;
+    if (compact.length <= budget) return compact;
+  }
+  const exponential = `${sign}${magnitude.toExponential(0).replace("e+", "e")}%`;
+  return exponential.length <= budget ? exponential : percent < 0 ? "<-99T%" : ">99T%";
 }
 
 export function formatFinancialValue(
@@ -119,13 +161,13 @@ export function formatFinancialValue(
   row: Pick<FinancialTableRow, "format" | "divisor">,
 ): string {
   if (value == null || !Number.isFinite(value)) return "—";
-  if (row.format === "eps") return formatNumber(value, 2);
+  if (row.format === "eps") return formatPerShareNumber(value);
   if (row.format === "percent") return `${formatNumber(value * 100, 1)}%`;
   return formatWithDivisor(value, row.divisor);
 }
 
-export function formatFinancialHeader(date: string, currency?: string, dateSource?: FinancialStatement["dateSource"], compact = false): string {
-  const period = date === "TTM" ? "TTM" : date.slice(0, 10);
+export function formatFinancialHeader(date: string, currency?: string, dateSource?: FinancialStatement["dateSource"], compact = false, periodEnd?: string): string {
+  const period = date === "TTM" ? (periodEnd ? `TTM ${periodEnd}` : "TTM") : date.slice(0, 10);
   const label = currency ? `${period} ${currency}` : period;
   if (date === "TTM") return label;
   return `${label} ${compact ? (dateSource === "sec" ? "S" : "P") : (dateSource === "sec" ? "(SEC date)" : "(provider date)")}`;
@@ -330,7 +372,7 @@ interface FinancialTableModelRow {
 export interface FinancialTableModel {
   period: FinancialPeriod;
   subTab: FinancialSubTab;
-  statements: FinancialStatement[];
+  statements: FinancialTableStatement[];
   rows: FinancialTableModelRow[];
 }
 
@@ -344,7 +386,7 @@ export function selectFinancialStatements(
   const rawStatements = (period === "annual" ? annualStatements : quarterlyStatements).slice(-limit).reverse();
   const ttm = period === "annual" && statement !== "balance" ? computeTTM(quarterlyStatements) : null;
   const previousStatementMap = buildPreviousStatementMap(period, annualStatements, quarterlyStatements, ttm);
-  const statements = ttm ? [ttm, ...rawStatements] : rawStatements;
+  const statements: FinancialTableStatement[] = ttm ? [ttm, ...rawStatements] : rawStatements;
 
   // A balance sheet is a dated snapshot. It needs neither a four-quarter sum
   // nor four reports before the latest position can be compared with year end.
@@ -358,7 +400,7 @@ export function selectFinancialStatements(
       statements.unshift(latest);
       const previous = [...quarterlyStatements].reverse().find((candidate) => {
         const days = (Date.parse(latest.date) - Date.parse(candidate.date)) / 86_400_000;
-        return days >= 350 && days <= 380 && candidate.currency === latest.currency;
+        return days >= 350 && days <= 380;
       });
       if (previous) previousStatementMap.set(latest.date, previous);
     }
@@ -382,6 +424,7 @@ export function buildFinancialTableModel(
   const hasAnnualStatements = annualStatements.length > 0;
   const hasQuarterlyStatements = quarterlyStatements.length > 0;
   if (!hasAnnualStatements && !hasQuarterlyStatements) return null;
+  const comparisonCurrency = financialStatementCurrency(financials, [...annualStatements, ...quarterlyStatements]);
 
   const requestedPeriod = options.period ?? (hasAnnualStatements ? "annual" : "quarterly");
   const period = resolveFinancialPeriod(requestedPeriod, hasAnnualStatements, hasQuarterlyStatements);
@@ -405,7 +448,9 @@ export function buildFinancialTableModel(
           ? row.summaryKey ? previous[row.summaryKey] as number | undefined : undefined
           : statementMetricValue(row, previous)
         : undefined;
-      const growth = row.kind === "metric" && !row.showGrowth ? undefined : computeGrowth(value, previousValue);
+      const growth = (row.kind === "metric" && !row.showGrowth)
+        || !canCompareFinancialRow(row, statement, previous, comparisonCurrency)
+        ? undefined : computeGrowth(value, previousValue);
       return {
         ...formatFinancialCell(formatFinancialValue(value, row), growth),
         value,

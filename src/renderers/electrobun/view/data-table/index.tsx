@@ -77,6 +77,7 @@ export function WebDataTable<T, C extends DataTableColumn = DataTableColumn>({
   horizontalPadding = 1,
   fillAvailableWidth = true,
   showHorizontalScrollbar = true,
+  freezeFirstColumn = false,
   scrollToIndex,
   scrollToIndexAlign = "nearest",
   scrollToIndexVersion = 0,
@@ -93,6 +94,7 @@ export function WebDataTable<T, C extends DataTableColumn = DataTableColumn>({
   const bodyHorizontal = useScrollbarState(showHorizontalScrollbar);
   const bodyVertical = useScrollbarState(true);
   const [viewportWidth, setViewportWidth] = useState(0);
+  const [frozenScrollLeft, setFrozenScrollLeft] = useState(0);
   const [scrollbarActive, markScrollbarActive] = useScrollbarActivity();
   const tableWidth = useMemo(
     () => getTableWidth(columns, columnGap, horizontalPadding),
@@ -322,6 +324,7 @@ export function WebDataTable<T, C extends DataTableColumn = DataTableColumn>({
         }}
         onScroll={(event) => {
           markScrollbarActive();
+          if (freezeFirstColumn) setFrozenScrollLeft(event.currentTarget.scrollLeft);
           const controlledOffset = controlledScrollOffsetRef.current;
           controlledScrollOffsetRef.current = null;
           if (controlledOffset
@@ -349,6 +352,9 @@ export function WebDataTable<T, C extends DataTableColumn = DataTableColumn>({
         >
           <WebDataTableHeader
             columns={columns}
+            freezeFirstColumn={freezeFirstColumn}
+            scrollLeft={frozenScrollLeft}
+            viewportWidth={viewportWidth}
             columnGap={columnGap}
             horizontalPadding={horizontalPadding}
             focusPane={focusPane}
@@ -401,6 +407,9 @@ export function WebDataTable<T, C extends DataTableColumn = DataTableColumn>({
                     item={item}
                     itemKey={itemKey}
                     columns={columns}
+                    freezeFirstColumn={freezeFirstColumn}
+                    scrollLeft={frozenScrollLeft}
+                    viewportWidth={viewportWidth}
                     columnGap={columnGap}
                     horizontalPadding={horizontalPadding}
                     focusPane={focusPane}

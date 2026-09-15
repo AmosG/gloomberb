@@ -18,6 +18,23 @@ export interface InsiderTransaction {
   ownershipType?: string;
   ownershipNature?: string;
   reportingOwners?: Array<{ name: string; cik: string; title: string }>;
+  footnoteIds?: string[];
+}
+
+export interface InsiderFilingDisclosure {
+  form: string;
+  originalFilingDate: string | null;
+  reportingOwners: Array<{ name: string; cik: string; title: string }>;
+  footnotes: Array<{ id: string; text: string }>;
+  remarks: string | null;
+}
+
+export function isInsiderForm(form: string): boolean {
+  return /^4(?:\/A)?$/i.test(form.trim());
+}
+
+export function isInsiderAmendment(form: string): boolean {
+  return /^4\/A$/i.test(form.trim());
 }
 
 function tagContent(xml: string, tag: string): string | undefined {
@@ -35,10 +52,31 @@ function numberValue(xml: string, tag: string): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
+function reportingOwners(xml: string): InsiderFilingDisclosure["reportingOwners"] {
+  return [...xml.matchAll(/<(?:[\w.-]+:)?reportingOwner(?:\s[^>]*)?>([\s\S]*?)<\/(?:[\w.-]+:)?reportingOwner\s*>/gi)]
+    .map((match) => ({ name: tagText(match[1]!, "rptOwnerName"), cik: tagText(match[1]!, "rptOwnerCik"), title: tagText(match[1]!, "officerTitle") }));
+}
+
+function disclosureText(xml: string): string {
+  return decodeHtmlEntities(xml.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim());
+}
+
+export function parseForm4Disclosure(xml: string): InsiderFilingDisclosure | null {
+  if (!/<(?:[\w.-]+:)?ownershipDocument(?:\s|>)/i.test(xml)) return null;
+  const original = tagText(xml, "dateOfOriginalSubmission");
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(original) ? new Date(`${original}T00:00:00Z`) : null;
+  return {
+    form: tagText(xml, "documentType") || "4",
+    originalFilingDate: date && Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === original ? original : null,
+    reportingOwners: reportingOwners(xml),
+    footnotes: [...xml.matchAll(/<(?:[\w.-]+:)?footnote\s[^>]*\bid\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/(?:[\w.-]+:)?footnote\s*>/gi)]
+      .map((match) => ({ id: match[1]!, text: disclosureText(match[2]!) })),
+    remarks: disclosureText(tagContent(xml, "remarks") ?? "") || null,
+  };
+}
+
 export function parseForm4Xml(xml: string): InsiderTransaction[] {
-  const owners = [...xml.matchAll(/<(?:[\w.-]+:)?reportingOwner(?:\s[^>]*)?>([\s\S]*?)<\/(?:[\w.-]+:)?reportingOwner\s*>/gi)]
-    .map((match) => ({ name: tagText(match[1]!, "rptOwnerName"), cik: tagText(match[1]!, "rptOwnerCik"), title: tagText(match[1]!, "officerTitle") }))
-    .filter((owner) => owner.name);
+  const owners = reportingOwners(xml).filter((owner) => owner.name);
   if (!owners.length) return [];
   const blocks = [...xml.matchAll(/<(?:[\w.-]+:)?(nonDerivativeTransaction|derivativeTransaction)(?:\s[^>]*)?>([\s\S]*?)<\/(?:[\w.-]+:)?\1\s*>/gi)];
   return blocks.map((match, transactionIndex) => {
@@ -65,6 +103,7 @@ export function parseForm4Xml(xml: string): InsiderTransaction[] {
       ownershipType: tagText(tagContent(tagContent(block, "ownershipNature") ?? "", "directOrIndirectOwnership") ?? "", "value"),
       ownershipNature: tagText(tagContent(tagContent(block, "ownershipNature") ?? "", "natureOfOwnership") ?? "", "value"),
       form: tagText(xml, "documentType") || "4",
+      footnoteIds: [...new Set([...block.matchAll(/<(?:[\w.-]+:)?footnoteId\s[^>]*\bid\s*=\s*["']([^"']+)["']/gi)].map((note) => note[1]!))],
     };
   });
 }

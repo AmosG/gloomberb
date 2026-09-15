@@ -8,7 +8,7 @@ import { getSharedMarketDataCoordinator, type MarketDataCoordinator } from "../.
 import { useQuoteEntries } from "../../market-data/hooks";
 import type { InstrumentRef } from "../../market-data/request-types";
 import type { QueryEntry } from "../../market-data/result-types";
-import { buildQuoteKey } from "../../market-data/selectors";
+import { buildInstrumentKey, buildQuoteKey } from "../../market-data/selectors";
 
 const quoteStreamLog = debugLog.createLogger("quote-stream");
 export const DEFAULT_QUOTE_POLL_INTERVAL_MS = 60_000;
@@ -34,18 +34,11 @@ export function normalizeQuoteStreamSubscriptionTarget(target: QuoteSubscription
 }
 
 export function buildQuoteStreamSubscriptionIdentityKey(target: QuoteSubscriptionTarget): string {
-  const contractKey = target.context?.instrument?.conId
-    ?? target.context?.instrument?.localSymbol
-    ?? target.context?.instrument?.symbol
-    ?? "";
-  return [
-    target.symbol,
-    target.exchange ?? "",
-    target.context?.brokerId ?? "",
-    target.context?.brokerInstanceId ?? "",
-    contractKey,
-    target.route ?? "auto",
-  ].join("|");
+  return `${buildInstrumentKey({
+    symbol: target.symbol, exchange: target.exchange,
+    brokerId: target.context?.brokerId, brokerInstanceId: target.context?.brokerInstanceId,
+    instrument: target.context?.instrument,
+  })}|${target.route ?? "auto"}`;
 }
 
 export function buildQuoteStreamSubscriptionKey(target: QuoteSubscriptionTarget): string {

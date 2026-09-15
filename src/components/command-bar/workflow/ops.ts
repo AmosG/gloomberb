@@ -1,6 +1,12 @@
 import { type LayoutConfig, type PaneBinding, type PaneInstanceConfig } from "../../../types/config";
 import type { PaneSettingField, PaneTemplateContext, PaneTemplateCreateOptions, PaneTemplateInstanceConfig, PaneTemplateDef } from "../../../types/plugin";
 import { getFocusedCollectionId, getFocusedTickerSymbol } from "../../../state/app/context";
+import { resolveInstrumentForPane, resolveListingForPane } from "../../../core/state/app/instrument";
+import { resolveTickerOpenTarget } from "../../../tickers/open-target";
+import { instrumentFromTicker } from "../../../market-data/request-types";
+import { scopedBrokerContractIdentityKey } from "../../../utils/instrument-identity";
+import { tickerSelectionFromSearchResult } from "../../../tickers/selection";
+import { tickerInstrumentLabel } from "../../../tickers/instrument-label";
 import type { PluginRegistry } from "../../../plugins/registry";
 import { formatTickerListInput } from "../../../tickers/list";
 import { PANE_LOCK_SETTING_KEY, setPaneLocked, updatePaneInstance, setPaneSettings } from "../../../pane-settings";
@@ -146,12 +152,28 @@ async function resolvePaneTemplateOptions(
     layout: state.config.layout,
     focusedPaneId: state.focusedPaneId,
     activeTicker: getFocusedTickerSymbol(state),
+    activeInstrument: state.focusedPaneId ? resolveInstrumentForPane(state, state.focusedPaneId)?.instrument : undefined,
+    activeListing: state.focusedPaneId ? resolveListingForPane(state, state.focusedPaneId) : undefined,
     activeCollectionId: getFocusedCollectionId(state),
   };
 
   let resolvedOptions = options;
   if (template.shortcut?.argPlaceholder === "ticker") {
-    const resolvedTicker = await resolveTickerInputOrThrow(
+    if (resolvedOptions?.instrument === null && !resolvedOptions.ticker) {
+      const publicTarget = await resolveTickerOpenTarget({ query: resolvedOptions.symbol ?? resolvedOptions.arg ?? baseContext.activeTicker ?? "",
+        tickers: state.tickers, tickerRepository: deps.tickerRepository, dataProvider: deps.dataProvider, publicOnly: true });
+      if (!publicTarget) throw new Error("Could not resolve the selected public listing.");
+      deps.dispatch({ type: "UPDATE_TICKER", ticker: publicTarget.ticker });
+      if (publicTarget.created) deps.pluginRegistry.events.emit("ticker:added", { symbol: publicTarget.symbol, ticker: publicTarget.ticker });
+      resolvedOptions = { ...resolvedOptions, symbol: publicTarget.symbol, ticker: publicTarget.ticker, listing: resolvedOptions.listing ?? publicTarget.listing };
+    }
+    const requested = resolvedOptions?.symbol ?? resolvedOptions?.arg;
+    const activeTicker = baseContext.activeTicker && baseContext.activeInstrument !== undefined
+      && (!requested || requested === baseContext.activeTicker) ? state.tickers.get(baseContext.activeTicker) : undefined;
+    const resolvedTicker = resolvedOptions?.ticker && resolvedOptions.ticker.metadata.ticker === resolvedOptions.symbol
+      ? { symbol: resolvedOptions.symbol, ticker: resolvedOptions.ticker }
+      : activeTicker ? { symbol: activeTicker.metadata.ticker, ticker: activeTicker }
+      : await resolveTickerInputOrThrow(
       resolvedOptions?.symbol ?? resolvedOptions?.arg,
       baseContext.activeTicker,
       baseContext.activeCollectionId,
@@ -162,6 +184,12 @@ async function resolvePaneTemplateOptions(
       symbol: resolvedTicker.symbol,
       ticker: resolvedTicker.ticker,
       searchResult: null,
+      instrument: resolvedOptions?.instrument !== undefined ? resolvedOptions.instrument
+        : resolvedOptions?.searchResult ? tickerSelectionFromSearchResult(resolvedOptions.searchResult).instrument
+        : resolvedTicker.symbol === baseContext.activeTicker && baseContext.activeInstrument !== undefined ? baseContext.activeInstrument
+        : instrumentFromTicker(resolvedTicker.ticker)?.instrument,
+      listing: resolvedOptions?.listing ?? tickerSelectionFromSearchResult(resolvedOptions?.searchResult ?? undefined).listing
+        ?? (resolvedTicker.symbol === baseContext.activeTicker ? baseContext.activeListing : undefined),
     };
   } else if (template.shortcut?.argPlaceholder === "tickers") {
     const rawInput = resolvedOptions?.arg ?? resolvedOptions?.values?.tickers ?? "";
@@ -176,6 +204,10 @@ async function resolvePaneTemplateOptions(
   const context: PaneTemplateContext = {
     ...baseContext,
     activeTicker: resolvedOptions?.symbol ?? baseContext.activeTicker,
+    activeInstrument: resolvedOptions?.instrument !== undefined ? resolvedOptions.instrument
+      : !resolvedOptions?.symbol || resolvedOptions.symbol === baseContext.activeTicker ? baseContext.activeInstrument : undefined,
+    activeListing: resolvedOptions?.listing
+      ?? (!resolvedOptions?.symbol || resolvedOptions.symbol === baseContext.activeTicker ? baseContext.activeListing : undefined),
   };
 
   return {
@@ -210,7 +242,16 @@ export async function createPaneTemplateOrThrow(
   if (createInstanceResult === null) {
     return;
   }
-  const spec = createInstanceResult ?? {};
+  let spec = createInstanceResult ?? {};
+  if (spec.binding?.kind === "fixed" && spec.binding.symbol === context.activeTicker && context.activeInstrument !== undefined) {
+    const instrument = spec.binding.instrument !== undefined ? spec.binding.instrument : context.activeInstrument;
+    const listing = spec.binding.listing ?? context.activeListing;
+    const label = tickerInstrumentLabel(spec.binding.symbol, instrument);
+    spec = { ...spec, binding: { ...spec.binding, instrument, ...(listing ? { listing } : {}) },
+      ...(spec.instanceId && instrument ? { instanceId: `${spec.instanceId}:${encodeURIComponent(scopedBrokerContractIdentityKey(instrument))}` } : {}),
+      ...(spec.title?.endsWith(spec.binding.symbol) ? { title: spec.title.slice(0, -spec.binding.symbol.length) + label } : {}),
+    };
+  }
 
   const paneDef = deps.pluginRegistry.panes.get(template.paneId);
   if (!paneDef) {

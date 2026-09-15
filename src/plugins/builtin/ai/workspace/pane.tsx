@@ -247,7 +247,6 @@ export function LocalAgentWorkspacePane({ paneId, focused, width, height }: Pane
   const selectedTicker = useAppSelector((state) => previousSymbol ? state.tickers.get(previousSymbol) ?? null : null);
   const selectedFinancials = useAppSelector((state) => previousSymbol ? state.financials.get(previousSymbol) ?? null : null);
   const baseCurrency = useAppSelector((state) => state.config.baseCurrency);
-  const exchangeRates = useAppSelector((state) => state.exchangeRates);
 
   const updateWorkspace = useCallback((updater: (current: LocalAgentWorkspaceState) => LocalAgentWorkspaceState) => {
     setPersistedWorkspace((current) => updater(normalizeLocalAgentWorkspace(current)));
@@ -400,7 +399,7 @@ export function LocalAgentWorkspacePane({ paneId, focused, width, height }: Pane
       setStatusMessage("Select a ticker in another pane before attaching context.");
       return;
     }
-    const content = buildTickerAiContext(selectedTicker, selectedFinancials, baseCurrency, exchangeRates);
+    const content = buildTickerAiContext(selectedTicker, selectedFinancials, baseCurrency);
     const attachment: LocalAgentAttachmentPayload = {
       id: `ticker:${previousSymbol}:${Date.now()}`,
       kind: "ticker",
@@ -410,7 +409,7 @@ export function LocalAgentWorkspacePane({ paneId, focused, width, height }: Pane
     };
     setAttachments([attachment]);
     setStatusMessage(null);
-  }, [baseCurrency, exchangeRates, previousSymbol, selectedFinancials, selectedTicker]);
+  }, [baseCurrency, previousSymbol, selectedFinancials, selectedTicker]);
 
   const removeAttachments = useCallback(() => {
     setAttachments([]);
@@ -706,6 +705,7 @@ export function LocalAgentWorkspacePane({ paneId, focused, width, height }: Pane
     ).length,
   );
   const composerHeight = nativePaneChrome ? 3 : 2;
+  const attachmentPreviewHeight = Math.min(8, Math.max(1, height - 10));
 
   return (
     <Box flexDirection="row" width={nativePaneChrome ? "100%" : width} height={nativePaneChrome ? "100%" : height} overflow="hidden">
@@ -856,15 +856,15 @@ export function LocalAgentWorkspacePane({ paneId, focused, width, height }: Pane
         )}
         {activeThreadProviderSupported ? (
           <>
-            <Box flexDirection="column" paddingX={1}>
+            <Box flexDirection="column" paddingX={1} flexShrink={0}>
               {attachments.map((attachment) => (
-                <Box key={attachment.id} flexDirection="column" backgroundColor={colors.panel} paddingX={1}>
-                  <Box flexDirection="row">
+                <Box key={attachment.id} flexDirection="column" height={attachmentPreviewHeight + 1} flexShrink={0} backgroundColor={colors.panel} paddingX={1}>
+                  <Box flexDirection="row" height={1} flexShrink={0} overflow="hidden">
                     <Text fg={colors.warning} attributes={TextAttributes.BOLD}>Attached: {attachment.label}</Text>
                     <Box flexGrow={1} />
                     <Button stopPropagation label="Remove attachments" displayLabel="Remove" variant="ghost" compact onPress={removeAttachments} />
                   </Box>
-                  <ScrollBox height={Math.min(8, Math.max(3, height - 12))} scrollY focusable={false}>
+                  <ScrollBox height={attachmentPreviewHeight} flexShrink={0} scrollY focusable={false}>
                     <Text fg={colors.textDim}>{attachment.content}</Text>
                   </ScrollBox>
                 </Box>

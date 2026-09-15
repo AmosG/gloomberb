@@ -4,7 +4,8 @@ import type { CachedAssetArgs, CachedAssetMethod, CachedAssetValue, DataProvider
 import type { AnalystResearchData, CorporateActionsData, HolderData } from "../../types/financials";
 import { canonicalExchange } from "../../utils/exchanges";
 import { shouldLogProviderError } from "../provider-errors";
-import { withBrokerTimeout } from "./brokers";
+import { hasBrokerContext, withBrokerTimeout } from "./brokers";
+import { publicListingExchange } from "../listing-target";
 import { buildVariantKey, compactUrl, listCachedResources, resolveCachePolicy, type ProviderRouterCachePolicyKey } from "./cache";
 import { hasAnalystResearchValue, hasCorporateActionsValue, isAnalystResearchMissingRatingTargets } from "./financials";
 import type { ProviderRouterCoreDeps } from "./route-types";
@@ -141,8 +142,13 @@ export class ProviderRouterCachedRoutes {
   }
 
   private describe(method: CachedAssetMethod, args: readonly unknown[]): Route {
-    const [ticker, exchange, extra, context] = args as [string, string | undefined, any, MarketDataRequestContext | undefined];
+    const [ticker, originalExchange, extra, context] = args as [string, string | undefined, any, MarketDataRequestContext | undefined];
+    let exchange = originalExchange;
     const instrumentContext = (method === "getOptionsChain" ? context : extra) as MarketDataRequestContext | undefined;
+    if (["getHolders", "getAnalystResearch", "getCorporateActions", "getOptionsChain"].includes(method)
+      && !hasBrokerContext(instrumentContext) && !instrumentContext?.instrument) {
+      exchange = publicListingExchange(ticker, exchange);
+    }
     const tickerRoute = (kind: string, policy: ProviderRouterCachePolicyKey): Pick<Route, "kind" | "policy" | "entityKey" | "variants"> => ({
       kind, policy, entityKey: this.deps.getEntityKey(ticker, instrumentContext?.instrument),
       variants: this.deps.getTickerVariantCandidates(exchange),

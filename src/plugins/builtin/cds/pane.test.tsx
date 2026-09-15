@@ -18,7 +18,7 @@ const ACTIVITY: CdsActivity = {
   trades: normalizeCdsTrades([
     trade("1", "Oracle Corporation", "2026-08-25T10:00:00Z", { reportedSpread: 0.009, spreadNotation: "3" }),
     trade("2", "Oracle Corporation", "2026-08-25T12:00:00Z", { reportedSpread: null }),
-    trade("3", "Ford Motor Company", "2026-08-25T11:00:00Z", { reportedSpread: 0.025, spreadNotation: "3" }),
+    trade("3", "Ford Motor Company", "2026-08-25T11:00:00Z", { reportedSpread: 250, spreadNotation: "4" }),
   ]),
 };
 
@@ -104,7 +104,7 @@ describe("CdsPane", () => {
     await renderPane();
     const frame = setup!.captureCharFrame();
 
-    // Most active first, and the 250bp report stays 250bp while the percent one becomes 90bp.
+    // Most active first: numeric notation 4 stays 250bp; decimal notation 3 becomes 90bp.
     const oracle = frame.indexOf("Oracle Corporation");
     const ford = frame.indexOf("Ford Motor Company");
     expect(oracle).toBeGreaterThanOrEqual(0);

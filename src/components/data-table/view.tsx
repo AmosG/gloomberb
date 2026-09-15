@@ -9,6 +9,7 @@ import {
 } from "react";
 import type { ScrollBoxRenderable } from "../../ui";
 import { useShortcut } from "../../react/input";
+import { isPlainKeyboardEvent } from "../../utils/keyboard";
 import { DataTable, type DataTableColumn, type DataTableProps } from "../ui";
 import {
   isNextTableRowKey,
@@ -539,6 +540,27 @@ export function DataTableView<
       itemCount: tableProps.items.length,
     })) return;
     if (tableProps.items.length === 0) return;
+
+    // Leave plain arrows to tabs and modified text-selection keys to editors.
+    if (event.ctrl && isPlainKeyboardEvent({ ...event, ctrl: false })
+      && !event.targetEditable && tableProps.showHorizontalScrollbar !== false
+      && (event.name === "left" || event.name === "right")) {
+      const body = effectiveScrollRef.current;
+      const viewportWidth = body?.viewport?.width ?? 0;
+      const currentLeft = body?.scrollLeft ?? 0;
+      const maxLeft = Math.max(0, (body?.scrollWidth ?? 0) - viewportWidth);
+      if (body && viewportWidth > 0 && maxLeft > 0) {
+        const direction = event.name === "left" ? -1 : 1;
+        const nextLeft = Math.max(0, Math.min(maxLeft,
+          currentLeft + direction * Math.max(1, Math.floor(viewportWidth / 2))));
+        if (nextLeft !== currentLeft) {
+          body.scrollLeft = nextLeft;
+          effectiveSyncHeaderScroll();
+          stopTableKey(event);
+        }
+      }
+      return;
+    }
 
     if (isNextTableRowKey(event)) {
       stopTableKey(event);

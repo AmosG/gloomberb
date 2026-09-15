@@ -13,6 +13,9 @@ import {
   addPaneToLayout,
 } from "../../plugins/pane-manager";
 import type { PluginRegistry } from "../../plugins/registry";
+import type { PinTickerOptions } from "../../types/plugin";
+import { tickerInstrumentLabel } from "../../tickers/instrument-label";
+import { instrumentFromTicker } from "../../market-data/request-types";
 import type { AppAction, AppState } from "../../state/app/context";
 
 interface CommandBarPaneActionsOptions {
@@ -39,16 +42,17 @@ export function useCommandBarPaneActions({
     dispatch({ type: "UPDATE_PANE_STATE", paneId: targetPaneId, patch: { collectionId } });
   }, [dispatch, stateRef]);
 
-  const retargetTickerResearchPane = useCallback((paneId: string, symbol: string) => {
+  const retargetTickerResearchPane = useCallback((paneId: string, symbol: string, options?: PinTickerOptions) => {
     const currentState = stateRef.current;
     const targetPane = findPaneInstance(currentState.config.layout, paneId);
     if (!targetPane || targetPane.paneId !== TICKER_RESEARCH_PANE_ID) return;
+    const instrument = options?.instrument !== undefined ? options.instrument : instrumentFromTicker(currentState.tickers.get(symbol))?.instrument ?? undefined;
 
     const nextLayout = {
       ...currentState.config.layout,
       instances: currentState.config.layout.instances.map((instance) => (
         instance.instanceId === targetPane.instanceId
-          ? { ...instance, title: symbol, binding: { kind: "fixed" as const, symbol } }
+          ? { ...instance, title: tickerInstrumentLabel(symbol, instrument), binding: { kind: "fixed" as const, symbol, ...(instrument !== undefined ? { instrument } : {}), ...(options?.listing ? { listing: options.listing } : {}) } }
           : instance
       )),
     };
@@ -56,30 +60,32 @@ export function useCommandBarPaneActions({
     dispatch({ type: "FOCUS_PANE", paneId: targetPane.instanceId });
   }, [dispatch, stateRef]);
 
-  const openFixedTickerPane = useCallback((symbol: string, options?: { forceNewPane?: boolean }) => {
+  const openFixedTickerPane = useCallback((symbol: string, options?: PinTickerOptions) => {
     pluginRegistry.pinTicker(symbol, {
       floating: true,
       paneType: TICKER_RESEARCH_PANE_ID,
       forceNewPane: options?.forceNewPane,
+      instrument: options?.instrument,
+      listing: options?.listing,
     });
   }, [pluginRegistry]);
 
-  const focusTicker = useCallback((symbol: string, options?: { forceNewPane?: boolean }) => {
+  const focusTicker = useCallback((symbol: string, options?: PinTickerOptions) => {
     const currentState = stateRef.current;
     const focusedPane = currentState.focusedPaneId
       ? findPaneInstance(currentState.config.layout, currentState.focusedPaneId)
       : null;
     if (options?.forceNewPane) {
-      openFixedTickerPane(symbol, { forceNewPane: true });
+      openFixedTickerPane(symbol, options);
       return;
     }
 
     if (focusedPane?.paneId === TICKER_RESEARCH_PANE_ID) {
-      retargetTickerResearchPane(focusedPane.instanceId, symbol);
+      retargetTickerResearchPane(focusedPane.instanceId, symbol, options);
       return;
     }
 
-    openFixedTickerPane(symbol);
+    openFixedTickerPane(symbol, options);
   }, [openFixedTickerPane, retargetTickerResearchPane, stateRef]);
 
   const persistLayoutChange = useCallback((nextLayout: LayoutConfig) => {

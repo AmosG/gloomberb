@@ -5,8 +5,12 @@ import type { CachedFinancialsTarget, DataProvider } from "../../types/data-prov
 import type { TickerFinancials } from "../../types/financials";
 import type { BrokerAccount } from "../../types/trading";
 import type { TickerMetadata, TickerRecord } from "../../types/ticker";
-import type { AppAction, PaneRuntimeState } from "./context";
+import type { AppAction, AppState, PaneRuntimeState } from "./context";
 import type { AppSessionSnapshot } from "../../core/state/session-persistence";
+import { instrumentFromTicker, type InstrumentRef } from "../../market-data/request-types";
+import { buildInstrumentKey } from "../../market-data/selectors";
+import { resolveCollectionForPane } from "../../core/state/app/layout";
+import { hasAmbiguousTickerContracts, resolveInstrumentForPane } from "../../core/state/app/instrument";
 import { getDockedPaneIds } from "../../plugins/pane-manager";
 import { debugLog } from "../../utils/debug-log";
 import { measurePerf, measurePerfAsync } from "../../utils/perf-marks";
@@ -32,6 +36,7 @@ interface StartupPaneStateSeed {
 
 interface RefreshPlanEntry {
   ticker: TickerRecord;
+  instrument: InstrumentRef;
   priority: number;
   mode: "quote" | "financials";
 }
@@ -50,12 +55,13 @@ export interface InitializeAppStateArgs {
   tickerRepository: AppTickerRepositoryPort;
   dataProvider: DataProvider;
   sessionSnapshot?: AppSessionSnapshot | null;
+  paneState?: Record<string, PaneRuntimeState>;
   dispatch: Dispatch<AppAction>;
-  primeCachedFinancials?: (entries: Array<{ ticker: TickerRecord; financials: TickerFinancials }>) => void;
-  refreshTicker: (symbol: string, exchange?: string, tickerOverride?: TickerRecord | null, priority?: number) => void;
-  refreshQuote: (symbol: string, exchange?: string, tickerOverride?: TickerRecord | null, priority?: number) => void;
-  refreshTickersBatch?: (entries: Array<{ ticker: TickerRecord; priority: number }>) => void;
-  refreshQuotesBatch?: (entries: Array<{ ticker: TickerRecord; priority: number }>) => void;
+  primeCachedFinancials?: (entries: Array<{ ticker: TickerRecord; instrument: InstrumentRef; financials: TickerFinancials }>) => void;
+  refreshTicker: (symbol: string, exchange?: string, tickerOverride?: TickerRecord | null, priority?: number, instrument?: InstrumentRef) => void;
+  refreshQuote: (symbol: string, exchange?: string, tickerOverride?: TickerRecord | null, priority?: number, instrument?: InstrumentRef) => void;
+  refreshTickersBatch?: (entries: Array<{ ticker: TickerRecord; priority: number; instrument?: InstrumentRef }>) => void;
+  refreshQuotesBatch?: (entries: Array<{ ticker: TickerRecord; priority: number; instrument?: InstrumentRef }>) => void;
   autoImportBrokerPositions: (tickerMap: Map<string, TickerRecord>) => Promise<void>;
   persistedBrokerAccounts?: Record<string, BrokerAccount[]>;
 }
@@ -64,20 +70,20 @@ function buildPaneStateSeed(
   config: AppConfig,
   tickers: TickerRecord[],
   tickerMap: Map<string, TickerRecord>,
-  sessionSnapshot: AppSessionSnapshot | null | undefined,
+  paneState: Record<string, PaneRuntimeState>,
 ): Record<string, StartupPaneStateSeed> {
   const seed: Record<string, StartupPaneStateSeed> = {};
   if (tickers.length === 0) return seed;
 
   for (const instance of config.layout.instances) {
     if (instance.paneId !== "portfolio-list") continue;
-    const existingCursor = sessionSnapshot?.paneState?.[instance.instanceId]?.cursorSymbol;
+    const existingCursor = paneState[instance.instanceId]?.cursorSymbol;
     if (typeof existingCursor === "string" && tickerMap.has(existingCursor)) {
       seed[instance.instanceId] = { cursorSymbol: existingCursor };
       continue;
     }
 
-    const collectionId = instance.params?.collectionId ?? config.portfolios[0]?.id ?? config.watchlists[0]?.id;
+    const collectionId = resolveCollectionForPane({ config, paneState } as AppState, instance.instanceId);
     const initialTicker = tickers.find((ticker) =>
       (collectionId && ticker.metadata.portfolios.includes(collectionId))
       || (collectionId && ticker.metadata.watchlists.includes(collectionId))
@@ -91,52 +97,25 @@ function buildPaneStateSeed(
   return seed;
 }
 
-function resolveSymbolForPane(
-  config: AppConfig,
-  instanceId: string,
-  paneStateSeed: Record<string, StartupPaneStateSeed>,
-  sessionSnapshot: AppSessionSnapshot | null | undefined,
-  tickerMap: Map<string, TickerRecord>,
-  seen = new Set<string>(),
-): string | null {
-  if (seen.has(instanceId)) return null;
-  seen.add(instanceId);
-
-  const instance = findPaneInstance(config.layout, instanceId);
-  if (!instance) return null;
-
-  // Any pane can publish a cursor symbol; followers resolve through it.
-  const cursor = paneStateSeed[instanceId]?.cursorSymbol
-    ?? (typeof sessionSnapshot?.paneState?.[instanceId]?.cursorSymbol === "string"
-      ? sessionSnapshot.paneState[instanceId]?.cursorSymbol as string
-      : null);
-  if (cursor) return tickerMap.has(cursor) ? cursor : null;
-
-  if (instance.binding?.kind === "fixed") {
-    return tickerMap.has(instance.binding.symbol) ? instance.binding.symbol : null;
-  }
-
-  if (instance.binding?.kind === "follow") {
-    return resolveSymbolForPane(config, instance.binding.sourceInstanceId, paneStateSeed, sessionSnapshot, tickerMap, seen);
-  }
-
-  return null;
-}
-
 function buildRefreshPlan(
   config: AppConfig,
   tickerMap: Map<string, TickerRecord>,
   paneStateSeed: Record<string, StartupPaneStateSeed>,
+  initialPaneState: Record<string, PaneRuntimeState>,
   sessionSnapshot: AppSessionSnapshot | null | undefined,
 ): RefreshPlanEntry[] {
-  const planBySymbol = new Map<string, RefreshPlanEntry>();
+  const planByInstrument = new Map<string, RefreshPlanEntry>();
+  const paneState = { ...initialPaneState };
+  for (const [id, patch] of Object.entries(paneStateSeed)) paneState[id] = { ...paneState[id], ...patch };
+  const state = { config, paneState, tickers: tickerMap };
 
-  const enqueueSymbol = (symbol: string | null, priority: number, mode: RefreshPlanEntry["mode"]) => {
-    if (!symbol) return;
-    const ticker = tickerMap.get(symbol);
+  const enqueueInstrument = (instrument: InstrumentRef | null, priority: number, mode: RefreshPlanEntry["mode"]) => {
+    if (!instrument) return;
+    const ticker = tickerMap.get(instrument.symbol.trim().toUpperCase());
     if (!ticker) return;
 
-    const existing = planBySymbol.get(symbol);
+    const key = buildInstrumentKey(instrument);
+    const existing = planByInstrument.get(key);
     if (existing) {
       existing.priority = Math.min(existing.priority, priority);
       if (mode === "financials") {
@@ -145,7 +124,7 @@ function buildRefreshPlan(
       return;
     }
 
-    planBySymbol.set(symbol, { ticker, priority, mode });
+    planByInstrument.set(key, { ticker, instrument, priority, mode });
   };
 
   const resolveWarmupMode = (instance: AppConfig["layout"]["instances"][number] | undefined): RefreshPlanEntry["mode"] => {
@@ -163,8 +142,8 @@ function buildRefreshPlan(
 
   for (const instanceId of getDockedPaneIds(config.layout)) {
     const instance = findPaneInstance(config.layout, instanceId);
-    enqueueSymbol(
-      resolveSymbolForPane(config, instanceId, paneStateSeed, sessionSnapshot, tickerMap),
+    enqueueInstrument(
+      resolveInstrumentForPane(state, instanceId),
       0,
       resolveWarmupMode(instance),
     );
@@ -172,8 +151,8 @@ function buildRefreshPlan(
 
   for (const entry of config.layout.floating) {
     const instance = findPaneInstance(config.layout, entry.instanceId);
-    enqueueSymbol(
-      resolveSymbolForPane(config, entry.instanceId, paneStateSeed, sessionSnapshot, tickerMap),
+    enqueueInstrument(
+      resolveInstrumentForPane(state, entry.instanceId),
       1,
       resolveWarmupMode(instance),
     );
@@ -182,34 +161,25 @@ function buildRefreshPlan(
   let backgroundWarmups = 0;
   for (const target of sessionSnapshot?.hydrationTargets ?? []) {
     if (backgroundWarmups >= MAX_BACKGROUND_WARMUP_TICKERS) break;
-    const before = planBySymbol.size;
-    enqueueSymbol(target.symbol, 2, "financials");
-    if (planBySymbol.size > before) {
+    const before = planByInstrument.size;
+    enqueueInstrument(target, 2, "financials");
+    if (planByInstrument.size > before) {
       backgroundWarmups += 1;
     }
   }
 
   for (const symbol of config.recentTickers) {
     if (backgroundWarmups >= MAX_BACKGROUND_WARMUP_TICKERS) break;
-    const before = planBySymbol.size;
-    enqueueSymbol(symbol, 2, "quote");
-    if (planBySymbol.size > before) {
+    const ticker = tickerMap.get(symbol);
+    if (hasAmbiguousTickerContracts(ticker)) continue;
+    const before = planByInstrument.size;
+    enqueueInstrument(instrumentFromTicker(ticker, symbol), 2, "quote");
+    if (planByInstrument.size > before) {
       backgroundWarmups += 1;
     }
   }
 
-  return [...planBySymbol.values()].sort((left, right) => left.priority - right.priority);
-}
-
-function buildCachedFinancialTarget(ticker: TickerRecord): CachedFinancialsTarget {
-  const instrument = ticker.metadata.broker_contracts?.[0] ?? null;
-  return {
-    symbol: ticker.metadata.ticker,
-    exchange: ticker.metadata.exchange,
-    brokerId: instrument?.brokerId,
-    brokerInstanceId: instrument?.brokerInstanceId,
-    instrument,
-  };
+  return [...planByInstrument.values()].sort((left, right) => left.priority - right.priority);
 }
 
 async function resolveCachedFinancialPrimeEntries(
@@ -217,44 +187,40 @@ async function resolveCachedFinancialPrimeEntries(
   sessionSnapshot: AppSessionSnapshot | null | undefined,
   tickerMap: Map<string, TickerRecord>,
   dataProvider: DataProvider,
-): Promise<Array<{ ticker: TickerRecord; financials: TickerFinancials }>> {
+): Promise<Array<{ ticker: TickerRecord; instrument: InstrumentRef; financials: TickerFinancials }>> {
   if (!dataProvider.getCachedFinancialsForTargets) return [];
 
-  const targetEntriesBySymbol = new Map<string, { ticker: TickerRecord; target: CachedFinancialsTarget }>();
+  const targetEntriesByInstrument = new Map<string, { ticker: TickerRecord; target: CachedFinancialsTarget }>();
   for (const target of sessionSnapshot?.hydrationTargets ?? []) {
     const symbol = target.symbol.trim().toUpperCase();
     const ticker = tickerMap.get(symbol);
     if (ticker) {
-      targetEntriesBySymbol.set(symbol, { ticker, target });
+      targetEntriesByInstrument.set(buildInstrumentKey(target), { ticker, target: { ...target, symbol } });
     }
   }
 
   for (const entry of refreshPlan.filter((entry) => entry.mode === "financials")) {
-    const symbol = entry.ticker.metadata.ticker.trim().toUpperCase();
-    if (!targetEntriesBySymbol.has(symbol)) {
-      targetEntriesBySymbol.set(symbol, {
-        ticker: entry.ticker,
-        target: buildCachedFinancialTarget(entry.ticker),
+    const key = buildInstrumentKey(entry.instrument);
+    if (!targetEntriesByInstrument.has(key)) targetEntriesByInstrument.set(key, { ticker: entry.ticker, target: entry.instrument });
+  }
+
+  // The provider's cache API returns a symbol-keyed map. Read each instrument
+  // separately so two contracts for one symbol cannot overwrite one another.
+  const primedEntries = await Promise.all([...targetEntriesByInstrument.values()].map(async ({ ticker, target }) => {
+    try {
+      const cached = await dataProvider.getCachedFinancialsForTargets!([target], { includeStaleQuotes: true });
+      const financials = cached.get(target.symbol.trim().toUpperCase());
+      return financials ? { ticker, instrument: target, financials } : null;
+    } catch (error) {
+      startupLog.warn("cached financials read failed", {
+        instrumentKey: buildInstrumentKey(target),
+        message: error instanceof Error ? error.message : String(error),
       });
+      return null;
     }
-  }
+  }));
 
-  const targetEntries = [...targetEntriesBySymbol.values()];
-  if (targetEntries.length === 0) return [];
-  const cachedFinancials = await dataProvider.getCachedFinancialsForTargets(
-    targetEntries.map((entry) => entry.target),
-    { includeStaleQuotes: true },
-  );
-  const primedEntries: Array<{ ticker: TickerRecord; financials: TickerFinancials }> = [];
-
-  for (const entry of targetEntries) {
-    const cached = cachedFinancials.get(entry.ticker.metadata.ticker.trim().toUpperCase());
-    if (cached) {
-      primedEntries.push({ ticker: entry.ticker, financials: cached });
-    }
-  }
-
-  return primedEntries;
+  return primedEntries.filter((entry): entry is NonNullable<typeof entry> => entry !== null);
 }
 
 export async function initializeAppState({
@@ -262,6 +228,7 @@ export async function initializeAppState({
   tickerRepository,
   dataProvider,
   sessionSnapshot,
+  paneState,
   dispatch,
   primeCachedFinancials,
   refreshTicker,
@@ -327,9 +294,13 @@ export async function initializeAppState({
     accountCount: Object.values(persistedBrokerAccounts).reduce((sum, accounts) => sum + accounts.length, 0),
   });
 
+  const effectivePaneState = paneState ?? {
+    ...sessionSnapshot?.paneState,
+    ...config.layouts[config.activeLayoutIndex]?.paneState,
+  };
   const paneStateSeed = measurePerf(
     "startup.build-pane-state-seed",
-    () => buildPaneStateSeed(config, tickers, tickerMap, sessionSnapshot),
+    () => buildPaneStateSeed(config, tickers, tickerMap, effectivePaneState),
     { paneCount: config.layout.instances.length },
   );
   measurePerf("startup.dispatch-pane-state-seed", () => {
@@ -340,7 +311,7 @@ export async function initializeAppState({
 
   const refreshPlan = measurePerf(
     "startup.build-refresh-plan",
-    () => buildRefreshPlan(config, tickerMap, paneStateSeed, sessionSnapshot),
+    () => buildRefreshPlan(config, tickerMap, paneStateSeed, effectivePaneState, sessionSnapshot),
     {
       tickerCount: tickerMap.size,
       sessionHydrationTargetCount: sessionSnapshot?.hydrationTargets.length ?? 0,
@@ -385,17 +356,17 @@ export async function initializeAppState({
     const financialEntries = refreshPlan.filter((entry) => entry.mode === "financials");
     const quoteEntries = refreshPlan.filter((entry) => entry.mode === "quote");
     if (refreshTickersBatch) {
-      refreshTickersBatch(financialEntries.map((entry) => ({ ticker: entry.ticker, priority: entry.priority })));
+      refreshTickersBatch(financialEntries.map((entry) => ({ ticker: entry.ticker, priority: entry.priority, instrument: entry.instrument })));
     } else {
       for (const entry of financialEntries) {
-        refreshTicker(entry.ticker.metadata.ticker, entry.ticker.metadata.exchange, entry.ticker, entry.priority);
+        refreshTicker(entry.ticker.metadata.ticker, entry.ticker.metadata.exchange, entry.ticker, entry.priority, entry.instrument);
       }
     }
     if (refreshQuotesBatch) {
-      refreshQuotesBatch(quoteEntries.map((entry) => ({ ticker: entry.ticker, priority: entry.priority })));
+      refreshQuotesBatch(quoteEntries.map((entry) => ({ ticker: entry.ticker, priority: entry.priority, instrument: entry.instrument })));
     } else {
       for (const entry of quoteEntries) {
-        refreshQuote(entry.ticker.metadata.ticker, entry.ticker.metadata.exchange, entry.ticker, entry.priority);
+        refreshQuote(entry.ticker.metadata.ticker, entry.ticker.metadata.exchange, entry.ticker, entry.priority, entry.instrument);
       }
     }
   }, { count: refreshPlan.length });

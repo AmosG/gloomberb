@@ -2,6 +2,7 @@ import type { DataProvider, SearchRequestContext } from "../../types/data-provid
 import type { InstrumentSearchResult } from "../../types/instrument";
 import type { BrokerCandidate } from "./brokers";
 import { shouldLogProviderError } from "../provider-errors";
+import { searchInstrumentKey } from "../../tickers/search/identity";
 
 const SEARCH_CACHE_TTL_MS = 30_000;
 const SEARCH_CACHE_MAX_ENTRIES = 100;
@@ -215,18 +216,8 @@ export class ProviderRouterSearchRoutes {
   }
 }
 
-function normalizeSearchKeyPart(value?: string): string {
-  return (value ?? "").trim().toUpperCase();
-}
-
 function buildSearchResultKey(item: InstrumentSearchResult): string {
-  return [
-    normalizeSearchKeyPart(item.symbol),
-    normalizeSearchKeyPart(item.exchange),
-    normalizeSearchKeyPart(item.type),
-    normalizeSearchKeyPart(item.primaryExchange),
-    normalizeSearchKeyPart(item.currency),
-  ].join("|");
+  return searchInstrumentKey(item);
 }
 
 function getSearchResultRichness(item: InstrumentSearchResult, context?: SearchRequestContext): number {

@@ -54,15 +54,15 @@ export function NewsPresetPane({
     ? sortPreference
     : defaultSort;
   const loadNewsStory = useLoadNewsStory();
-  const { detailArticle, openArticle, closeDetail } = useNewsArticleDetail(articles, loadNewsStory);
+  const { detailArticle, detailLoading, detailError, openArticle, closeDetail } = useNewsArticleDetail(articles, loadNewsStory);
   const { readArticleIds, markArticleRead } = useNewsReadState();
 
   useNewsArticleFooter({
     registrationId: `news-wire:${paneKey}`,
     focused,
     article: detailArticle,
-    loading: loading && articles.length > 0,
-    error,
+    loading: detailLoading || (loading && articles.length > 0),
+    error: [error, detailError].filter(Boolean).join(" ") || null,
   });
 
   const detailContent = detailArticle ? (

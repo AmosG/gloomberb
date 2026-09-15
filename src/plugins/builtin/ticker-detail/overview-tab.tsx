@@ -4,13 +4,13 @@ import { CompanyLogo } from "../../../components/company-logo";
 import { PriceReturnStrip } from "../../../components/price-performance";
 import { t } from "../../../i18n";
 import { useFxRatesMap } from "../../../market-data/hooks";
-import { formatMarketPriceWithCurrency, formatSignedMarketPrice } from "../../../market-data/market/format";
+import { formatMarketPriceWithCurrency, formatSignedMarketPrice, quoteFormatOptions } from "../../../market-data/market/format";
 import { exchangeShortName, marketStateColor, marketStateLabel } from "../../../market-data/market/status";
 import { appendQuoteToPriceReturnHistory, buildPriceReturnFields } from "../../../market-data/performance";
 import { useViewport } from "../../../react/input";
 import { useAppSelector } from "../../../state/app/context";
 import { colors, priceColor } from "../../../theme/colors";
-import { appendLiveQuotePoint } from "../../../time-series/chart-data";
+import { appendLiveQuotePoint, hasUnknownBondHistoryBasis } from "../../../time-series/chart-data";
 import type { TickerFinancials } from "../../../types/financials";
 import type { TickerRecord } from "../../../types/ticker";
 import { Box, ScrollBox, Text, TextAttributes, useUiCapabilities } from "../../../ui";
@@ -41,6 +41,9 @@ export function OverviewTab({
   const fundamentals = financials?.fundamentals;
   const capitalization = selectMarketCapitalization(quote, fundamentals);
   const profile = financials?.profile;
+  const instrumentType = quote?.instrumentType?.trim()
+    || financials?.quoteMetadata?.instrumentType?.trim()
+    || ticker.metadata.assetCategory;
   const exchangeRates = useFxRatesMap([
     baseCurrency,
     ticker.metadata.currency,
@@ -67,7 +70,9 @@ export function OverviewTab({
   const contentWidth = Math.max((width || Math.floor(termWidth * 0.5)) - (fractionalViewport ? 2 : 4), 20);
   const chartWidth = contentWidth;
   const hasHistory = (financials?.priceHistory?.length ?? 0) > 2;
-  const chartHistory = appendLiveQuotePoint(financials?.priceHistory ?? [], quote);
+  const unknownHistoryBasis = hasUnknownBondHistoryBasis(quote, ticker.metadata.assetCategory, financials?.quoteMetadata?.instrumentType);
+  const historyQuote = unknownHistoryBasis ? undefined : quote;
+  const chartHistory = appendLiveQuotePoint(financials?.priceHistory ?? [], historyQuote);
   const chartDelta = (chartHistory.at(-1)?.close ?? 0) - (chartHistory[0]?.close ?? 0);
   const chartTimeZone = resolveExchangeTimeZone(
     ticker.metadata.exchange || quote?.listingExchangeName || quote?.exchangeName,
@@ -76,7 +81,7 @@ export function OverviewTab({
     id: `${ticker.metadata.ticker}:price`,
     label: `${ticker.metadata.ticker} Price`,
     color: priceColor(chartDelta),
-    unit: quoteCurrency,
+    unit: unknownHistoryBasis ? "unknown" : quoteCurrency,
     style: "area",
     axis: "right",
     panelId: "price",
@@ -86,8 +91,9 @@ export function OverviewTab({
   const quoteBookInline = hasBidAsk && contentWidth >= 68;
   const quoteBookWidth = quoteBookInline ? Math.min(32, Math.max(24, Math.floor(contentWidth * 0.3))) : Math.min(contentWidth, 32);
   const quoteSummaryWidth = quoteBookInline ? Math.max(20, contentWidth - quoteBookWidth - 2) : contentWidth;
-  const quotePriceText = quote ? formatMarketPriceWithCurrency(quote.price, quote.currency, { assetCategory: ticker.metadata.assetCategory }) : "";
-  const quoteChangeText = quote ? formatSignedMarketPrice(quote.change, { assetCategory: ticker.metadata.assetCategory }) : "";
+  const quoteOptions = quoteFormatOptions(quote, ticker.metadata.assetCategory, financials?.quoteMetadata?.instrumentType);
+  const quotePriceText = quote ? formatMarketPriceWithCurrency(quote.price, quote.currency, quoteOptions) : "";
+  const quoteChangeText = quote ? formatSignedMarketPrice(quote.change, quoteOptions) : "";
   const quotePercentText = quote ? `(${formatPercentRaw(quote.changePercent)})` : "";
   const quoteTextWidth = Math.max(1, quoteSummaryWidth - (nativePaneChrome ? 6 : 0));
   const stackQuoteChange = displayWidth(quoteChangeText) + 1 + displayWidth(quotePercentText) > quoteTextWidth;
@@ -113,17 +119,8 @@ export function OverviewTab({
     marketCapExchangeRates: effectiveExchangeRates,
   });
   const performanceFields = buildPriceReturnFields(
-    appendQuoteToPriceReturnHistory(financials?.priceHistory ?? [], quote),
-  ).map((field) => {
-    if (field.value != null || field.unavailableReason) return field;
-    if (field.id === "1Y" && fundamentals?.return1Y != null) {
-      return { ...field, value: fundamentals.return1Y };
-    }
-    if (field.id === "3Y" && fundamentals?.return3Y != null) {
-      return { ...field, value: fundamentals.return3Y };
-    }
-    return field;
-  });
+    appendQuoteToPriceReturnHistory(financials?.priceHistory ?? [], historyQuote),
+  );
   const hasPerformance = performanceFields.some((field) => field.value != null || field.unavailableReason);
   const positionRows = buildPositionRows({
     ticker,
@@ -178,10 +175,10 @@ export function OverviewTab({
               <Box flexDirection="row" gap={2}>
                 <Text fg={colors.textDim}>{t("Pre-Market")}:</Text>
                 <Text fg={priceColor(quote.preMarketChange ?? 0)}>
-                  {formatMarketPriceWithCurrency(quote.preMarketPrice, quote.currency, { assetCategory: ticker.metadata.assetCategory })}
+                  {formatMarketPriceWithCurrency(quote.preMarketPrice, quote.currency, quoteOptions)}
                 </Text>
                 <Text fg={priceColor(quote.preMarketChange ?? 0)}>
-                  {formatSignedMarketPrice(quote.preMarketChange, { assetCategory: ticker.metadata.assetCategory })} ({formatPercentRaw(quote.preMarketChangePercent)})
+                  {formatSignedMarketPrice(quote.preMarketChange, quoteOptions)} ({formatPercentRaw(quote.preMarketChangePercent)})
                 </Text>
               </Box>
             )}
@@ -189,10 +186,10 @@ export function OverviewTab({
               <Box flexDirection="row" gap={2}>
                 <Text fg={colors.textDim}>{t("After-Hours")}:</Text>
                 <Text fg={priceColor(quote.postMarketChange ?? 0)}>
-                  {formatMarketPriceWithCurrency(quote.postMarketPrice, quote.currency, { assetCategory: ticker.metadata.assetCategory })}
+                  {formatMarketPriceWithCurrency(quote.postMarketPrice, quote.currency, quoteOptions)}
                 </Text>
                 <Text fg={priceColor(quote.postMarketChange ?? 0)}>
-                  {formatSignedMarketPrice(quote.postMarketChange, { assetCategory: ticker.metadata.assetCategory })} ({formatPercentRaw(quote.postMarketChangePercent)})
+                  {formatSignedMarketPrice(quote.postMarketChange, quoteOptions)} ({formatPercentRaw(quote.postMarketChangePercent)})
                 </Text>
               </Box>
             )}
@@ -203,7 +200,7 @@ export function OverviewTab({
           </Box>
 
           {quote && hasBidAsk && (
-            <QuoteBook quote={quote} assetCategory={ticker.metadata.assetCategory} width={quoteBookWidth} />
+            <QuoteBook quote={quote} assetCategory={quoteOptions.assetCategory} width={quoteBookWidth} />
           )}
         </Box>
 
@@ -221,7 +218,8 @@ export function OverviewTab({
                 label="Day Range"
                 width={rangeWidth}
                 currency={quoteCurrency}
-                assetCategory={ticker.metadata.assetCategory}
+                priceBasis={quote.priceBasis}
+                assetCategory={quoteOptions.assetCategory}
                 markerColor={rangeMarkerColor}
               />
             )}
@@ -233,7 +231,8 @@ export function OverviewTab({
                 label="52W Range"
                 width={rangeWidth}
                 currency={quoteCurrency}
-                assetCategory={ticker.metadata.assetCategory}
+                priceBasis={quote.priceBasis}
+                assetCategory={quoteOptions.assetCategory}
                 markerColor={rangeMarkerColor}
               />
             )}
@@ -278,12 +277,12 @@ export function OverviewTab({
         )}
 
         {/* Sector / Industry / Type */}
-        {(sector || industry || ticker.metadata.assetCategory) && (
+        {(sector || industry || instrumentType) && (
           <Box flexDirection="row" height={1} gap={3}>
-            {ticker.metadata.assetCategory && (
+            {instrumentType && (
               <Box flexDirection="row">
                 <Text fg={colors.textDim}>{t("Type")}: </Text>
-                <Text fg={colors.text}>{ticker.metadata.assetCategory}</Text>
+                <Text fg={colors.text}>{instrumentType}</Text>
               </Box>
             )}
             {sector && (

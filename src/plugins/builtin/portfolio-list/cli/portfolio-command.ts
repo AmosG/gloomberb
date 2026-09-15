@@ -126,9 +126,9 @@ async function setPositionCommand(
   await withMarketData(ctx, async ({ config, store, dataProvider }) => {
     try {
       const portfolio = requireManualPortfolio(config, portfolioName);
-      const ticker = await resolveTickerForCli(symbol, store, dataProvider);
       const shares = parseFiniteNumber(sharesValue, "Shares");
       const avgCost = parseFiniteNumber(avgCostValue, "Average cost");
+      const ticker = await resolveTickerForCli(symbol, store, dataProvider);
       const currency = resolveManualPositionCurrency(rawCurrency, ticker, portfolio, config.baseCurrency);
       const result = setManualPortfolioPosition(ticker, portfolio.id, {
         shares,

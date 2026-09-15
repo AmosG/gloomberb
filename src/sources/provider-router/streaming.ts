@@ -69,7 +69,7 @@ export class ProviderRouterStreamingRoutes {
         targetCount: providerTargets.length,
       });
       unsubscribers.push(streamingProvider.subscribeQuotes(providerTargets, (target, quote) => {
-        if (isProviderQuoteUsableForCurrentSession(quote, target.exchange)) {
+        if (isProviderQuoteUsableForCurrentSession(quote, target.exchange, target.symbol)) {
           onQuote(target, quote);
         }
       }));

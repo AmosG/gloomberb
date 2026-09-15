@@ -7,7 +7,7 @@ import type {
 import { dividendReferencePrice, fetchDividendData, type DividendData } from "./client";
 import type { DividendPayment } from "./types";
 import { formatDividendYield, toDividendRows } from "./view";
-import { formatDistributionAmount } from "../../../utils/format";
+import { formatDistributionAmount, formatPercent } from "../../../utils/format";
 import type { Quote } from "../../../types/financials";
 import { dividendPriceStatus, dividendQuotePriceMetadata } from "./reference-price";
 
@@ -38,7 +38,7 @@ const defaultDependencies: DividendYieldHeadlessDependencies = {
       currentPrice = null;
     }
     const data = await fetchDividendData(symbol, currentPrice, exchange, currentPriceCurrency);
-    if (referenceQuote && dividendReferencePrice(currentPrice, currentPriceCurrency, data.currency ?? "USD") != null) {
+    if (referenceQuote && dividendReferencePrice(currentPrice, currentPriceCurrency, data.currency ?? "") != null) {
       Object.assign(data, dividendQuotePriceMetadata(referenceQuote));
     }
     return data;
@@ -68,10 +68,12 @@ export function projectDividendYieldHeadless(
     };
   });
   const metrics = data.metrics;
-  const currency = data.currency ?? data.payments[0]?.currency ?? "USD";
+  const currency = data.currency ?? data.payments[0]?.currency ?? "";
   const priceStatus = dividendPriceStatus(data.price, data.priceAsOf, data.priceStale);
+  const errors = [data.historyError, data.summaryError].filter((error): error is string => !!error);
 
   return {
+    ...(errors.length > 0 ? { complete: false, errors } : {}),
     sections: [
       {
         title: "Dividend metrics",
@@ -83,11 +85,11 @@ export function projectDividendYieldHeadless(
             : "Reference price time unavailable; cash yield may be out of date." }] : []),
           { label: "Trailing yield", value: metrics.trailingYield, formatted: formatDividendYield(metrics.trailingYield) },
           { label: "Forward yield", value: metrics.forwardYield, formatted: formatDividendYield(metrics.forwardYield) },
-          { label: "Trailing rate", value: metrics.trailingRate, formatted: formatDistributionAmount(metrics.trailingRate ?? undefined, currency) },
-          { label: "Forward rate", value: metrics.forwardRate, formatted: formatDistributionAmount(metrics.forwardRate ?? undefined, currency) },
-          { label: "Payout ratio", value: metrics.payoutRatio },
-          { label: "1Y growth", value: metrics.growth1Y },
-          { label: "3Y growth", value: metrics.growth3Y },
+          { label: "Trailing rate", value: metrics.trailingRate, formatted: currency ? formatDistributionAmount(metrics.trailingRate ?? undefined, currency) : "—" },
+          { label: "Forward rate", value: metrics.forwardRate, formatted: currency ? formatDistributionAmount(metrics.forwardRate ?? undefined, currency) : "—" },
+          { label: "Earnings Payout", value: metrics.payoutRatio, formatted: formatDividendYield(metrics.payoutRatio) },
+          { label: "1Y Cash Growth", value: metrics.growth1Y, formatted: formatPercent(metrics.growth1Y ?? undefined) },
+          { label: "3Y Cash CAGR", value: metrics.growth3Y, formatted: formatPercent(metrics.growth3Y ?? undefined) },
           { label: "Frequency", value: metrics.paymentFrequency },
           { label: "Ex-dividend", value: metrics.exDividendDate },
           { label: "Next pay", value: metrics.nextPayDate },
@@ -108,6 +110,8 @@ export function projectDividendYieldHeadless(
       type,
       currency: data.currency ?? data.payments[0]?.currency ?? null,
       historyAvailable: data.historyAvailable ?? true,
+      historyError: data.historyError ?? null,
+      summaryError: data.summaryError ?? null,
       providerId: data.providerId ?? null,
       historyFetchedAt: data.fetchedAt ?? null,
       historyStale: data.stale ?? null,

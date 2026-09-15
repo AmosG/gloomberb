@@ -14,6 +14,85 @@ afterEach(() => {
 });
 
 describe("13F data cache", () => {
+  test("all browser entry points reconcile additions and restatements without borrowing another period", async () => {
+    const forms: any[] = [
+      { accession_number: "addition", period_of_report: "2026-06-30", table_value_total: 50, table_entry_total: 1,
+        filed_as_of_date: "2026-08-20", submission_type: "13F-HR/A", amendment_type: "NEW HOLDINGS" },
+      { accession_number: "original", period_of_report: "2026-06-30", table_value_total: 100, table_entry_total: 2,
+        filed_as_of_date: "2026-08-14", submission_type: "13F-HR" },
+    ];
+    let latestFilings = forms;
+    setHttpFetchTransport(async (url) => {
+      const request = new URL(String(url));
+      const path = request.pathname.split("/").at(-1);
+      const withManager = (rows: any[]) => rows.map((form) => ({ ...form, cik: "1067983", company_name: "Fund" }));
+      if (path === "forms") return json(withManager(forms.slice(Number(request.searchParams.get("offset") ?? 0), Number(request.searchParams.get("limit")))));
+      if (path === "filings") return json(withManager(latestFilings));
+      if (path === "funds") return json([{ cik: "1067983", name: "Fund" }]);
+      if (path === "topfunds") return json([{ cik: "1067983", name: "Fund", period_of_report: "2026-06-30", pnl: 4 }]);
+      if (path === "tickers") return json([{ cusip: "111111111", ticker: "AAA" }]);
+      if (path === "holders") return json({ period_of_report: "2026-06-30", ciks: ["1067983"] });
+      return json([]);
+    });
+    for (const [tab, query] of [["performance", ""], ["funds", "Fund"], ["funds", "1067983"], ["byTicker", "AAA"], ["latest", "latest"]] as const) {
+      expect((await loadBrowserRows(tab, query)).rows[0]).toMatchObject({ tableValueTotal: 150, tableEntryTotal: 3 });
+    }
+    forms.unshift({ ...forms[1], accession_number: "newer-quarter", period_of_report: "2026-09-30", table_value_total: 900, table_entry_total: 9 });
+    expect((await loadBrowserRows("performance", "")).rows[0]).toMatchObject({ periodOfReport: "2026-06-30", estQuarterReturn: 4, tableValueTotal: 150, tableEntryTotal: 3 });
+    forms.shift();
+    forms.unshift({ ...forms[0], accession_number: "restatement", amendment_type: "RESTATEMENT", filed_as_of_date: "2026-08-21", table_value_total: 20, table_entry_total: 1 });
+    expect((await loadBrowserRows("funds", "Fund")).rows[0]).toMatchObject({ tableValueTotal: 20, tableEntryTotal: 1 });
+    forms[0].amendment_type = undefined;
+    expect((await loadBrowserRows("funds", "Fund")).rows[0]).toMatchObject({ tableValueTotal: null, tableEntryTotal: null });
+    forms.splice(0, 1);
+    forms.pop();
+    expect((await loadBrowserRows("funds", "Fund")).rows[0]).toMatchObject({ tableValueTotal: null, tableEntryTotal: null });
+    latestFilings = [{ ...forms[0], period_of_report: "2026-03-31" }];
+    expect((await loadBrowserRows("latest", "latest")).rows[0]).toMatchObject({ periodOfReport: "2026-03-31", tableValueTotal: null, tableEntryTotal: null });
+  });
+
+  test("a missing prior report preserves current holdings and restores comparisons after refresh", async () => {
+    let failure: "previous" | "current" | null = "previous";
+    setHttpFetchTransport(async (url) => {
+      const request = new URL(String(url));
+      if (request.pathname.endsWith("/forms")) return json([
+        { accession_number: "current", period_of_report: "2026-06-30", table_value_total: 100, table_entry_total: 1, filed_as_of_date: "2026-08-14", submission_type: "13F-HR", cik: "1067983" },
+        { accession_number: "previous", period_of_report: "2026-03-31", table_value_total: 90, table_entry_total: 1, filed_as_of_date: "2026-05-14", submission_type: "13F-HR", cik: "1067983" },
+      ]);
+      const accession = request.searchParams.get("accession_number");
+      if (accession === failure) return new Response("unavailable", { status: 503 });
+      return json([{ accession_number: accession, cik: "1067983", cusip: "111111111", value: accession === "current" ? 100 : 90, ssh_prnamt: 10 }]);
+    });
+    const partial = await loadFundDetail("1067983", "Fund");
+    expect(partial.latestReport).toMatchObject({ complete: true, tableValueTotal: 100 });
+    expect(partial.previousReport?.complete).toBe(false);
+    expect(partial.warnings).toEqual(["2026-03-31: holdings unavailable; comparison unavailable."]);
+    expect(buildFundHoldingRows(partial)[0]).toMatchObject({ value: 100, weight: 1, previousValue: null, estimatedPnl: null, action: "unknown", sharesChange: null });
+    failure = null;
+    const recovered = await loadFundDetail("1067983", "Fund", undefined, { forceRefresh: true });
+    expect(hasComparable13FQuarter(recovered)).toBe(true);
+    expect(buildFundHoldingRows(recovered)[0]).toMatchObject({ value: 100, previousValue: 90, action: "held", sharesChange: 0 });
+    failure = "current";
+    await expect(loadFundDetail("1067983", "Fund", undefined, { forceRefresh: true })).rejects.toThrow("Forms13F 503");
+  });
+
+  test("one failed holder enhancement retains every source CIK and healthy metadata", async () => {
+    setHttpFetchTransport(async (url) => {
+      const request = new URL(String(url));
+      const path = request.pathname.split("/").at(-1);
+      if (path === "tickers") return json([{ cusip: "111111111", ticker: "AAA" }]);
+      if (path === "holders") return json({ period_of_report: "2026-06-30", ciks: ["1", "2"] });
+      if (path === "forms" && request.searchParams.get("cik") === "0000000002") return new Response("unavailable", { status: 503 });
+      return json([{ accession_number: "healthy", cik: "1", company_name: "Healthy Fund", period_of_report: "2026-06-30", filed_as_of_date: "2026-08-14", submission_type: "13F-HR", table_value_total: 100, table_entry_total: 1 }]);
+    });
+    const result = await loadBrowserRows("byTicker", "AAA");
+    expect(result.rows).toHaveLength(2);
+    expect(result.rows[0]).toMatchObject({ cik: "0000000001", name: "Healthy Fund", tableValueTotal: 100 });
+    expect(result.rows[1]).toMatchObject({ cik: "0000000002", name: "0000000002" });
+    expect(result.rows[1]?.tableValueTotal).toBeUndefined();
+    expect(result.warning).toBe("0000000002: filing metadata unavailable.");
+  });
+
   test("keeps performance returns and latest filing metadata in their own reporting periods", async () => {
     let reportedPeriod = "2026-09-30";
     setHttpFetchTransport(async (url) => {

@@ -94,6 +94,10 @@ export interface DataTableProps<
   horizontalPadding?: number;
   fillAvailableWidth?: boolean;
   showHorizontalScrollbar?: boolean;
+  /** Keep the row identifier visible during horizontal scrolling. */
+  freezeFirstColumn?: boolean;
+  /** Append export-only source records after the displayed table. */
+  getExportMetadata?: () => readonly (readonly unknown[])[];
   scrollToIndex?: number | null;
   scrollToIndexAlign?: DataTableScrollAlign;
   scrollToIndexVersion?: number;

@@ -7,6 +7,17 @@ export interface YieldPoint {
   asOf?: string | null;  // FRED observation date, absent on older servers
   stale?: boolean;
   fetchedAt?: string;
+  error?: string;
+}
+
+export function isYieldObservationDate(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === value;
+}
+
+export function yieldCurveErrors(points: readonly YieldPoint[]): string[] {
+  return points.flatMap((point) => point.error ? [`${point.maturity}: ${point.error}`] : []);
 }
 
 export const TREASURY_MATURITIES: Array<{ maturity: string; years: number; seriesId: string }> = [
@@ -42,14 +53,14 @@ export function parseYieldPoints(points: YieldPoint[]): YieldPoint[] {
 export function curveAsOf(points: readonly YieldPoint[]): string | null {
   const available = points.filter((point) => point.yield != null && Number.isFinite(point.yield));
   const date = available[0]?.asOf;
-  return date && available.every((point) => point.asOf === date) ? date : null;
+  return isYieldObservationDate(date) && available.every((point) => point.asOf === date) ? date : null;
 }
 
 export function spreadBasisPoints(points: readonly YieldPoint[]): number | null {
   const y2 = points.find((point) => point.maturity === "2Y");
   const y10 = points.find((point) => point.maturity === "10Y");
   if (y2?.yield == null || y10?.yield == null || !Number.isFinite(y2.yield) || !Number.isFinite(y10.yield)
-    || !y2.asOf || y2.asOf !== y10.asOf) return null;
+    || !isYieldObservationDate(y2.asOf) || y2.asOf !== y10.asOf) return null;
   return Math.round((y10.yield - y2.yield) * 100);
 }
 

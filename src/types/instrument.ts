@@ -1,3 +1,6 @@
+/** Source price convention. Percent-of-par quantities are nominal face amounts;
+ * prices are percentage points per 100 face, independently of contract multiplier. */
+export type PriceBasis = "per-unit" | "percent-of-par";
 
 export interface BrokerContractRef {
   brokerId: string;
@@ -14,6 +17,14 @@ export interface BrokerContractRef {
   strike?: number;
   multiplier?: string;
   tradingClass?: string;
+}
+
+/** Public listing metadata supplied by a selected search result. */
+export interface TickerListingRef {
+  name: string;
+  exchange: string;
+  currency?: string;
+  type: string;
 }
 
 export interface InstrumentSearchResult {

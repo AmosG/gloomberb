@@ -5,19 +5,10 @@ import type { QueryEntry } from "./result-types";
 import { hasLikelyQuoteUnitMismatch } from "../utils/currency-units";
 import { normalizePriceHistory } from "../utils/price-history";
 import { resolveTickerFinancialsQuoteState } from "./quotes/resolution";
+import { instrumentIdentityKey } from "../utils/instrument-identity";
 
 export function buildInstrumentKey(instrument: InstrumentRef): string {
-  const contractKey = instrument.instrument?.conId
-    ?? instrument.instrument?.localSymbol
-    ?? instrument.instrument?.symbol
-    ?? "";
-  return [
-    instrument.symbol.trim().toUpperCase(),
-    (instrument.exchange ?? "").trim().toUpperCase(),
-    instrument.brokerId ?? "",
-    instrument.brokerInstanceId ?? "",
-    contractKey,
-  ].join("|");
+  return instrumentIdentityKey(instrument);
 }
 
 export function toMarketDataContext(instrument: InstrumentRef): MarketDataRequestContext {

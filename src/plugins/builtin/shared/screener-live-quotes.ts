@@ -1,4 +1,5 @@
 import type { QuoteSubscriptionTarget } from "../../../types/data-provider";
+import { publicTickerKey } from "../../../utils/exchanges";
 import type { Quote } from "../../../types/financials";
 import { buildQuoteKey, resolveEntryData } from "../../../market-data/selectors";
 import type { QueryEntry } from "../../../market-data/result-types";
@@ -9,9 +10,9 @@ const STREAM_CONNECTING_GRACE_MS = 15_000;
 export interface ScreenerQuoteRow {
   symbol: string;
   name: string;
-  price: number;
-  change: number;
-  changePercent: number;
+  price: number | null;
+  change: number | null;
+  changePercent: number | null;
   volume: number | null;
   currency: string;
   exchange: string;
@@ -34,8 +35,8 @@ export function buildScreenerQuoteTargets(
     exchange: row.exchange,
     surface: "screener",
     visible: true,
-    selected: row.symbol === selectedSymbol,
-    weight: row.symbol === selectedSymbol ? 100 : 70,
+    selected: row.symbol === selectedSymbol || publicTickerKey(row.symbol, row.exchange) === selectedSymbol,
+    weight: row.symbol === selectedSymbol || publicTickerKey(row.symbol, row.exchange) === selectedSymbol ? 100 : 70,
   }));
 }
 
@@ -66,12 +67,12 @@ export function overlayScreenerQuoteEntries<T extends ScreenerQuoteRow>(
       ...row,
       name: quote.name?.trim() || row.name,
       price: quote.price,
-      change: finite(quote.change) ? quote.change : row.change,
+      change: finite(quote.change) ? quote.change : null,
       changePercent: finite(quote.changePercent)
         ? quote.changePercent
-        : row.changePercent,
-      volume: finite(quote.volume) ? quote.volume : row.volume,
-      currency: quote.currency || row.currency,
+        : null,
+      volume: finite(quote.volume) && quote.volume >= 0 ? quote.volume : null,
+      currency: quote.currency?.trim() || "",
       lastUpdated: quote.lastUpdated,
     };
   });

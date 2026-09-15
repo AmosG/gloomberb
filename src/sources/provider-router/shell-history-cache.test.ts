@@ -24,10 +24,10 @@ test("saved Shell source caches recover across range, broader and detailed paths
     const corrected = good.map((point) => ({ ...point, historySource: { ...point.historySource!, provider: origin } }));
     try {
       for (const [kind, variantKey] of [
-        ["price-history", "exchange=LSE;range=ALL;version=4;calendar=1;granularity=1;unit=GBP"],
-        ["price-history", "exchange=LSE;range=ALL;resolution=1wk;version=4;granularity=1;unit=GBP"],
-        ["price-history", "range=ALL;resolution=1wk;version=4;granularity=1;unit=GBP"],
-        ["detailed-price-history", "exchange=LSE;start=1996-01-01;end=2026-09-10;bar=1wk;version=4;unit=GBP"],
+        ["price-history", "exchange=LSE;range=ALL;version=5;calendar=1;granularity=1;unit=GBP"],
+        ["price-history", "exchange=LSE;range=ALL;resolution=1wk;version=5;granularity=1;unit=GBP"],
+        ["price-history", "range=ALL;resolution=1wk;version=5;granularity=1;unit=GBP"],
+        ["detailed-price-history", "exchange=LSE;start=1996-01-01;end=2026-09-10;bar=1wk;version=5;unit=GBP"],
       ]) store.resources.set({ namespace: "market", kind: kind!, entityKey: ticker, variantKey, sourceKey: `provider:${id}` }, legacy, { cachePolicy: policy });
       let calls = 0;
       const load = async () => { calls++; return corrected; };
@@ -48,7 +48,7 @@ test("saved Shell source caches recover across range, broader and detailed paths
 test("an unavailable or legacy provider response cannot revive poisoned cache; valid independent history still wins", async () => {
   const store = new AppPersistence(createTempDbPath("shell-lineage-fallback"));
   try {
-    const key = { namespace: "market", kind: "price-history", entityKey: "SHEL", variantKey: "exchange=LSE;range=ALL;resolution=1wk;version=4;unit=GBP" };
+    const key = { namespace: "market", kind: "price-history", entityKey: "SHEL", variantKey: "exchange=LSE;range=ALL;resolution=1wk;version=5;unit=GBP" };
     store.resources.set({ ...key, sourceKey: "provider:gloomberb-cloud" }, bad, { cachePolicy: policy });
     for (const [index, load] of [async () => [], async () => bad, async () => { throw Error("controlled offline source"); }].entries()) {
       const router = new AssetDataRouter({ ...fallbackProvider, id: "gloomberb-cloud", getPriceHistoryForResolution: load }, [], store.resources);
@@ -70,12 +70,12 @@ test("modern London, US and Amsterdam histories and broker history are not retir
     for (const [ticker, exchange, points] of [["SHEL", "LSE", modern], ["SHEL", "NYSE", bad], ["SHELL", "AMS", bad]] as const) {
       const unit = exchange === "LSE" ? ";unit=GBP" : "";
       store.resources.set({ namespace: "market", kind: "price-history", entityKey: ticker,
-        variantKey: `exchange=${exchange};range=1Y;resolution=1wk;version=4${unit}`, sourceKey: "provider:yahoo" }, points, { cachePolicy: policy });
+        variantKey: `exchange=${exchange};range=1Y;resolution=1wk;version=5${unit}`, sourceKey: "provider:yahoo" }, points, { cachePolicy: policy });
       const router = new AssetDataRouter({ ...fallbackProvider, id: "yahoo", async getPriceHistoryForResolution() { throw Error("unchanged cache should be reused"); } }, [], store.resources);
       equal(await router.getPriceHistoryForResolution(ticker, exchange, "1Y", "1wk"), points);
     }
     const broker: BrokerAdapter = { id: "ibkr", name: "IBKR", configSchema: [], async validate() { return true; }, async importPositions() { return []; } };
-    store.resources.set({ namespace: "market", kind: "price-history", entityKey: "SHEL", variantKey: "exchange=LSE;range=ALL;resolution=1wk;version=4;unit=GBP", sourceKey: "broker:ibkr:ibkr-work" }, bad, { cachePolicy: policy });
+    store.resources.set({ namespace: "market", kind: "price-history", entityKey: "SHEL", variantKey: "exchange=LSE;range=ALL;resolution=1wk;version=5;unit=GBP", sourceKey: "broker:ibkr:ibkr-work" }, bad, { cachePolicy: policy });
     const router = new AssetDataRouter(fallbackProvider, [], store.resources);
     attachTestRegistry(router, { brokers: [["ibkr", broker]] }); setBrokerInstances(router, [brokerInstance()]);
     equal(await router.getPriceHistoryForResolution("SHEL", "LSE", "ALL", "1wk", { brokerId: "ibkr", brokerInstanceId: "ibkr-work" }), bad);
@@ -116,7 +116,7 @@ test("cadence-verified filtered caches recover missing disclosure only for reque
     const corrected = good.map((point) => ({ ...point, historySource: { ...point.historySource!, provider: origin } }));
     try {
       store.resources.set({ namespace: "market", kind: "price-history", entityKey: "SHEL",
-        variantKey: "exchange=LSE;range=ALL;resolution=1wk;version=4;granularity=1;unit=GBP", sourceKey: "provider:gloomberb-cloud" }, legacy, { cachePolicy: policy });
+        variantKey: "exchange=LSE;range=ALL;resolution=1wk;version=5;granularity=1;unit=GBP", sourceKey: "provider:gloomberb-cloud" }, legacy, { cachePolicy: policy });
       let calls = 0;
       const provider = { ...fallbackProvider, id: "gloomberb-cloud", async getPriceHistoryForResolution() { calls++; return corrected; } };
       const router = new AssetDataRouter(provider, [], store.resources);

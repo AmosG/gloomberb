@@ -70,9 +70,9 @@ test("a slow linked ticker applies its tab to the reused or new pane after hydra
       expect(actions.filter((action) => action.type === "UPDATE_PANE_STATE")).toHaveLength(1);
       expect(actions.find((action) => action.type === "UPDATE_TICKER")).toMatchObject({ ticker: { metadata: { ticker: "VOD:XLON", exchange: "LSE" } } });
       expect(stateRef.current.config.layout.instances.find((pane) => pane.instanceId === paneId)?.binding)
-        .toEqual({ kind: "fixed", symbol: "VOD:XLON" });
+        .toMatchObject({ kind: "fixed", symbol: "VOD:XLON" });
       expect(focused).toEqual([paneId]);
-      expect(layouts).toBe(savedListing === "VOD:XLON" ? 0 : 1);
+      expect(layouts).toBe(1);
       expect(stateRef.current.config.layout.instances.filter((pane) => pane.paneId === TICKER_RESEARCH_PANE_ID))
         .toHaveLength(reusePane ? 1 : 2);
     } finally {

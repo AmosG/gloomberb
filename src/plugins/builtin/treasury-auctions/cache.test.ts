@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { ConnectionHealthRegistry } from "../../../core/connection-health";
 import type { PluginPersistence } from "../../../types/plugin";
+import { MemoryPluginPersistence } from "../../../test-support/plugin-persistence";
+import { fetchAuctionPages } from "./client";
 import {
   attachTreasuryAuctionsPersistence,
   loadTreasuryAuctions,
@@ -55,6 +57,45 @@ afterEach(() => {
 });
 
 describe("loadTreasuryAuctions", () => {
+  test("incomplete pagination cannot overwrite a known board or lose its failure on the next read", async () => {
+    const { persistence, writes } = fakePersistence();
+    attachTreasuryAuctionsPersistence(persistence);
+    const original = await loadTreasuryAuctions(false, async () => [auctionFixture("known")]);
+    const failed = await loadTreasuryAuctions(true, () => fetchAuctionPages(async (page) => page === 1
+      ? { data: [{ security_type: "Note", security_term: "2-Year", auction_date: "2026-09-10" }], meta: { "total-pages": 2 } }
+      : { error: "Invalid page envelope" }));
+    const read = await loadTreasuryAuctions(false, async () => { throw new Error("Fresh cached read must not fetch"); });
+    for (const result of [failed, read]) {
+      expect(result.auctions).toEqual(original.auctions);
+      expect(result.fetchedAt).toBe(original.fetchedAt);
+      expect(result.stale).toBe(true);
+      expect(result.refreshError).toContain("page 2");
+    }
+    expect(writes).toHaveLength(1);
+    const recovered = await loadTreasuryAuctions(true, async () => [auctionFixture("recovered")]);
+    expect(recovered.stale).toBe(false);
+    expect(recovered.refreshError).toBeUndefined();
+    expect((await loadTreasuryAuctions(false)).auctions[0]?.id).toBe("recovered");
+  });
+
+  test("legacy potentially truncated history is replaced while a validated cached board remains usable", async () => {
+    const persistence = new MemoryPluginPersistence();
+    persistence.seedResource("treasury-auctions", "recent:120", [auctionFixture("legacy")], {
+      sourceKey: "treasury-fiscal-data", schemaVersion: 2,
+    });
+    persistence.seedResource("treasury-auctions", "recent:30", [auctionFixture("current")], {
+      sourceKey: "treasury-fiscal-data", schemaVersion: 3,
+    });
+    attachTreasuryAuctionsPersistence(persistence);
+    let calls = 0;
+    const loader = async () => { calls++; return [auctionFixture("complete")]; };
+    const replaced = await loadTreasuryAuctions(false, loader, 120);
+    const current = await loadTreasuryAuctions(false, loader, 30);
+    expect(replaced.auctions[0]?.id).toBe("complete");
+    expect(current.auctions[0]?.id).toBe("current");
+    expect(calls).toBe(1);
+  });
+
   test("serves fresh cache without hitting the network", async () => {
     const { persistence } = fakePersistence({ value: [auctionFixture("cached")], stale: false, expired: false });
     attachTreasuryAuctionsPersistence(persistence);

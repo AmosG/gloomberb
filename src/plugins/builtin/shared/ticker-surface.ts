@@ -1,3 +1,4 @@
+import { publicTickerBindingSymbol } from "../../../tickers/selection";
 import type {
   PaneTemplateContext,
   PaneTemplateCreateOptions,
@@ -113,16 +114,16 @@ export function createTickerSurfacePaneTemplate(
     },
     ...(templateOptions.publicShare ? {
       publicShare: {
-        serialize: ({ pane }) => pane.binding?.kind === "fixed" && pane.binding.symbol.trim()
+        serialize: ({ pane }) => pane.binding?.kind === "fixed" && publicTickerBindingSymbol(pane.binding)
           ? {
             title: pane.title?.trim() || `${titlePrefix} ${pane.binding.symbol}`,
-            data: { symbol: pane.binding.symbol.trim().toUpperCase() },
+            data: { symbol: publicTickerBindingSymbol(pane.binding)! },
           }
           : null,
         restore: (data) => {
           if (Object.keys(data).length !== 1 || typeof data.symbol !== "string") return null;
           const symbol = data.symbol.trim().toUpperCase();
-          return symbol ? { symbol } : null;
+          return symbol ? { symbol, instrument: null } : null;
         },
       },
     } : {}),

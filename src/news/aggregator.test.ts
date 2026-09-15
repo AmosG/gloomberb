@@ -578,3 +578,19 @@ describe("NewsService", () => {
     expect(state.nextCursor).toBe("page-3");
   });
 });
+
+it("retains usable articles and source-owned failure status until a successful replacement", async () => {
+  const service = new NewsService();
+  let failed = true;
+  service.register(newsProvider({ id: "feeds", name: "Feeds", provider: {
+    fetchNews: async () => [],
+    fetchNewsPage: async () => ({ articles: [makeItem({ url: "https://example.com/available" })], error: failed ? "1 of 2 RSS feeds unavailable." : null }),
+  } }));
+  const first = await service.load({ feed: "latest" });
+  expect(first.articles).toHaveLength(1);
+  expect(first.error).toBe("1 of 2 RSS feeds unavailable.");
+  expect(first.phase).toBe("ready");
+  failed = false;
+  expect((await service.load({ feed: "latest" })).error).toBeNull();
+  service.stop();
+});

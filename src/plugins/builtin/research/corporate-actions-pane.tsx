@@ -539,8 +539,8 @@ export function CorporateActionsView({
   }, [reload]);
 
   usePaneFooter(footerPaneId, () => ({
-    info: loadingErrorFooterInfo(loading, error),
-  }), [error, footerPaneId, loading]);
+    info: loadingErrorFooterInfo(loading, error ?? (sourceNotice?.failed ? sourceNotice.text : null)),
+  }), [error, footerPaneId, loading, sourceNotice]);
 
   if (authWall) return <SignInWall
     action={variant === "earnings-estimates" ? "view earnings estimates" : "view corporate actions"}
@@ -562,9 +562,9 @@ export function CorporateActionsView({
       onActivate={(row) => setOpenRowId(row.id)}
       onDetailKeyDown={handleDetailKeyDown}
       rootBefore={rows.length > 0 ? (
-        <Box flexDirection="column" paddingX={1}>
-          {sourceNotice && <Box {...(sourceNotice.failed ? { "data-gloom-status": "error" } : {})}>
-            <Prose width={width - 2} color={sourceNotice.failed ? colors.negative : colors.textDim} text={sourceNotice.text} />
+        <Box flexDirection="column" paddingX={1} {...(sourceNotice?.failed ? { "data-gloom-status": "error" } : {})}>
+          {sourceNotice && !sourceNotice.failed && <Box>
+            <Prose width={width - 2} color={colors.textDim} text={sourceNotice.text} />
           </Box>}
         </Box>
       ) : undefined}

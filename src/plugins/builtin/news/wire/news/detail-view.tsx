@@ -11,19 +11,11 @@ import { useInlineTickers } from "../../../../../state/hooks/inline-tickers";
 import { isPlainKey } from "../../../../../utils/keyboard";
 import { wrapTextLines } from "../../../../../utils/text-wrap";
 import { formatDetailDate } from "../../../../../utils/datetime-format";
+import { mergeNewsArticle } from "../../../../../news/news-model";
 import { formatNewsCategory } from "../categories";
 
 function hasStoryItems(article: MarketNewsItem | null): boolean {
   return (article?.items?.length ?? 0) > 0;
-}
-
-function mergeLoadedArticle(base: MarketNewsItem, loaded: MarketNewsItem | null | undefined): MarketNewsItem {
-  if (!loaded) return base;
-  return {
-    ...base,
-    ...loaded,
-    items: hasStoryItems(loaded) ? loaded.items : base.items,
-  };
 }
 
 export function useNewsArticleDetail(
@@ -31,57 +23,59 @@ export function useNewsArticleDetail(
   loadArticleDetail?: (articleId: string) => Promise<MarketNewsItem | null>,
 ) {
   const [detailArticleId, setDetailArticleId] = useState<string | null>(null);
-  const [loadedArticles, setLoadedArticles] = useState<Map<string, MarketNewsItem>>(() => new Map());
-  const requestedArticleIds = useRef<Set<string>>(new Set());
+  const [request, setRequest] = useState<{
+    base: MarketNewsItem;
+    article?: MarketNewsItem;
+    loading: boolean;
+    error: string | null;
+  } | null>(null);
+  const requestedArticle = useRef<MarketNewsItem | null>(null);
   const baseDetailArticle = useMemo(
-    () => (
-      detailArticleId
-        ? articles.find((article) => article.id === detailArticleId) ?? null
-        : null
-    ),
+    () => articles.find((article) => article.id === detailArticleId) ?? null,
     [articles, detailArticleId],
   );
-  const detailArticle = useMemo(() => (
-    baseDetailArticle && detailArticleId
-      ? mergeLoadedArticle(baseDetailArticle, loadedArticles.get(detailArticleId))
-      : baseDetailArticle
-  ), [baseDetailArticle, detailArticleId, loadedArticles]);
+  // The service owns cached stories. A local completion only belongs to the
+  // exact feed revision that requested it; it must never cover a newer update.
+  const currentRequest = request?.base === baseDetailArticle ? request : null;
+  const detailArticle = currentRequest?.article ?? baseDetailArticle;
 
   useEffect(() => {
-    if (detailArticleId && !baseDetailArticle) {
-      setDetailArticleId(null);
-    }
+    if (detailArticleId && !baseDetailArticle) setDetailArticleId(null);
   }, [baseDetailArticle, detailArticleId]);
 
   useEffect(() => {
-    if (!detailArticleId || !baseDetailArticle || hasStoryItems(detailArticle)) return;
-    if (!loadArticleDetail || requestedArticleIds.current.has(detailArticleId)) return;
-
-    requestedArticleIds.current.add(detailArticleId);
-    void loadArticleDetail(detailArticleId)
-      .then((loadedArticle) => {
-        if (!loadedArticle) return;
-        setLoadedArticles((current) => {
-          const next = new Map(current);
-          next.set(detailArticleId, loadedArticle);
-          return next;
-        });
+    if (!baseDetailArticle || hasStoryItems(baseDetailArticle) || !loadArticleDetail) return;
+    if (requestedArticle.current === baseDetailArticle) return;
+    requestedArticle.current = baseDetailArticle;
+    let active = true;
+    setRequest({ base: baseDetailArticle, loading: true, error: null });
+    void loadArticleDetail(baseDetailArticle.id)
+      .then((article) => {
+        if (!active) return;
+        if (article && article.id !== baseDetailArticle.id) throw new Error("Story detail identity mismatch.");
+        setRequest({ base: baseDetailArticle, article: article ? mergeNewsArticle(baseDetailArticle, article) : undefined, loading: false, error: null });
       })
-      .catch(() => {
-        requestedArticleIds.current.delete(detailArticleId);
+      .catch((error: unknown) => {
+        if (!active) return;
+        setRequest({ base: baseDetailArticle, loading: false, error: error instanceof Error ? error.message : "Story detail unavailable." });
       });
-  }, [baseDetailArticle, detailArticle, detailArticleId, loadArticleDetail]);
+    return () => { active = false; };
+  }, [baseDetailArticle, loadArticleDetail]);
 
   const openArticle = useCallback((article: MarketNewsItem) => {
+    requestedArticle.current = null;
     setDetailArticleId(article.id);
   }, []);
-
   const closeDetail = useCallback(() => {
+    requestedArticle.current = null;
     setDetailArticleId(null);
+    setRequest(null);
   }, []);
 
   return {
     detailArticle,
+    detailLoading: currentRequest?.loading ?? false,
+    detailError: currentRequest?.error ?? null,
     openArticle,
     closeDetail,
   };
@@ -198,8 +192,11 @@ export function NewsDetailView({ item, focused, width, showTitle = true }: {
     () => item.categories.map(formatNewsCategory).filter(Boolean).join(" · "),
     [item.categories],
   );
-  const lastUpdatedAt = timelineItems[0]?.publishedAt ?? item.publishedAt;
-  const lastUpdatedStr = formatDetailDate(storyItemDate(lastUpdatedAt));
+  const lastUpdatedAt = new Date(Math.max(
+    storyItemDate(item.publishedAt).getTime(),
+    storyItemDate(timelineItems[0]?.publishedAt ?? item.publishedAt).getTime(),
+  ));
+  const lastUpdatedStr = formatDetailDate(lastUpdatedAt);
 
   const scrollBy = useCallback((delta: number) => {
     const scrollBox = scrollRef.current;

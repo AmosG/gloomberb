@@ -10,7 +10,7 @@ let changeLoader: (next: Loader) => void;
 
 afterEach(() => setup?.renderer.destroy());
 
-async function mount(loader: Loader, clearOnError = false) {
+async function mount(loader: Loader, clearOnError: boolean | ((error: unknown) => boolean) = false) {
   function Probe() {
     const [request, setRequest] = useState(() => loader);
     changeLoader = (next) => setRequest(() => next);
@@ -67,7 +67,7 @@ test.each([false, true])("refresh failure clears data only when configured: %s",
   expect(resource).toMatchObject({
     data: clearOnError ? null : "cached",
     loading: false,
-    error: "",
+    error: "Request failed",
     status: "error",
   });
 });
@@ -80,4 +80,27 @@ test("a new security cannot display the previous security's loaded data while pe
   expect(resource).toMatchObject({ data: null, updatedAt: null, loading: true, error: null });
   await act(async () => { next.reject(new Error("MSFT unavailable")); });
   expect(resource).toMatchObject({ data: null, updatedAt: null, loading: false, error: "MSFT unavailable" });
+});
+
+test("error policy retains the original retrieval time through an outage and clears it with denied data", async () => {
+  let failure: Error | null = null;
+  const seen: unknown[] = [];
+  await mount(async () => {
+    if (failure) throw failure;
+    return "known research";
+  }, (error) => {
+    seen.push(error);
+    return error instanceof Error && error.message === "Access denied";
+  });
+  const retrievedAt = resource.updatedAt;
+  expect(retrievedAt).not.toBeNull();
+  const outage = new Error("Provider timed out");
+  failure = outage;
+  await act(async () => { await resource.reload(); });
+  expect(resource).toMatchObject({ data: "known research", updatedAt: retrievedAt, error: outage.message });
+  const denial = new Error("Access denied");
+  failure = denial;
+  await act(async () => { await resource.reload(); });
+  expect(resource).toMatchObject({ data: null, updatedAt: null, error: denial.message });
+  expect(seen).toEqual([outage, denial]);
 });

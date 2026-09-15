@@ -10,10 +10,12 @@ const DEFAULT_TICKER_METADATA: Omit<TickerMetadata, "ticker" | "exchange" | "cur
 };
 
 function hydratePosition(raw: Record<string, unknown>): TickerPosition {
+  const avgCost = Object.hasOwn(raw, "avgCost") ? raw.avgCost : raw.avg_cost;
   return {
     portfolio: (raw.portfolio as string) ?? "",
     shares: (raw.shares as number) ?? 0,
-    avgCost: (raw.avgCost ?? raw.avg_cost) as number ?? 0,
+    avgCost: typeof avgCost === "number" && Number.isFinite(avgCost) ? avgCost : undefined,
+    priceBasis: raw.priceBasis === "per-unit" || raw.priceBasis === "percent-of-par" ? raw.priceBasis : undefined,
     currency: (raw.currency as string) ?? undefined,
     dateAcquired: (raw.dateAcquired ?? raw.date_acquired) as string | undefined,
     broker: (raw.broker as string) ?? "manual",
@@ -25,6 +27,7 @@ function hydratePosition(raw: Record<string, unknown>): TickerPosition {
     brokerInstanceId: (raw.brokerInstanceId ?? raw.broker_instance_id) as string | undefined,
     brokerAccountId: (raw.brokerAccountId ?? raw.broker_account_id) as string | undefined,
     brokerContractId: (raw.brokerContractId ?? raw.broker_contract_id) as number | undefined,
+    brokerContractIdentity: typeof raw.brokerContractIdentity === "string" ? raw.brokerContractIdentity : undefined,
   };
 }
 

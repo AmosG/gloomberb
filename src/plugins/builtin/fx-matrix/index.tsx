@@ -9,6 +9,7 @@ import {
 } from "../../../components";
 import { getSharedMarketDataCoordinator } from "../../../market-data/coordinator";
 import { useFxRatesMap } from "../../../market-data/hooks";
+import { resolveEntryData } from "../../../market-data/selectors";
 import { usePaneSettingValue } from "../../../state/app/context";
 import { colors } from "../../../theme/colors";
 import type { PaneProps } from "../../../types/plugin";
@@ -19,6 +20,7 @@ import { summarizeFxRates, fxStatusLabel } from "../../../utils/fx-status";
 import type { PluginModule } from "../plugin-module";
 import { useAutoRefresh, useUpdatedAgo } from "../shared/auto-refresh";
 import { MAJOR_CURRENCIES, formatRate, resolveCurrencies, type MajorCurrency } from "./pairs";
+import { createFxExportMetadata } from "./export";
 
 const FX_MATRIX_PANE_ID = "fx-matrix";
 /** Stable identity: a fresh literal here would reload the board every render. */
@@ -33,7 +35,15 @@ function FxMatrixPane({ focused, width, height }: PaneProps) {
   const [selectedCurrency, setSelectedCurrency] = useState<string | null>(null);
 
   const rates = useFxRatesMap(currencies);
-  const status = summarizeFxRates(currencies, rates, (currency) => getSharedMarketDataCoordinator()?.getFxEntry(currency));
+  // Export the provenance of this render's rates, even if a provider response
+  // arrives before React commits the next render and the user exports now.
+  const rateEntries = new Map(currencies.map((currency) => {
+    const entry = getSharedMarketDataCoordinator()?.getFxEntry(currency);
+    return [currency as string, entry && resolveEntryData(entry) === (rates.get(currency) ?? null)
+      ? { ...entry, error: entry.error ? { ...entry.error } : null }
+      : undefined] as const;
+  }));
+  const status = summarizeFxRates(currencies, rates, (currency) => rateEntries.get(currency));
   const statusText = fxStatusLabel(status);
 
   const refresh = useCallback(() => {
@@ -117,6 +127,9 @@ function FxMatrixPane({ focused, width, height }: PaneProps) {
       rootWidth={width}
       rootHeight={height}
       columns={columns}
+      freezeFirstColumn
+      getExportMetadata={() => createFxExportMetadata(currencies, rates,
+        (currency) => rateEntries.get(currency))}
       items={dataProvider ? currencies : []}
       sortColumnId={null}
       sortDirection="asc"
