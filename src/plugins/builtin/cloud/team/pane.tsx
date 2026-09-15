@@ -458,7 +458,9 @@ export function TeamPane({ focused, width, height, close }: PaneProps) {
         setSection(target.value);
       }
     }
-  }, { allowEditable: true });
+    // "before": the app cycles panes on Tab in the normal phase; inside this
+    // pane Tab walks the ring instead, like the composer and quick-add do.
+  }, { allowEditable: true, phase: "before" });
 
   const hints = useMemo<PaneHint[]>(() => {
     if (!signedIn) return [];
