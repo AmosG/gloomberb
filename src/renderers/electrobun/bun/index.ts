@@ -1,4 +1,5 @@
 import Electrobun, { ApplicationMenu, BrowserView, BrowserWindow, Utils } from "electrobun/bun";
+import { debugLog } from "../../../utils/debug-log";
 import {
   APP_SESSION_ID,
   APP_SESSION_SCHEMA_VERSION,
@@ -37,8 +38,10 @@ import {
 import { MAIN_WINDOW_RPC_KEY } from "./window/focus";
 import { handleHttpFetch } from "./desktop/http-fetch";
 import {
+  activateExternalPlugin,
   bundleExternalPluginDirectory,
   collectExternalPluginBundles,
+  deactivateExternalPlugin,
   installExternalPlugin,
   removeExternalPlugin,
   updateExternalPlugin,
@@ -75,6 +78,11 @@ type DesktopRpc = ReturnType<typeof BrowserView.defineRPC<ElectrobunDesktopRpcSc
 console.log = (...args) => console.error(...args);
 console.info = (...args) => console.error(...args);
 console.warn = (...args) => console.error(...args);
+
+// The Bun process has no Debug pane. An error logged here, such as a plugin
+// that failed to import, would otherwise be invisible outside the view's
+// marketplace row; the launcher log is where a desktop user can look.
+debugLog.mirrorToConsole({ minLevel: "error" });
 
 setConfigStoreHost(nodeConfigStoreHost);
 
@@ -497,6 +505,10 @@ async function handleBackendRequest(
       return removeExternalPlugin(request.payload.directory);
     case "plugins.bundle":
       return bundleExternalPluginDirectory(request.payload.directory);
+    case "plugins.activate":
+      return activateExternalPlugin(requireServices().pluginRegistry, request.payload.directory);
+    case "plugins.deactivate":
+      return deactivateExternalPlugin(requireServices().pluginRegistry, request.payload.pluginId);
     case "host.restart":
     case "host.exit":
     case "host.windowControl":

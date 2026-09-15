@@ -1,18 +1,25 @@
 import { readdir, rm, stat } from "fs/promises";
 import { existsSync, lstatSync } from "fs";
-import { join } from "path";
+import { basename, join } from "path";
 
-import type { DesktopExternalPluginBundle, DesktopPluginOperationResult, DesktopPluginPin } from "../shared/protocol";
+import type {
+  DesktopExternalPluginBundle,
+  DesktopPluginActivationResult,
+  DesktopPluginOperationResult,
+  DesktopPluginPin,
+} from "../shared/protocol";
 import { bundleExternalPlugin, pluginBundleCacheDir } from "../../../plugins/bundle";
 import { linkHostPackages } from "../../../plugins/host-link";
 import {
   getPluginCacheDir,
   getPluginsDir,
-  isDirectoryOrLink,
-  isPluginDirectory,
+  listPluginDirectories,
+  loadExternalPlugin,
   readPluginCommit,
   resolvePluginEntry,
 } from "../../../plugins/loader";
+import type { PluginRegistry } from "../../../plugins/registry";
+import { desktopRendererCapabilityManifests } from "./desktop/initialization";
 import type { GloomPlugin } from "../../../types/plugin";
 import { debugLog } from "../../../utils/debug-log";
 
@@ -93,7 +100,8 @@ async function bundlePluginDirectory(
   const base = {
     id: plugin?.id ?? directory,
     name: plugin?.name ?? directory,
-    version: plugin?.version ?? "0.0.0",
+    // Empty rather than a made-up number when the plugin could not be read.
+    version: plugin?.version ?? "",
     path: pluginDir,
     directory,
     ...(commit ? { commit } : {}),
@@ -108,7 +116,7 @@ async function bundlePluginDirectory(
   // Skip compiling something the desktop cannot run anyway; the marketplace
   // still lists it, explaining why it is inert.
   if (plugin.targets && !plugin.targets.includes("desktop")) {
-    return { ...base, error: `${plugin.name} does not support the desktop app.` };
+    return { ...base, unsupportedTarget: "desktop" };
   }
 
   try {
@@ -159,9 +167,10 @@ export async function collectExternalPluginBundles(): Promise<DesktopExternalPlu
   await removeLegacyBundleCache(pluginsDir);
   const bundles: DesktopExternalPluginBundle[] = [];
 
-  for (const entry of await readdir(pluginsDir, { withFileTypes: true })) {
-    if (!isPluginDirectory(entry.name) || !isDirectoryOrLink(entry, join(pluginsDir, entry.name))) continue;
-    const bundle = await bundlePluginDirectory(pluginsDir, entry.name);
+  // Links every folder before reading any: a plugin that imports a sibling
+  // needs the sibling linked too, whichever of them is read first.
+  for (const pluginDir of await listPluginDirectories(pluginsDir)) {
+    const bundle = await bundlePluginDirectory(pluginsDir, basename(pluginDir));
     if (bundle) bundles.push(bundle);
   }
 
@@ -212,4 +221,51 @@ export function removeExternalPlugin(directory: string): Promise<DesktopPluginOp
     await removePlugin(directory, { quiet: true });
     return { directory };
   });
+}
+
+/**
+ * Registers a plugin in this process after startup.
+ *
+ * The view registers the same plugin for its panes and commands, but a
+ * capability or broker call from the view is forwarded here, to the registry
+ * built when the app launched. Without this step a plugin installed from the
+ * marketplace would render its panes and fail on its first data request until
+ * a relaunch. An update replaces the running registration; the module is
+ * imported fresh so the new code is what registers.
+ */
+export async function activateExternalPlugin(
+  registry: PluginRegistry,
+  directory: string,
+): Promise<DesktopPluginActivationResult> {
+  const pluginDir = join(getPluginsDir(), directory);
+  const loaded = await loadExternalPlugin(pluginDir, "desktop", { fresh: true });
+  if (!loaded) return { ok: false, error: "The plugin has no entry file." };
+  if (loaded.error) return { ok: false, error: loaded.error };
+  if (loaded.unsupportedTarget) return { ok: false, error: `${loaded.plugin.name} does not run on the desktop.` };
+
+  const pluginId = loaded.plugin.id;
+  try {
+    if (registry.allPlugins.has(pluginId)) registry.unregister(pluginId);
+    await registry.register(loaded.plugin);
+    log.info(`Activated ${pluginId} v${loaded.plugin.version ?? "?"} in the Bun process`);
+    return { ok: true, pluginId, capabilityManifests: desktopRendererCapabilityManifests(registry.capabilities) };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    log.error(`Activating ${pluginId} failed: ${message}`);
+    return { ok: false, error: message };
+  }
+}
+
+export function deactivateExternalPlugin(
+  registry: PluginRegistry,
+  pluginId: string,
+): { capabilityManifests: ReturnType<typeof desktopRendererCapabilityManifests> } {
+  if (registry.allPlugins.has(pluginId)) {
+    try {
+      registry.unregister(pluginId);
+    } catch (error) {
+      log.error(`Deactivating ${pluginId} failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  return { capabilityManifests: desktopRendererCapabilityManifests(registry.capabilities) };
 }

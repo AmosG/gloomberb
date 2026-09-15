@@ -21,8 +21,11 @@ export interface MarketplaceHost {
    * be registered, in which case the entry is kept with that error attached.
    */
   activate(entry: LoadedExternalPlugin): Promise<void>;
-  /** Hides the plugin's panes and unregisters it, ahead of removing its files. */
-  deactivate(pluginId: string): Promise<void>;
+  /**
+   * Hides the plugin's panes and unregisters it, ahead of removing its files.
+   * The folder identifies an install that never produced an id.
+   */
+  deactivate(pluginId: string, directory?: string): Promise<void>;
   /** What a registered plugin actually added, for "open what it added" and the detail view. */
   contributions(pluginId: string): PluginContributions;
 }
@@ -71,6 +74,15 @@ export interface PluginManager {
    * activated without a restart. Null when the directory has no plugin entry.
    */
   load(directory: string): Promise<LoadedExternalPlugin | null>;
+  /**
+   * Registers the plugin wherever its capabilities and brokers execute when
+   * that is not this renderer. The desktop view renders panes, but forwards
+   * data calls to its Bun process, which keeps its own registry; without this
+   * an installed plugin would draw its pane and fail on the first request.
+   * The terminal is one process and leaves it out.
+   */
+  activate?(directory: string): Promise<{ ok: true } | { ok: false; error: string }>;
+  deactivate?(pluginId: string): Promise<void>;
 }
 
 let manager: PluginManager | null = null;

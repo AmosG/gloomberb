@@ -191,6 +191,16 @@ export function getElectrobunBackendInitSnapshot(): ElectrobunBackendInit | null
   return initSnapshot;
 }
 
+/**
+ * The registry reads capability manifests from the init snapshot, which is
+ * what the Bun process had at launch. A plugin activated there afterwards
+ * hands back the new set, and this is how the view adopts it.
+ */
+export function replaceElectrobunCapabilityManifests(manifests: ElectrobunBackendInit["capabilityManifests"]): void {
+  if (!initSnapshot) return;
+  initSnapshot = { ...initSnapshot, capabilityManifests: manifests };
+}
+
 export function setElectrobunRemoteRequestHandler(handler: RemoteControlRequestHandler | null): () => void {
   remoteControlRequestHandler = handler;
   return () => {

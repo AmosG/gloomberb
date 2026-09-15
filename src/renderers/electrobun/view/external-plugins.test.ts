@@ -10,7 +10,7 @@ import type { DesktopExternalPluginBundle } from "../shared/protocol";
  * starting. Every case here is one a user can hit by installing a bad plugin.
  */
 function bundle(overrides: Partial<DesktopExternalPluginBundle>): DesktopExternalPluginBundle {
-  return { id: "x", name: "X", version: "1.0.0", path: "/tmp/x", ...overrides };
+  return { id: "x", name: "X", version: "1.0.0", path: "/tmp/x", directory: "x", ...overrides };
 }
 
 describe("loadDesktopExternalPlugins", () => {
@@ -31,6 +31,18 @@ describe("loadDesktopExternalPlugins", () => {
     const [entry] = await loadDesktopExternalPlugins([bundle({ id: "empty" })]);
 
     expect(entry?.error).toContain("no bundle");
+  });
+
+  test("keeps a terminal-only plugin apart from the broken ones", async () => {
+    // IBKR Gateway declares cli and tui on purpose. Reporting that as a load
+    // error made the marketplace call a working install "failed".
+    const [entry] = await loadDesktopExternalPlugins([
+      bundle({ id: "ibkr-gateway", targets: ["cli", "tui"], unsupportedTarget: "desktop" }),
+    ]);
+
+    expect(entry?.error).toBeUndefined();
+    expect(entry?.unsupportedTarget).toBe("desktop");
+    expect(entry?.plugin.targets).toEqual(["cli", "tui"]);
   });
 
   test("keeps loading the rest after one plugin fails", async () => {

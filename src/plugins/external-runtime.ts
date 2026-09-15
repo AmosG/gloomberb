@@ -50,8 +50,15 @@ export function upsertExternalPlugin(entry: LoadedExternalPlugin): void {
   notify();
 }
 
-export function removeExternalPlugin(pluginId: string): void {
-  const next = entries.filter((entry) => entry.plugin.id !== pluginId);
+/**
+ * Drops the entry for a plugin id, or for a folder: a plugin that failed to
+ * import only has its folder to be addressed by, and the id the marketplace
+ * knows it under is the registry's.
+ */
+export function removeExternalPlugin(pluginId: string, directory?: string): void {
+  const next = entries.filter((entry) => (
+    entry.plugin.id !== pluginId && (!directory || entry.directory !== directory)
+  ));
   if (next.length === entries.length) return;
   entries = next;
   notify();

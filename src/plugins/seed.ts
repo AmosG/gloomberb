@@ -19,8 +19,8 @@ const log = debugLog.createLogger("plugin-seed");
 export const EXTRACTED_PLUGINS = [
   { id: "tv", repo: "gloom-sh/gloom-tv", directory: "gloom-tv", previousOwnerIds: ["macro", "macro-tv"] },
   { id: "substack", repo: "gloom-sh/gloom-substack", directory: "gloom-substack" },
-  { id: "ibkr", repo: "gloom-sh/gloomberb-ibkr", directory: "gloomberb-ibkr" },
-  { id: "ibkr-gateway", repo: "gloom-sh/gloomberb-ibkr-gateway", directory: "gloomberb-ibkr-gateway" },
+  { id: "ibkr", repo: "gloom-sh/gloom-ibkr", directory: "gloom-ibkr" },
+  { id: "ibkr-gateway", repo: "gloom-sh/gloom-ibkr-gateway", directory: "gloom-ibkr-gateway" },
   { id: "public", repo: "gloom-sh/gloom-public", directory: "gloom-public" },
   { id: "robinhood", repo: "gloom-sh/gloom-robinhood", directory: "gloom-robinhood" },
   { id: "simplefin", repo: "gloom-sh/gloom-simplefin", directory: "gloom-simplefin" },

@@ -94,15 +94,30 @@ describe("mergeCatalog", () => {
   });
 
   test("flags a plugin the current renderer cannot run without calling it uninstalled", () => {
+    // The loader reports the mismatch from the installed code's own targets.
     const [entry] = mergeCatalog({
       registry: [registryPlugin({ id: "ibkr-gateway", targets: ["cli", "tui", "desktop"] })],
-      installed: [installedPlugin({ id: "ibkr-gateway" })],
+      installed: [installedPlugin({ id: "ibkr-gateway", unsupportedTarget: "web" })],
       target: "web",
     });
 
     expect(entry?.installed).toBe(true);
     expect(entry?.unsupportedHere).toBe(true);
     expect(unsupportedLabel(entry!)).toBe("Not on web");
+  });
+
+  test("believes a plugin that loaded here over a feed that says it should not have", () => {
+    // The installed code declares desktop; the feed is a release behind and
+    // still lists cli and tui. The pane was calling a running plugin
+    // "terminal only".
+    const [entry] = mergeCatalog({
+      registry: [registryPlugin({ id: "ibkr-gateway", targets: ["cli", "tui"] })],
+      installed: [installedPlugin({ id: "ibkr-gateway" })],
+      target: "desktop",
+    });
+
+    expect(entry?.unsupportedHere).toBe(false);
+    expect(statusOf(entry!).kind).toBe("enabled");
   });
 
   test("names the one renderer a plugin is limited to", () => {
@@ -158,6 +173,45 @@ describe("mergeCatalog", () => {
 
     expect(entry?.loadError).toBe("SyntaxError");
     expect(statusOf(entry!).kind).toBe("failed");
+  });
+
+  test("puts a failed import on the registry row it was installed from", () => {
+    // The loader cannot read an id from a module that does not evaluate, so it
+    // reports the folder. Left unmatched, the user sees the plugin they just
+    // installed as still available, plus an unlisted "gloomberb-adjacent" that
+    // failed: two rows for one broken install.
+    const entries = mergeCatalog({
+      registry: [registryPlugin({ id: "adjacent-indices", repo: "Lucas-Kohorst/gloomberb-adjacent" })],
+      installed: [installedPlugin({
+        id: "gloomberb-adjacent",
+        name: "gloomberb-adjacent",
+        version: "",
+        directory: "gloomberb-adjacent",
+        loadError: "Cannot find module 'gloomberb/plugins'",
+      })],
+      target: "tui",
+    });
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.id).toBe("adjacent-indices");
+    expect(entries[0]?.installed).toBe(true);
+    expect(entries[0]?.directory).toBe("gloomberb-adjacent");
+    expect(statusOf(entries[0]!).kind).toBe("failed");
+    expect(versionLabel(entries[0]!)).toBe("");
+  });
+
+  test("matches by id before folder, so a shared folder name cannot steal a plugin that reports its id", () => {
+    const entries = mergeCatalog({
+      registry: [
+        registryPlugin({ id: "fork", repo: "someone/gloom-thing" }),
+        registryPlugin({ id: "thing", repo: "gloom-sh/gloom-thing" }),
+      ],
+      installed: [installedPlugin({ id: "thing", directory: "gloom-thing" })],
+      target: "tui",
+    });
+
+    expect(entries.find((entry) => entry.id === "thing")?.installed).toBe(true);
+    expect(entries.find((entry) => entry.id === "fork")?.installed).toBe(false);
   });
 });
 
