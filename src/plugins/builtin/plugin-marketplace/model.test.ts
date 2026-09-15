@@ -94,15 +94,30 @@ describe("mergeCatalog", () => {
   });
 
   test("flags a plugin the current renderer cannot run without calling it uninstalled", () => {
+    // The loader reports the mismatch from the installed code's own targets.
     const [entry] = mergeCatalog({
       registry: [registryPlugin({ id: "ibkr-gateway", targets: ["cli", "tui", "desktop"] })],
-      installed: [installedPlugin({ id: "ibkr-gateway" })],
+      installed: [installedPlugin({ id: "ibkr-gateway", unsupportedTarget: "web" })],
       target: "web",
     });
 
     expect(entry?.installed).toBe(true);
     expect(entry?.unsupportedHere).toBe(true);
     expect(unsupportedLabel(entry!)).toBe("Not on web");
+  });
+
+  test("believes a plugin that loaded here over a feed that says it should not have", () => {
+    // The installed code declares desktop; the feed is a release behind and
+    // still lists cli and tui. The pane was calling a running plugin
+    // "terminal only".
+    const [entry] = mergeCatalog({
+      registry: [registryPlugin({ id: "ibkr-gateway", targets: ["cli", "tui"] })],
+      installed: [installedPlugin({ id: "ibkr-gateway" })],
+      target: "desktop",
+    });
+
+    expect(entry?.unsupportedHere).toBe(false);
+    expect(statusOf(entry!).kind).toBe("enabled");
   });
 
   test("names the one renderer a plugin is limited to", () => {

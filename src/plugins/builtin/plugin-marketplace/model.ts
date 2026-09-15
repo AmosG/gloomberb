@@ -199,15 +199,17 @@ export function mergeCatalog(options: {
       errorCount: local?.errorCount ?? 0,
       lastError: local?.lastError,
       needsRestart: local?.needsRestart === true,
-      // Part of the build, or loaded here: either way it runs wherever the
-      // build does, and only its own targets can say otherwise. The web app
-      // compiles the web-capable plugins into itself, so a local entry is the
-      // answer to "does this run here" even for one the feed calls installable.
-      // Anything absent needs a renderer that loads plugins from outside the
-      // build, which the web app does not, whatever the plugin declares.
-      unsupportedHere: plugin.bundled || (!!local && !local.unsupportedTarget)
-        ? !plugin.targets.includes(target)
-        : !runsExternalPlugins(target) || !plugin.targets.includes(target),
+      // A plugin this renderer loaded is the answer to "does it run here":
+      // the loader already applied the targets the installed code declares,
+      // which may be newer than what the feed says. Part of the build without
+      // a local report, only the feed's targets can say. Anything absent needs
+      // a renderer that loads plugins from outside the build, which the web
+      // app does not, whatever the plugin declares.
+      unsupportedHere: local
+        ? !!local.unsupportedTarget
+        : plugin.bundled
+          ? !plugin.targets.includes(target)
+          : !runsExternalPlugins(target) || !plugin.targets.includes(target),
       section: sectionOf(base),
     });
   }
