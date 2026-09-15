@@ -8,6 +8,7 @@ import { TextAttributes } from "../../../ui";
 import { apiClient } from "../../../api-client";
 import { PluginRenderProvider } from "../../runtime";
 import { gloomberbCloudPlugin } from "../cloud";
+import { TeamStatusWidget } from "../cloud/team/status-widget";
 import { teamStore } from "../cloud/team/store";
 import { formatChatPaneTitle } from "./channel-labels";
 import { ChatContent } from "./content";
@@ -724,6 +725,26 @@ describe("team channels in the sidebar", () => {
     expect(header).toBeGreaterThan(-1);
     expect(lines[header + 1]).toContain("general");
     expect(lines.findIndex((line) => line.includes("everyone"))).toBeLessThan(header);
+  });
+
+  test("the status chip mounts against the live chat controller and shows unread", async () => {
+    // chatController.getSnapshot() builds a fresh object per call; the chip
+    // must not feed it to useSyncExternalStore or React loops at startup.
+    (teamStore as any).update({ teams: [macroDesk] });
+    const previousChannelStates = chatController.getSnapshot().channelStates;
+    function Chip() {
+      return (
+        <PluginRenderProvider pluginId="gloomberb-cloud" runtime={createTestPluginRuntime()}>
+          <TeamStatusWidget />
+        </PluginRenderProvider>
+      );
+    }
+    await act(async () => {
+      testSetup = await testRender(<Chip />, { width: 40, height: 3 });
+    });
+    await flushFrame();
+    expect(setup().captureCharFrame()).toContain("MD");
+    expect(chatController.getSnapshot().channelStates).toEqual(previousChannelStates);
   });
 
   test("pane titles carry the team prefix", () => {

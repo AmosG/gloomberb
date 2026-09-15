@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { Button } from "../../../../components/ui/button";
 import { colors } from "../../../../theme/colors";
 import { Box, Span, Text, TextAttributes } from "../../../../ui";
@@ -18,14 +18,22 @@ export function TeamStatusWidget() {
     (onChange) => teamStore.subscribe(onChange),
     () => teamStore.getSnapshot(),
   );
-  const chat = useSyncExternalStore(
-    (onChange) => chatController.subscribe(onChange),
-    () => chatController.getSnapshot(),
-  );
+  // The chat controller builds a fresh snapshot per call, so it cannot back
+  // useSyncExternalStore; subscribe and keep only what the chips show.
+  const [unreadByChannel, setUnreadByChannel] = useState<ReadonlyMap<string, number>>(() => new Map());
+  useEffect(() => chatController.subscribe((chat) => {
+    setUnreadByChannel((previous) => {
+      const next = new Map<string, number>();
+      for (const state of chat.channelStates) {
+        if (state.channelId.startsWith("team:") && state.unreadCount > 0) next.set(state.channelId, state.unreadCount);
+      }
+      if (next.size === previous.size && [...next].every(([id, count]) => previous.get(id) === count)) return previous;
+      return next;
+    });
+  }), []);
   if (snapshot.teams.length === 0) return null;
 
   const updates = countTeamUpdates(snapshot.notifications);
-  const unreadByChannel = new Map(chat.channelStates.map((state) => [state.channelId, state.unreadCount]));
 
   return (
     <Box flexDirection="row" paddingRight={1}>
