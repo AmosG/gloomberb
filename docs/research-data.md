@@ -70,7 +70,7 @@ Market capitalization can come from a financial snapshot when a current quote do
 
 Relative Valuation excludes explicitly stale quote prices, changes, and quote market caps from comparisons. Its exports retain the original quote, source timestamp and stale status, and identify incomplete output. Separately reported fundamentals and fallback market caps retain their own source and retrieval time; these are not dated by the rejected quote.
 
-Bank capital metrics and REIT FFO/AFFO depend on source coverage. Operating cash flow is not a substitute for FFO/AFFO. Missing measures are identified in the financial view.
+Bank capital metrics and REIT FFO/AFFO depend on source coverage. Operating cash flow is not a substitute for FFO/AFFO. Missing measures are available through the financial view’s warning indicator.
 
 ## Insider filings
 
@@ -79,6 +79,12 @@ INS retains Form 4 and Form 4/A disclosures separately, with their filing access
 [SEC Form 4, General Instruction 9](https://www.sec.gov/files/form4.pdf) permits amendments that add lines, correct particular lines or explain other changes. Unchanged original lines need not be repeated. The original filing date and owner CIKs can narrow the potentially affected filings, but do not identify transaction lines to replace. INS therefore keeps the disclosures as filed without inventing replacement or additive transactions. Affected security/side totals are unavailable; independent filings remain usable. Missing amendment identity broadens the uncertain scope. Unknown prices remain unknown, and the 90-day summary still covers only loaded non-derivative purchases and sales.
 
 Amendment status uses the existing footer. Headless reports retain the candidate original accessions and mark affected output incomplete, including an amendment that contains explanations without transaction lines. Owner filtering preserves amendment context for the selected owner's original filings. The loaded window is limited; this is disclosure history, not a reconstructed position ledger or a guarantee that every later amendment has been loaded.
+
+## Institutional holdings
+
+For 13F option positions, reported values and shares refer to the underlying security. The 13F percentage is the share of reported value, not an option premium or portfolio delta. The position type remains identified in the holdings table, and exports retain this value basis.
+
+Incomplete filing coverage and unreconciled amendments appear in the pane’s warning indicator; open it to inspect the affected reporting periods and filings.
 
 ## Treasury auctions
 

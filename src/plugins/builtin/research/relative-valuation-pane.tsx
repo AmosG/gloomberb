@@ -1,11 +1,11 @@
 import { formatPriceEarnings } from "../../../utils/price-earnings";
 import { describeFundamentalMarketCap } from "../../../utils/market-capitalization";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Box, TextAttributes } from "../../../ui";
+import { TextAttributes } from "../../../ui";
 import {
   DataTableView,
-  Prose,
   usePaneFooter,
+  usePaneNoticeFooter,
   type DataTableCell,
   type DataTableColumn,
   type DataTableKeyEvent,
@@ -161,6 +161,12 @@ export function RelativeValuationPane({ focused, width, height }: PaneProps) {
   const selectedCapNotice = selectedRow?.marketCapProvenance?.kind === "fundamentals"
     ? `${selectedRow.symbol} cap: ${describeFundamentalMarketCap(selectedRow.marketCapProvenance)}.` : undefined;
 
+  usePaneNoticeFooter({
+    registrationId: "relative-valuation-notices",
+    notices: selectedCapNotice ? [selectedCapNotice] : [],
+    focused,
+  });
+
   useClampSelectedIndex(rows.length, selectedIdx, setSelectedIdx);
 
   const renderCell = useCallback((row: RelativeRow, column: RelativeColumn, _index: number, rowState: { selected: boolean }): DataTableCell => {
@@ -217,9 +223,6 @@ export function RelativeValuationPane({ focused, width, height }: PaneProps) {
       onRootKeyDown={handleKeyDown}
       rootWidth={width}
       rootHeight={height}
-      rootBefore={selectedCapNotice ? <Box paddingX={1} flexShrink={0} flexDirection="column">
-        <Prose text={selectedCapNotice} width={Math.max(8, width - 2)} color={colors.textDim} />
-      </Box> : undefined}
       columns={columns}
       items={sortedRows}
       sortColumnId={sortPreference.columnId}

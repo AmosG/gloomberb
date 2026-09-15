@@ -5,10 +5,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction 
 import { usePaneStateValue, usePaneTicker } from "../../../../state/app/context";
 import {
   DataTableView,
-  Notice,
   PaneStatusBody,
   Tabs,
   usePaneFooter,
+  usePaneNoticeFooter,
   type DataTableCell,
   type DataTableColumn,
 } from "../../../../components";
@@ -150,6 +150,12 @@ export function ResolvedFinancialsTab({
       return next;
     });
   }, [currentGroupIds]);
+
+  usePaneNoticeFooter({
+    registrationId: "financials-notices",
+    notices: financialStatementLimitations(financials),
+    focused,
+  });
 
   // The active section and period are already the visible tab selections, so the
   // footer only carries what the controls cannot show.
@@ -403,7 +409,6 @@ export function ResolvedFinancialsTab({
         resetScrollKey={`${resolvedPeriod}:${subTab.key}:${displayStatements.length}`}
         rootBefore={(
           <>
-            {financialStatementLimitations(financials).map((limitation) => <Notice key={limitation} tone="muted">{limitation}</Notice>)}
             <Box flexDirection="row" height={1}>
               <Box width={FINANCIAL_SUB_TABS_WIDTH} height={1}>
                 <Tabs

@@ -1,12 +1,11 @@
 import { Box } from "../../../../ui";
 import { colors } from "../../../../theme/colors";
 import { describeFundamentalMarketCap, selectMarketCapitalization } from "../../../../utils/market-capitalization";
-import { wrapTextLines } from "../../../../utils/text-wrap";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Tabs,
-  Prose,
   usePaneFooter,
+  usePaneNoticeFooter,
   type DataTableKeyEvent,
   type TickerListVisibleRange,
 } from "../../../../components";
@@ -410,8 +409,12 @@ export function PortfolioListPane({ focused, width, height }: PaneProps) {
   const selectedCap = selectMarketCapitalization(selectedFinancials?.quote, selectedFinancials?.fundamentals);
   const capNotice = viewMode === "table" && columns.some((column) => column.id === "market_cap") && selectedCap?.provenance.kind === "fundamentals"
     ? `${cursorSymbol} market cap: ${describeFundamentalMarketCap(selectedCap.provenance)}.` : undefined;
-  const capNoticeHeight = capNotice ? wrapTextLines(capNotice, Math.max(8, width - 2)).length : 0;
-  const contentHeight = Math.max(1, height - headerHeight - drawerHeight - quickAddHeight - capNoticeHeight);
+  usePaneNoticeFooter({
+    registrationId: "portfolio-list-notices",
+    notices: capNotice ? [capNotice] : [],
+    focused: focused && !quickAddFocused,
+  });
+  const contentHeight = Math.max(1, height - headerHeight - drawerHeight - quickAddHeight);
   const quickAddRow = activeCollectionId && activeCollectionEntry && quickAddCollectionKind ? (
     <QuickAddTickerInput
       collectionId={activeCollectionId}
@@ -442,7 +445,6 @@ export function PortfolioListPane({ focused, width, height }: PaneProps) {
         </Box>
       )}
 
-      {capNotice ? <Box paddingX={1} flexShrink={0}><Prose text={capNotice} width={Math.max(8, width - 2)} color={colors.textDim} /></Box> : null}
       {viewMode === "table" ? (
         <PortfolioTickerTable
           columns={columns}
