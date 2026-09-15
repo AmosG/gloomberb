@@ -8,6 +8,8 @@ import { TextAttributes } from "../../../ui";
 import { apiClient } from "../../../api-client";
 import { PluginRenderProvider } from "../../runtime";
 import { gloomberbCloudPlugin } from "../cloud";
+import { teamStore } from "../cloud/team/store";
+import { formatChatPaneTitle } from "./channel-labels";
 import { ChatContent } from "./content";
 import { chatController } from "./controller";
 import { useChatChannelNavigation } from "./content/channel-navigation";
@@ -678,5 +680,59 @@ describe("ChatContent channel sidebar", () => {
       installServerChannels(chatController, []);
       chatController.dispose();
     }
+  });
+});
+
+describe("team channels in the sidebar", () => {
+  const macroDesk = {
+    id: "org-1",
+    name: "Macro Desk",
+    slug: "macro-desk",
+    accentColor: "magenta" as const,
+    shortName: "MD",
+    allowMemberInvites: false,
+    channelId: "team:org-1",
+    createdAt: "2026-09-14T12:00:00.000Z",
+    role: "member" as const,
+    memberCount: 3,
+  };
+
+  afterEach(() => {
+    (teamStore as any).update({ teams: [] });
+  });
+
+  test("groups a team channel under its accent header with the short name prefix", async () => {
+    (teamStore as any).update({ teams: [macroDesk] });
+    const controller = createController({ sessionToken: "token-123" });
+    installServerChannels(controller, [
+      { id: "everyone", name: "everyone", created_at: "2026-03-26T12:10:05.684Z" },
+      { id: "team:org-1", name: "general", kind: "team", teamId: "org-1", created_at: "2026-09-14T12:00:00.000Z" },
+    ]);
+    controller.refreshChannels = async () => {};
+    controller.refreshChannelMessages = async () => {};
+    const ChannelPane = createChannelPane(controller, "everyone");
+
+    await act(async () => {
+      testSetup = await testRender(<ChannelPane />, { width: 90, height: 12 });
+    });
+    await flushFrame();
+
+    const frame = setup().captureCharFrame();
+    expect(frame).toContain("MD· Macro Desk");
+    const lines = frame.split("\n");
+    const header = lines.findIndex((line) => line.includes("MD· Macro Desk"));
+    expect(header).toBeGreaterThan(-1);
+    expect(lines[header + 1]).toContain("general");
+    expect(lines.findIndex((line) => line.includes("everyone"))).toBeLessThan(header);
+  });
+
+  test("pane titles carry the team prefix", () => {
+    (teamStore as any).update({ teams: [macroDesk] });
+    expect(formatChatPaneTitle(
+      { id: "team:org-1", name: "general", kind: "team", teamId: "org-1", created_at: "2026-09-14T12:00:00.000Z" },
+      "team:org-1",
+    )).toBe("MD·#general");
+    expect(formatChatPaneTitle(undefined, "team:org-1")).toBe("MD·#general");
+    expect(formatChatPaneTitle({ id: "equities", name: "equities", created_at: "x" }, "equities")).toBe("#equities");
   });
 });

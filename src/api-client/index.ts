@@ -14,6 +14,7 @@ import { CloudDataApi } from "./data";
 import { ApiRequestError } from "./errors";
 import { CloudApiRequestTransport } from "./request";
 import { CloudApiSocket } from "./socket";
+import { CloudTeamsApi } from "./teams";
 import type {
   AssistCommandDescriptor,
   AssistCommandResponse,
@@ -27,6 +28,7 @@ import type {
 export { ASKGTransportError } from "./askg";
 export type { ASKGToolResultOutcome, ASKGTransport } from "./askg";
 export { setCloudApiFetchTransport } from "./request";
+export { TEAM_ACCENT_COLORS } from "./types";
 export type * from "./types";
 
 /** Server-side caps for `/assist/command`; enforced here so a 422 is never sent. */
@@ -81,6 +83,10 @@ class GloomApiClient {
     },
   });
   private readonly chat: CloudChatApi = new CloudChatApi({
+    request: (path, options) => this.request(path, options),
+    socket: this.socket,
+  });
+  private readonly teams: CloudTeamsApi = new CloudTeamsApi({
     request: (path, options) => this.request(path, options),
     socket: this.socket,
   });
@@ -464,6 +470,30 @@ class GloomApiClient {
   subscribeChatNotifications = this.chat.subscribeNotifications.bind(this.chat);
   subscribeChatPresence = this.chat.subscribePresence.bind(this.chat);
   subscribeQuotes = this.socket.subscribeQuotes.bind(this.socket);
+
+  listTeams = this.teams.listTeams.bind(this.teams);
+  createTeam = this.teams.createTeam.bind(this.teams);
+  getTeamMembers = this.teams.getTeamMembers.bind(this.teams);
+  inviteTeamMemberByUsername = this.teams.inviteTeamMemberByUsername.bind(this.teams);
+  listTeamInviteLinks = this.teams.listTeamInviteLinks.bind(this.teams);
+  createTeamInviteLink = this.teams.createTeamInviteLink.bind(this.teams);
+  deleteTeamInviteLink = this.teams.deleteTeamInviteLink.bind(this.teams);
+  previewTeamInviteLink = this.teams.previewTeamInviteLink.bind(this.teams);
+  joinTeamThroughLink = this.teams.joinTeamThroughLink.bind(this.teams);
+  getTeamNotifications = this.teams.getTeamNotifications.bind(this.teams);
+  inviteTeamMemberByEmail = this.teams.inviteTeamMemberByEmail.bind(this.teams);
+  listTeamInvitations = this.teams.listTeamInvitations.bind(this.teams);
+  listMyTeamInvitations = this.teams.listMyTeamInvitations.bind(this.teams);
+  acceptTeamInvitation = this.teams.acceptTeamInvitation.bind(this.teams);
+  rejectTeamInvitation = this.teams.rejectTeamInvitation.bind(this.teams);
+  cancelTeamInvitation = this.teams.cancelTeamInvitation.bind(this.teams);
+  updateTeam = this.teams.updateTeam.bind(this.teams);
+  updateTeamMemberRole = this.teams.updateTeamMemberRole.bind(this.teams);
+  removeTeamMember = this.teams.removeTeamMember.bind(this.teams);
+  leaveTeam = this.teams.leaveTeam.bind(this.teams);
+  deleteTeam = this.teams.deleteTeam.bind(this.teams);
+  subscribeTeamNotifications = this.teams.subscribeTeamNotifications.bind(this.teams);
+  subscribeCloudEvent = this.teams.subscribeCloudEvent.bind(this.teams);
 
   /** Subscribes to a shared scanner feed; all panes of one kind share one upstream subscription. */
   subscribeScanner = this.socket.subscribeScanner.bind(this.socket);

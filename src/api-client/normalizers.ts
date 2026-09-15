@@ -8,6 +8,7 @@ import type {
   CloudSearchResponse,
   CloudTweetPayload,
   CloudTweetSearchResponse,
+  TeamNotification,
 } from "./types";
 import { normalizeTimestamp } from "../utils/timestamp";
 
@@ -98,6 +99,15 @@ export function normalizeChatState(
     ...response,
     channels: response.channels.map((channel) => normalizeChatChannel(channel)),
     notifications: response.notifications.map(normalizeChatNotification),
+  };
+}
+
+export function normalizeTeamNotification(
+  notification: TeamNotification,
+): TeamNotification {
+  return {
+    ...notification,
+    createdAt: normalizeTimestamp(notification.createdAt),
   };
 }
 

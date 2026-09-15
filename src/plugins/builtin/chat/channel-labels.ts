@@ -1,6 +1,15 @@
 import type { ChatChannel } from "../../../api-client";
 import { t } from "../../../i18n";
 import { normalizeChannelId } from "./controller/state";
+import { teamPrefix } from "../cloud/team/model";
+import { teamStore } from "../cloud/team/store";
+
+/** `MD·` for a team channel, empty otherwise. Team markers never depend on color. */
+export function teamChannelPrefix(channel: ChatChannel | undefined, fallbackId: string): string {
+  const teamId = channel?.kind === "team" ? channel.teamId ?? null : null;
+  const team = teamStore.getTeam(teamId) ?? teamStore.getTeamForChannel(fallbackId);
+  return team ? teamPrefix(team) : "";
+}
 
 function normalizeMentionUsername(username: string | null | undefined): string | null {
   const normalized = username?.trim().replace(/^@+/, "");
@@ -42,6 +51,10 @@ export function formatChannelLabel(channel: ChatChannel | undefined, fallbackId:
 
 export function formatChatPaneTitle(channel: ChatChannel | undefined, fallbackId: string) {
   const normalizedFallbackId = normalizeChannelId(fallbackId);
+  if (channel?.kind === "team" || normalizedFallbackId.startsWith("team:")) {
+    const prefix = teamChannelPrefix(channel, normalizedFallbackId);
+    return `${prefix}#${channel?.name?.trim() || "general"}`;
+  }
   if (channel?.kind === "direct") {
     return formatChannelLabel(channel, normalizedFallbackId);
   }

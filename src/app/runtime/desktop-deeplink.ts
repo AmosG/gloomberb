@@ -17,7 +17,7 @@ import { openPaneShare } from "../../shares/pane";
 import { materializeMarketplaceLayout } from "../../layout-marketplace/payload";
 
 type CloudDeepLinkRoute = {
-  kind: "cloud-alerts" | "cloud-emails" | "cloud-roundup" | "cloud-success";
+  kind: "cloud-alerts" | "cloud-emails" | "cloud-roundup" | "cloud-success" | "cloud-teams";
   week: string | null;
 };
 
@@ -165,6 +165,13 @@ function parseCloudDeepLink(parsed: ParsedGloomUrl): DesktopDeepLinkAction {
       type: "open-account-management",
       route: { kind: "cloud-emails", week: null },
       message: "Opened email settings.",
+    };
+  }
+  if (route === "teams") {
+    return {
+      type: "open-account-management",
+      route: { kind: "cloud-teams", week: null },
+      message: "Opened teams.",
     };
   }
   if (route === "success") {
@@ -522,6 +529,7 @@ export function handleDesktopDeepLink(rawUrl: string, options: DesktopDeepLinkHa
     case "open-account-management":
       if (!requirePane(options.pluginRegistry, "account-management", "Account management is unavailable.")) return;
       if (action.route.kind === "cloud-emails") requestAccountManagementTab("emails");
+      if (action.route.kind === "cloud-teams") requestAccountManagementTab("teams");
       if (action.route.kind === "cloud-success") {
         requestAccountManagementTab("pro");
         // Checkout just completed: re-read the session so the new plan shows at once.
