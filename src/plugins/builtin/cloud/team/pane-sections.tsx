@@ -77,7 +77,7 @@ export function MembersSection({
           const busy = busyId === member.id;
           return (
             <AccentRow key={member.id} accent={member.role === "owner" ? accent : colors.textMuted} width={width}>
-              <Text width={handleWidth} fg={self ? colors.textBright : colors.text} attributes={self ? TextAttributes.BOLD : 0}>
+              <Text width={handleWidth} flexShrink={0} fg={self ? colors.textBright : colors.text} attributes={self ? TextAttributes.BOLD : 0}>
                 {truncate(userHandle(member.user), handleWidth)}
               </Text>
               {nameWidth > 0 ? (
@@ -201,7 +201,7 @@ export function InvitesSection({
               const uses = link.maxUses === null ? `${link.uses} uses` : `${link.uses}/${link.maxUses} uses`;
               return (
                 <AccentRow key={link.token} accent={colors.textMuted} width={width}>
-                  <Text fg={colors.text}>{truncate(shortenInviteUrl(link.url), Math.max(12, width - 40))}</Text>
+                  <Text fg={colors.text} flexShrink={0}>{truncate(shortenInviteUrl(link.url), Math.max(12, width - 44))}</Text>
                   <Text fg={colors.textDim}>{`· ${uses} · ${describeExpiry(link.expiresAt)}`}</Text>
                   <Box flexGrow={1} />
                   <PaneButton id={`copy-link:${link.token}`} label="Copy" variant="ghost" onPress={() => onCopyLink(link)} />
@@ -264,7 +264,7 @@ export function ChannelsSection({
           const unread = unreadByChannel.get(channel.id) ?? 0;
           return (
             <AccentRow key={channel.id} accent={accent} width={width}>
-              <Text fg={unread > 0 ? colors.textBright : colors.text} attributes={unread > 0 ? TextAttributes.BOLD : 0}>
+              <Text fg={unread > 0 ? colors.textBright : colors.text} attributes={unread > 0 ? TextAttributes.BOLD : 0} flexShrink={0}>
                 {`#${channel.name}`}
               </Text>
               {unread > 0 ? <Text fg={accent} attributes={TextAttributes.BOLD}>{`[${unread}]`}</Text> : null}
@@ -274,7 +274,7 @@ export function ChannelsSection({
                 <ConfirmAction
                   id={`delete-channel:${channel.id}`}
                   label="Delete"
-                  question={`Delete #${channel.name} and its messages?`}
+                  question={`Delete #${channel.name}?`}
                   confirmLabel="Delete"
                   busy={busy === channel.id}
                   onConfirm={() => onDelete(channel)}

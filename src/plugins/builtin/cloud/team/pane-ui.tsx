@@ -262,7 +262,7 @@ export function ConfirmAction({
     return <PaneButton id={id} label={label} variant={variant === "danger" ? "ghost" : variant} onPress={() => setArmed(true)} />;
   }
   return (
-    <Box flexDirection="row" gap={1} alignItems="center">
+    <Box flexDirection="row" gap={1} alignItems="center" flexShrink={0} height={1}>
       <Text fg={colors.text}>{question}</Text>
       <PaneButton
         id={id}
@@ -303,8 +303,8 @@ export function AccentRow({
   width: number;
 }) {
   return (
-    <Box height={1} width={width} flexDirection="row" alignItems="center" gap={1}>
-      <Text fg={accent}>●</Text>
+    <Box height={1} width={width} flexDirection="row" alignItems="center" gap={1} overflow="hidden">
+      <Text fg={accent} flexShrink={0}>●</Text>
       {children}
     </Box>
   );
