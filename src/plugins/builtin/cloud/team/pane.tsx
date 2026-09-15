@@ -455,7 +455,7 @@ export function TeamPane({ focused, width, height, close }: PaneProps) {
         setSection(target.value);
       }
     }
-  });
+  }, { allowEditable: true });
 
   const hints = useMemo<PaneHint[]>(() => {
     if (!signedIn) return [];
@@ -483,11 +483,11 @@ export function TeamPane({ focused, width, height, close }: PaneProps) {
 
   useShortcut((event) => {
     if (!focused || !showCreate || snapshot.teams.length === 0) return;
-    if (isPlainKey(event, "escape") && !event.targetEditable) {
+    if (isPlainKey(event, "escape")) {
       event.preventDefault?.();
       setCreating(false);
     }
-  });
+  }, { allowEditable: true });
 
   if (!signedIn) {
     return <SignInWall action="use teams" />;
