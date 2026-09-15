@@ -2,7 +2,7 @@ import { useCallback, useState } from "react";
 import { Button } from "../ui/button";
 import { EmptyState } from "../ui/status";
 import { canInstallPlugins } from "../../plugins/current-target";
-import { getPluginInstaller } from "../../plugins/builtin/plugin-marketplace/store";
+import { getPluginManager } from "../../plugins/builtin/plugin-marketplace/store";
 import type { PaneDef, PaneProps } from "../../types/plugin";
 import { Box } from "../../ui";
 import { useAppSelector } from "../../state/app/context";
@@ -39,7 +39,7 @@ function MissingPanePlaceholder({ paneType, width }: PaneProps) {
   const linkedIds = [layouts[activeIndex]?.origin?.layoutId, ...layouts.map((layout) => layout.origin?.layoutId)]
     .filter((id): id is string => !!id);
   const requirement = requirementFor(paneType, linkedIds);
-  const installer = canInstallPlugins() ? getPluginInstaller() : null;
+  const installer = canInstallPlugins() ? getPluginManager() : null;
   const [installing, setInstalling] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,9 +47,9 @@ function MissingPanePlaceholder({ paneType, width }: PaneProps) {
     if (!installer || !requirement?.repo || installing) return;
     setInstalling(true);
     setError(null);
-    void installer(requirement.repo).then((result) => {
+    void installer.install(requirement.repo).then((result) => {
       setInstalling(false);
-      if (!result.ok) setError(result.error ?? "Install failed.");
+      if (!result.ok) setError(result.error);
     });
   }, [installer, installing, requirement]);
 
