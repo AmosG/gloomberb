@@ -7,6 +7,12 @@ import { Box, Text } from "../../../ui";
 import { PluginRenderProvider } from "../../runtime";
 import { createQuickNotesPane } from "./quick-notes-pane";
 import type { NotesFiles } from "./files";
+import { NotesStoreRegistry } from "./store";
+
+/** The tabs take a registry; while signed out it hands back the disk store. */
+function registryFor(files: NotesFiles): NotesStoreRegistry {
+  return new NotesStoreRegistry({ persistence: null, files, isSignedIn: () => false });
+}
 import type { QuickNoteEntry } from "./model";
 
 let testSetup: Awaited<ReturnType<typeof testRender>> | undefined;
@@ -28,6 +34,8 @@ function createMockNotesFiles(options?: { loadDelayMs?: number }) {
 
   return {
     saves,
+    readOnly: false,
+    owner: { kind: "user" },
     async load(key: string) {
       if (loadDelayMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, loadDelayMs));
@@ -86,7 +94,7 @@ afterEach(async () => {
 describe("createQuickNotesPane", () => {
   test("does not save stale buffer text to a new tab before its notes load", async () => {
     const notesFiles = createMockNotesFiles({ loadDelayMs: 50 });
-    const QuickNotesPane = createQuickNotesPane(notesFiles);
+    const QuickNotesPane = createQuickNotesPane(registryFor(notesFiles));
 
     testSetup = await testRender(
       <QuickNotesHarness QuickNotesPane={QuickNotesPane} />,
@@ -145,7 +153,7 @@ describe("createQuickNotesPane", () => {
         throw new Error("EACCES: permission denied");
       },
     } as unknown as NotesFiles & { saves: Array<{ key: string; text: string }> };
-    const QuickNotesPane = createQuickNotesPane(failing);
+    const QuickNotesPane = createQuickNotesPane(registryFor(failing));
 
     testSetup = await testRender(
       <QuickNotesHarness QuickNotesPane={QuickNotesPane} />,
