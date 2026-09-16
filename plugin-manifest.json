@@ -113,7 +113,8 @@
           "askg",
           "buildout",
           "chat",
-          "congress-trades"
+          "congress-trades",
+          "team"
         ],
         "capabilities": [
           "asset-data.gloomberb-cloud",
