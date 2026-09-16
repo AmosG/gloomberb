@@ -1,4 +1,6 @@
+import { useMemo } from "react";
 import { Box } from "../../../../ui";
+import { resolveOccludedPaneIds } from "../pane-occlusion";
 import type {
   DockDividerLayout,
   DockLeafLayout,
@@ -58,6 +60,8 @@ interface ShellPaneLayersProps {
   windowModePaneId: string | null;
 }
 
+const EMPTY_OCCLUSION: ReadonlySet<string> = new Set();
+
 export function ShellPaneLayers({
   contentHeight,
   dividerPreview,
@@ -91,6 +95,24 @@ export function ShellPaneLayers({
   windowModeDockResizePathKey,
   windowModePaneId,
 }: ShellPaneLayersProps) {
+  // Desktop pane chrome is DOM, where the compositor already skips covered
+  // windows; a transient focus shows one pane; a drag keeps everything drawn
+  // so the preview never reveals a blank spot.
+  const occludedPaneIds = useMemo(() => {
+    if (nativePaneChrome || transientFocusActive || dragFloatingRect || visibleFloatingPanes.length === 0) {
+      return EMPTY_OCCLUSION;
+    }
+    return resolveOccludedPaneIds([
+      ...dockLeafLayouts.map((leaf, order) => ({ paneId: leaf.instanceId, rect: leaf.rect, zIndex: null, order })),
+      ...visibleFloatingPanes.map(({ pane, rect }, order) => ({
+        paneId: pane.instance.instanceId,
+        rect,
+        zIndex: pane.floating?.zIndex ?? 50,
+        order: dockLeafLayouts.length + order,
+      })),
+    ], { width, height: contentHeight });
+  }, [contentHeight, dockLeafLayouts, dragFloatingRect, nativePaneChrome, transientFocusActive, visibleFloatingPanes, width]);
+
   return (
     <>
       {dockLeafLayouts.map((leaf) => {
@@ -111,6 +133,7 @@ export function ShellPaneLayers({
             top={rect.y}
             width={rect.width}
             height={rect.height}
+            visible={!occludedPaneIds.has(leaf.instanceId)}
           >
             <PaneFooterProvider>
               {(footer) => {
@@ -192,6 +215,7 @@ export function ShellPaneLayers({
                   width={preview.width}
                   height={preview.height}
                   zIndex={pane.floating?.zIndex ?? 50}
+                  hidden={occludedPaneIds.has(pane.instance.instanceId)}
                   focused={focused}
                   windowModeSelected={windowModeSelected}
                   locked={pane.instance.locked === true}
