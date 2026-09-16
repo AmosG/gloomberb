@@ -4,11 +4,20 @@ export function useThrottledCommitValue<T>(
   committedValue: T,
   commitValue: (value: T) => void,
   delayMs: number,
-  options?: { commitPendingOnUnmount?: boolean },
+  options?: {
+    commitPendingOnUnmount?: boolean;
+    /**
+     * Commit the first change of a burst at once and only defer the ones that
+     * follow within `delayMs`. A single step then lands immediately while a
+     * held key still collapses to one trailing commit.
+     */
+    leading?: boolean;
+  },
 ) {
   const [value, setValueState] = useState<T>(committedValue);
   const valueRef = useRef<T>(committedValue);
   const commitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastCommitAtRef = useRef(Number.NEGATIVE_INFINITY);
   const hasPendingCommitRef = useRef(false);
   const pendingValueRef = useRef<T>(committedValue);
   const appliedValueRef = useRef<T>(committedValue);
@@ -43,6 +52,7 @@ export function useThrottledCommitValue<T>(
     }
 
     appliedValueRef.current = targetValue;
+    lastCommitAtRef.current = performance.now();
     commitValueRef.current(targetValue);
   }, [clearPendingCommit]);
 
@@ -64,9 +74,16 @@ export function useThrottledCommitValue<T>(
       return;
     }
 
+    const burstInProgress = hasPendingCommitRef.current
+      || performance.now() - lastCommitAtRef.current < delayMs;
     clearPendingCommit();
 
     if (Object.is(appliedValueRef.current, nextValue)) {
+      return;
+    }
+
+    if (optionsRef.current?.leading && !burstInProgress) {
+      flushValue(nextValue);
       return;
     }
 

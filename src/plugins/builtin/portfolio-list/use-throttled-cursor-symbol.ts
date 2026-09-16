@@ -12,7 +12,10 @@ export function useThrottledCursorSymbol(
     setValue,
     flushValue,
     cancelPendingValue,
-  } = useThrottledCommitValue(committedCursorSymbol, setCommittedCursorSymbol, throttleMs);
+  } = useThrottledCommitValue(committedCursorSymbol, setCommittedCursorSymbol, throttleMs, {
+    // Followers see a single row step at once; a held key still commits once.
+    leading: true,
+  });
 
   return {
     cursorSymbol,

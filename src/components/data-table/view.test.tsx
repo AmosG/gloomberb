@@ -196,22 +196,24 @@ describe("DataTableView", () => {
     await renderSettled();
     expect(testSetup.captureCharFrame()).toContain("cursor=First row selected=First row");
 
+    // The first step after a pause commits at once; the steps that follow
+    // inside the commit window only move the cursor.
     await emitKeypress({ name: "down", sequence: "\u001B[B" });
     await renderSettled();
-    expect(testSetup.captureCharFrame()).toContain("cursor=Second row selected=First row");
+    expect(testSetup.captureCharFrame()).toContain("cursor=Second row selected=Second row");
 
     await emitKeypress({ name: "up", sequence: "\u001B[A", meta: true });
     await renderSettled();
-    expect(testSetup.captureCharFrame()).toContain("cursor=Second row selected=First row");
+    expect(testSetup.captureCharFrame()).toContain("cursor=Second row selected=Second row");
 
     await emitKeypress({ name: "up", sequence: "\u001B[A" });
     await renderSettled();
-    expect(testSetup.captureCharFrame()).toContain("cursor=First row selected=First row");
+    expect(testSetup.captureCharFrame()).toContain("cursor=First row selected=Second row");
 
     await emitKeypress({ name: "j", sequence: "j" });
     await emitKeypress({ name: "k", sequence: "k" });
     await renderSettled();
-    expect(testSetup.captureCharFrame()).toContain("cursor=First row selected=First row");
+    expect(testSetup.captureCharFrame()).toContain("cursor=First row selected=Second row");
 
     await emitKeypress({ name: "enter", sequence: "\r" });
     await renderSettled();

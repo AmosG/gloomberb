@@ -149,6 +149,7 @@ export function DataTableView<
   const pendingCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+  const lastKeyboardCommitAtRef = useRef(Number.NEGATIVE_INFINITY);
   const selectionKey = selection.kind === "id"
     ? selection.selectedId
     : selection.kind === "index"
@@ -389,6 +390,7 @@ export function DataTableView<
   ) => {
     const target = getCommitTarget(index);
     clearPendingCommit();
+    lastKeyboardCommitAtRef.current = performance.now();
     commitTarget(target, reason);
   }, [clearPendingCommit, commitTarget, getCommitTarget]);
 
@@ -396,6 +398,14 @@ export function DataTableView<
     if (selection.kind === "none") return;
     const target = getCommitTarget(index);
     if (!target) return;
+    // The first step after a pause commits at once, so a follower pane moves
+    // with the cursor; steps that follow within the delay collapse into one
+    // trailing commit, which is what keeps a held key from firing a load per
+    // row.
+    if (!pendingCommitRef.current && performance.now() - lastKeyboardCommitAtRef.current >= DATA_TABLE_SELECTION_COMMIT_DELAY_MS) {
+      commitIndexImmediately(index, "keyboard");
+      return;
+    }
     if (pendingCommitTimerRef.current) {
       clearTimeout(pendingCommitTimerRef.current);
     }
@@ -407,9 +417,10 @@ export function DataTableView<
       const pendingTarget = pendingCommitTargetRef.current;
       pendingCommitTargetRef.current = null;
       clearSelectionScrollTarget();
+      lastKeyboardCommitAtRef.current = performance.now();
       commitTarget(pendingTarget, "keyboard");
     }, DATA_TABLE_SELECTION_COMMIT_DELAY_MS);
-  }, [clearSelectionScrollTarget, commitTarget, getCommitTarget, selection.kind]);
+  }, [clearSelectionScrollTarget, commitIndexImmediately, commitTarget, getCommitTarget, selection.kind]);
 
   const updateCursorIndex = useCallback((
     index: number,
