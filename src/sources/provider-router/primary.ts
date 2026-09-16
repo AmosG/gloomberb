@@ -1,3 +1,4 @@
+import { sanitizeListingFinancialHistory } from "../listing-history";
 import { selectCachedResource } from "./cache";
 import { financialHistoryVariants, hasReusableExtendedHistory } from "./statement-history";
 import type { MarketDataRequestContext } from "../../types/data-provider";
@@ -79,6 +80,7 @@ export class ProviderRouterPrimaryRoutes {
           value = { ...mergeFinancials(value, previous?.value ?? null)!, statementHistory: attempt };
         }
         value = sanitizeShellFinancialHistory(value, { symbol: ticker, exchange }, sourceKey);
+        value = sanitizeListingFinancialHistory(value, { symbol: ticker, exchange }, sourceKey);
         const cacheValue = primaryResult
           ? {
             financialCurrency: value.financialCurrency,

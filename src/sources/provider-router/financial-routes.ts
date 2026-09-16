@@ -1,3 +1,4 @@
+import { sanitizeListingFinancialHistory } from "../listing-history";
 import { financialHistoryVariants, hasReusableExtendedHistory } from "./statement-history";
 import { sanitizeShellFinancialHistory } from "../history-coverage";
 import type {
@@ -309,7 +310,8 @@ export class ProviderRouterFinancialRoutes {
         const independentFields = requiresContractPrice && providerEntityKey !== entityKey
           ? { ...record.value, quote: undefined, quoteContributions: undefined, quoteMetadata: undefined, priceHistory: [] }
           : record.value;
-        const value = sanitizeShellFinancialHistory(independentFields, { symbol: ticker, exchange }, record.sourceKey);
+        const verifiedHistory = sanitizeShellFinancialHistory(independentFields, { symbol: ticker, exchange }, record.sourceKey);
+        const value = sanitizeListingFinancialHistory(verifiedHistory, { symbol: ticker, exchange }, record.sourceKey);
         return value === record.value ? record : { ...record, value, stale: value !== independentFields || record.stale };
       })),
       variantKeys,

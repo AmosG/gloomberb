@@ -7,7 +7,10 @@ export const SHELL_VERIFIED_LINEAGE_START = "2005-07-21";
 const coverageMessage = (providers: PriceHistorySource["provider"][]) => `${providers.map((provider) => provider === "yahoo" ? "Yahoo" : "Twelve Data").join(" and ")} London Shell coverage begins 2005-07-21; earlier share lineage is unverified.`;
 
 export class HistoryCoverageError extends ProviderMissError {
-  constructor(provider: PriceHistorySource["provider"] = "yahoo") { super(coverageMessage([provider])); this.name = "HistoryCoverageError"; }
+  constructor(reason: PriceHistorySource["provider"] | { message: string } = "yahoo") {
+    super(typeof reason === "string" ? coverageMessage([reason]) : reason.message);
+    this.name = "HistoryCoverageError";
+  }
 }
 
 export function hasShellCoverageRestriction(value: unknown): value is { source: PriceHistorySource["provider"]; reasonCode: "UNVERIFIED_PREDECESSOR_LINEAGE"; verifiedLineageStart: "2005-07-21" } {

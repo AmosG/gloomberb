@@ -1,3 +1,4 @@
+import { assertTradingPriceHistory, hasCircleOfferingPriceHistory } from "../listing-history";
 import type { BrokerCandidate } from "./brokers";
 import { withBrokerTimeout } from "./brokers";
 import type { DataProvider, MarketDataRequestContext } from "../../types/data-provider";
@@ -400,7 +401,7 @@ export class ProviderRouterHistoryRoutes {
       const unverifiedAllInterval = ["provider:yahoo", "provider:gloomberb-cloud"].includes(record.sourceKey)
         && /(?:^|;)range=ALL(?:;|$)/.test(record.variantKey)
         && !/(?:^|;)granularity=1(?:;|$)/.test(record.variantKey);
-      if (unverifiedAllInterval) return false;
+      if (unverifiedAllInterval || hasCircleOfferingPriceHistory(record.value, request.target, record.sourceKey)) return false;
       return request.cachePolicyKey === "priceHistoryIntraday"
         || !hasUnverifiedShellHistory(record.value, request.target, record.sourceKey, request.requestedStart);
     });
@@ -495,6 +496,7 @@ export class ProviderRouterHistoryRoutes {
     return this.firstProviderArrayResult(async (provider) => {
       const fetched = await request.fetchProvider(provider);
       if (fetched === null) return null;
+      assertTradingPriceHistory(fetched, request.target, this.deps.providerSourceKey(provider));
       if (request.cachePolicyKey !== "priceHistoryIntraday"
         && hasUnverifiedShellHistory(fetched, request.target, this.deps.providerSourceKey(provider))) return null;
       const value = normalizeRequestHistory(fetched, request);
