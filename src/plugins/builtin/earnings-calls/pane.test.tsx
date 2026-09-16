@@ -98,6 +98,37 @@ function manualPollTimers() {
   };
 }
 
+test("scrolling to the end of the shelf appends the next page instead of stopping at the first", async () => {
+  signIn();
+  const shelf = (start: number, count: number): CloudEarningsCallPayload[] =>
+    Array.from({ length: count }, (_, index) => ({
+      ...call("SHELF"),
+      id: `shelf-${start + index}`,
+      companyName: `COMPANY ${start + index}`,
+      callAt: new Date(Date.UTC(2026, 7, 1) - (start + index) * 86_400_000).toISOString(),
+    }));
+  const offsets: Array<string | null> = [];
+  setCloudApiFetchTransport(async (url) => {
+    const offset = Number(new URL(String(url)).searchParams.get("offset") ?? 0);
+    offsets.push(new URL(String(url)).searchParams.get("offset"));
+    return Response.json({ calls: offset > 0 ? shelf(50, 1) : shelf(0, 50) });
+  });
+  await mount(80, null);
+  expect(offsets).toEqual([null]);
+  expect(setup!.captureCharFrame()).toContain("COMPANY 0");
+  expect(setup!.captureCharFrame()).not.toContain("COMPANY 50");
+
+  await emitKeypress(setup!, Array.from({ length: 50 }, () => ({ name: "j", sequence: "j" })));
+  await frames();
+  expect(offsets).toEqual([null, "50"]);
+
+  // The page that arrived is reachable, and a short page ends the paging.
+  await emitKeypress(setup!, Array.from({ length: 5 }, () => ({ name: "j", sequence: "j" })));
+  await frames();
+  expect(setup!.captureCharFrame()).toContain("COMPANY 50");
+  expect(offsets).toEqual([null, "50"]);
+});
+
 test("a pending company lookup remains pending after the pane reopens", async () => {
   signIn();
   attachEarningsCallsPersistence(new MemoryPluginPersistence());
