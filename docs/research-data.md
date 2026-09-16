@@ -122,6 +122,8 @@ The benchmark request explicitly identifies SPY on NYSE Arca in USD, ISIN US7846
 
 Broker account-value history includes deposits and withdrawals. Investment returns require cash-flow adjustments. Broker-reported return series may not specify their calculation method. Currency values and percentage returns retain distinct axis labels. Account-value currency comes only from the history source; portfolio/display currency settings do not convert that history or establish its currency. The chart preserves elapsed calendar time and known missing dates. A later row at the same timestamp replaces the earlier row, including withdrawn values; missing values break the line instead of joining observations across the gap. Missing observations and cached data remain identified in the UI.
 
+Account summaries and Cash & Margin convert monetary totals only from the broker account's declared currency. Missing source currency or FX leaves those totals unavailable; missing cash is not a zero balance. PORT retains available account summaries and broker history after the last security position is sold. It does not derive a return from changes in account value or add cash-flow-adjusted return methods that the broker has not supplied.
+
 ## Dividends and sectors
 
 Dividend cash yield excludes taxes and reinvestment. SEC yield, tax components, and future payments are not modeled. Forward yield is an estimate rather than a guaranteed distribution. Dividend amounts and reference prices must use compatible listing currencies and units.

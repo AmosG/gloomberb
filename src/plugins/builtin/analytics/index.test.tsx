@@ -206,6 +206,68 @@ afterEach(async () => {
 });
 
 describe("PortfolioAnalyticsPane", () => {
+  for (const currency of [undefined, "CAD"]) {
+    test(`account summaries require source currency and request its FX (${currency ?? "unknown"})`, async () => {
+      const requested: string[] = [];
+      controlledCoordinator = new MarketDataCoordinator(createTestDataProvider({
+        getQuote: async () => null, getPriceHistory: async () => [], getPriceHistoryForResolution: async () => [],
+        getExchangeRate: async (source) => { requested.push(source); return 0.75; },
+      }));
+      setSharedMarketDataCoordinator(controlledCoordinator);
+      const config = createAnalyticsConfig(BROKER_PORTFOLIO_ID);
+      config.baseCurrency = "USD";
+      config.brokerInstances = [{ id: "ibkr-flex", brokerType: "ibkr", config: {} }];
+      await act(async () => {
+        testSetup = await testRender(<AnalyticsHarness config={config} height={32}
+          brokerAccounts={{ "ibkr-flex": [{ accountId: "DU12345", name: "Fixture", currency,
+            netLiquidation: 20000, totalCashValue: 18000 }] }} />, { width: 100, height: 32 });
+      });
+      for (let index = 0; index < 6; index++) await flushFrame();
+      const frame = testSetup!.captureCharFrame();
+      expect(frame).toContain(currency ? "Net Liq       15k" : "Net Liq       —");
+      expect(frame).toContain(currency ? "Cash          13.5k" : "Cash          —");
+      expect(frame).not.toContain("Net Liq       20k");
+      if (currency) expect(requested).toContain("CAD");
+      else expect(frame).toContain("FX            Unavailable");
+    });
+  }
+
+  for (const withAccount of [true, false]) test(`cash-only accounts retain broker history without deriving returns from cash flows (account snapshot ${withAccount})`, async () => {
+    const config = createAnalyticsConfig(BROKER_PORTFOLIO_ID);
+    config.brokerInstances = [{ id: "ibkr-flex", brokerType: "ibkr", config: {} }];
+    const ticker = createSharedTicker();
+    ticker.metadata.positions = [];
+    const adapter: BrokerAdapter = {
+      id: "ibkr", name: "Fixture", configSchema: [], validate: async () => true, importPositions: async () => [],
+      getPortfolioPerformance: async () => ({ accountId: "DU12345", source: "flex", currency: "USD", period: "2026", fetchedAt: 1,
+        points: [{ date: "2026-01-01", value: 10000, cumulativeReturn: 0 },
+          { date: "2026-05-01", value: 21000, cumulativeReturn: .1 },
+          { date: "2026-09-01", value: 6000, cumulativeReturn: .1 }] }),
+    };
+    await act(async () => {
+      testSetup = await testRender(<AnalyticsHarness config={config} ticker={ticker} height={36}
+        runtime={createTestPluginRuntime({ getBrokerAdapter: () => adapter })}
+        brokerAccounts={withAccount ? { "ibkr-flex": [{ accountId: "DU12345", name: "Fixture", currency: "USD",
+          netLiquidation: 6000, totalCashValue: 6000, grossPositionValue: 0 }] } : {}} />, { width: 100, height: 36 });
+    });
+    for (let index = 0; index < 6; index++) await flushFrame();
+    const frame = testSetup!.captureCharFrame();
+    if (withAccount) {
+      expect(frame).toContain("Net Liq       6k");
+      expect(frame).toContain("Cash          6k");
+    } else {
+      expect(frame).not.toContain("Net Liq");
+      expect(frame).not.toContain("Cash");
+      expect(frame).not.toContain("Val           0");
+      expect(frame).not.toContain("P&L           +0");
+    }
+    expect(frame).toContain("Broker return +10.00%");
+    expect(frame).toContain("Portfolio History");
+    expect(frame).toContain("Value (USD)");
+    expect(frame).not.toContain("Current-weight basket estimates");
+    expect(frame).not.toContain("Holdings by sector");
+  });
+
   test("switching accounts hides prior performance while the next account is pending", async () => {
     const firstId = BROKER_PORTFOLIO_ID;
     const secondId = "broker:ibkr-flex:DU54321";

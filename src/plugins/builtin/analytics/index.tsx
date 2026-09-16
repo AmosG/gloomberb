@@ -140,8 +140,8 @@ function PortfolioAnalyticsPane({ focused, width, height }: PaneProps) {
   const accountStateInput = useMemo(() => ({ brokerAccounts, config }), [brokerAccounts, config]);
   const { accountState, accountsError } = usePortfolioAccountState(activePortfolio, accountStateInput);
   const trackedCurrencies = useMemo(
-    () => buildTrackedCurrencies(portfolioTickers, financials, baseCurrency),
-    [baseCurrency, financials, portfolioTickers],
+    () => [...buildTrackedCurrencies(portfolioTickers, financials, baseCurrency), accountState?.account.currency],
+    [accountState?.account.currency, baseCurrency, financials, portfolioTickers],
   );
   const fetchedExchangeRates = useFxRatesMap(trackedCurrencies);
   const effectiveExchangeRates = selectEffectiveExchangeRates(fetchedExchangeRates, cachedExchangeRates);
@@ -216,6 +216,7 @@ function PortfolioAnalyticsPane({ focused, width, height }: PaneProps) {
     : sortedSectorRows[0]?.id ?? null;
   const sectorColumns = useMemo(() => buildSectorColumns(width), [width]);
   const hasPositions = portfolioTickers.length > 0;
+  const hasAccountData = accountState != null || brokerPerformance.performance != null;
 
   const summaryRows = useMemo(
     () => buildAnalyticsSummaryRows({
@@ -225,16 +226,16 @@ function PortfolioAnalyticsPane({ focused, width, height }: PaneProps) {
       portfolioStats,
       convertAccountValue: (value) => convertCurrency(
         value,
-        accountState?.account.currency || baseCurrency,
+        accountState?.account.currency ?? "",
         baseCurrency,
         effectiveExchangeRates,
       ),
-    }),
-    [accountState, activePortfolio, baseCurrency, brokerPerformance.performance, effectiveExchangeRates, portfolioStats],
+    }).filter((row) => hasPositions || accountState != null || row.id === "historical-return"),
+    [accountState, activePortfolio, baseCurrency, brokerPerformance.performance, effectiveExchangeRates, hasPositions, portfolioStats],
   );
 
   const riskRows = useMemo(
-    () => buildAnalyticsRiskRows({
+    () => hasPositions ? buildAnalyticsRiskRows({
       sharpe,
       beta,
       coverage: returnSeriesResult.coverage,
@@ -249,16 +250,17 @@ function PortfolioAnalyticsPane({ focused, width, height }: PaneProps) {
       benchmarkTimestamps: betaResult.benchmarkTimestamps,
       returns: portfolioReturnSeries,
       benchmarkReturns: spyReturnSeries.returns,
-    }),
-    [beta, betaResult, returnSeriesResult, spyReturnSeries, sharpe],
+    }) : [],
+    [beta, betaResult, hasPositions, returnSeriesResult, spyReturnSeries, sharpe],
   );
-  const metricsHeight = summaryRows.length + riskRows.length + 5;
+  const metricsHeight = summaryRows.length === 0 && riskRows.length === 0
+    ? 0 : summaryRows.length + (riskRows.length > 0 ? riskRows.length + 5 : 3);
   const historyNote = performanceHistoryNote(brokerPerformance.performance);
   usePaneNoticeFooter({
     registrationId: "analytics:data-notices",
     notices: [...allocationNotices.map((notice) => notice.text), ...(historyNote ? [historyNote] : [])],
     focused,
-    enabled: hasPositions,
+    enabled: hasPositions || hasAccountData,
     title: "Portfolio data",
   });
   const availableHistoryChartHeight = height - metricsHeight - 7;
@@ -307,7 +309,7 @@ function PortfolioAnalyticsPane({ focused, width, height }: PaneProps) {
             </Box>
           </Box>
 
-          {!hasPositions ? (
+          {!hasPositions && !hasAccountData ? (
             <Box paddingX={1} paddingY={1}>
               <EmptyState
                 title="No positions in this portfolio."
@@ -319,11 +321,11 @@ function PortfolioAnalyticsPane({ focused, width, height }: PaneProps) {
             </Box>
           ) : (
             <>
-              <AnalyticsMetricsPanel
+              {metricsHeight > 0 && <AnalyticsMetricsPanel
                 summaryRows={summaryRows}
                 riskRows={riskRows}
                 height={metricsHeight}
-              />
+              />}
 
               <PortfolioHistorySection
                 show={showHistoryChart}
@@ -339,22 +341,26 @@ function PortfolioAnalyticsPane({ focused, width, height }: PaneProps) {
                 formatAxisValue={formatHistoryAxis}
               />
 
-              <Box height={1} paddingX={1}>
-                <Text fg={colors.textDim} attributes={TextAttributes.BOLD}>
-                  Holdings by sector
-                </Text>
-              </Box>
+              {hasPositions && (
+                <>
+                  <Box height={1} paddingX={1}>
+                    <Text fg={colors.textDim} attributes={TextAttributes.BOLD}>
+                      Holdings by sector
+                    </Text>
+                  </Box>
 
-              <SectorAllocationTable
-                focused={focused}
-                resetScrollKey={activePortfolioId}
-                columns={sectorColumns}
-                rows={sortedSectorRows}
-                sort={sectorSort}
-                selectedSectorId={effectiveSelectedSectorId}
-                onHeaderClick={handleSectorHeaderClick}
-                onSelectSector={setSelectedSectorId}
-              />
+                  <SectorAllocationTable
+                    focused={focused}
+                    resetScrollKey={activePortfolioId}
+                    columns={sectorColumns}
+                    rows={sortedSectorRows}
+                    sort={sectorSort}
+                    selectedSectorId={effectiveSelectedSectorId}
+                    onHeaderClick={handleSectorHeaderClick}
+                    onSelectSector={setSelectedSectorId}
+                  />
+                </>
+              )}
             </>
           )}
         </>

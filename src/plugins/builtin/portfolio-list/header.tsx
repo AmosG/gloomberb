@@ -99,11 +99,11 @@ export function PortfolioCashMarginDrawer({
 }) {
   const convertAccountValue = (value: number) => convertCurrency(
     value,
-    accountState.account.currency || baseCurrency,
+    accountState.account.currency ?? "",
     baseCurrency,
     exchangeRates,
   );
-  const previewText = `${accountState.visibleCashBalances.length} ccy · Cash ${formatCompact(convertAccountValue(accountState.account.totalCashValue ?? 0))} · ${accountState.sourceLabel}`;
+  const previewText = `${accountState.visibleCashBalances.length} ccy · Cash ${formatCompact(convertAccountValue(accountState.account.totalCashValue ?? Number.NaN))} · ${accountState.sourceLabel}`;
   const drawerHeight = Math.max(1, height);
 
   if (!expanded) {
