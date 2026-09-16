@@ -6,7 +6,13 @@ import { useThemeColors } from "../../theme/theme-context";
 import { t } from "../../i18n";
 import { useRemoteUiNode } from "../../remote/semantic-tree";
 
-/** `plain` is text that happens to be clickable: no border, no fill. Status bar chips use it. */
+/**
+ * `ghost` is the quiet button in a row of buttons: it keeps the border so it
+ * still reads as a control next to a primary one. `plain` is text that happens
+ * to be clickable: no border, no fill. Anything shaped like a row, a table
+ * cell, a status bar chip or a link is `plain` — a box drawn around it reads as
+ * a control nested in the surface instead of part of it.
+ */
 export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "plain";
 
 export interface ButtonProps {

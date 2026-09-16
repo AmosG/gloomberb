@@ -247,7 +247,7 @@ export function InlineFieldView({
           label={`Edit ${field.label}`}
           displayLabel={truncateText(displayValue, valueWidth)}
           width={valueWidth}
-          variant="ghost"
+          variant="plain"
           compact
           onPress={() => {
             onFocus();

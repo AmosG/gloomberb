@@ -20,6 +20,12 @@ body {
 input, textarea, button { font: inherit; }
 input, textarea { cursor: text; user-select: text; }
 button, [data-gloom-interactive="true"] { cursor: pointer; }
+/* `plain` buttons drop the border, so hover is the only thing left that says
+   the row or chip is clickable. A translucent wash reads the same on the
+   sidebar, a pane body and the status bar. */
+[data-gloom-role="desktop-button"][data-gloom-variant="plain"]:not(:disabled):hover {
+  background-color: color-mix(in srgb, var(--gloom-text-bright) 8%, transparent);
+}
 [data-gloom-hover-bg="true"]:hover {
   background-color: var(--gloom-box-hover-bg) !important;
 }

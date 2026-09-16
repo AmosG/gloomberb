@@ -67,6 +67,7 @@ export function WebButton({
         if (!event.repeat) onPress?.();
       }}
       data-gloom-role="desktop-button"
+      data-gloom-variant={variant}
       data-gloom-interactive={disabled ? undefined : "true"}
       style={{
         display: "inline-flex",
