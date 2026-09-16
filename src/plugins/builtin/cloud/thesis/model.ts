@@ -19,17 +19,33 @@ export const THESIS_METRIC_KEYS: ReadonlyArray<{ key: string; label: string; uni
   { key: "revenueGrowthTtmPct", label: "Revenue growth, trailing 4Q vs prior 4Q", unit: "%" },
   { key: "dilutedSharesChangeYoYPct", label: "Diluted share count change YoY", unit: "%" },
   { key: "freeCashFlowTtm", label: "Free cash flow, trailing 4Q", unit: "" },
+  { key: "capexTtm", label: "Capex, trailing 4Q", unit: "" },
+  { key: "capexGrowthYoYPct", label: "Capex growth YoY, latest quarter", unit: "%" },
   { key: "netDebtToEbitda", label: "Net debt / EBITDA", unit: "x" },
   { key: "forwardPE", label: "Forward P/E", unit: "x" },
   { key: "trailingPE", label: "Trailing P/E", unit: "x" },
 ];
 
+/** Macro series a pillar can bind to; checked against FRED, not a ticker. */
+export const THESIS_SERIES_KEYS: ReadonlyArray<{ key: string; label: string; unit: string }> = [
+  { key: "series:DGS10", label: "10-year Treasury yield", unit: "%" },
+  { key: "series:DGS2", label: "2-year Treasury yield", unit: "%" },
+  { key: "series:FEDFUNDS", label: "Fed funds rate", unit: "%" },
+  { key: "series:UNRATE", label: "Unemployment rate", unit: "%" },
+  { key: "series:CPIYOY", label: "CPI inflation YoY", unit: "%" },
+  { key: "series:HYOAS", label: "High-yield credit spread", unit: "%" },
+  { key: "series:VIX", label: "VIX", unit: "" },
+  { key: "series:T10Y2Y", label: "10y minus 2y Treasury spread", unit: "%" },
+];
+
+const ALL_METRIC_KEYS = [...THESIS_METRIC_KEYS, ...THESIS_SERIES_KEYS];
+
 export function metricLabel(key: string): string {
-  return THESIS_METRIC_KEYS.find((entry) => entry.key === key)?.label ?? key;
+  return ALL_METRIC_KEYS.find((entry) => entry.key === key)?.label ?? key;
 }
 
 export function metricUnit(key: string): string {
-  return THESIS_METRIC_KEYS.find((entry) => entry.key === key)?.unit ?? "";
+  return ALL_METRIC_KEYS.find((entry) => entry.key === key)?.unit ?? "";
 }
 
 export function computeHealth(document: ThesisDocument): ThesisHealth {

@@ -14,7 +14,7 @@ import {
 import { ApiRequestError } from "../../../../api-client/errors";
 import type { AppNotificationRequest } from "../../../../types/plugin";
 import type { DialogApi } from "../../../../ui/dialog";
-import { THESIS_METRIC_KEYS, emptyDocument, itemId } from "./model";
+import { THESIS_METRIC_KEYS, THESIS_SERIES_KEYS, emptyDocument, itemId } from "./model";
 import { confirm, promptChoice, promptNumber, promptSelect, promptText, promptTextarea } from "./prompts";
 import { thesisStore } from "./store";
 
@@ -196,30 +196,41 @@ export async function addPillar(ctx: FlowContext, thesis: CloudThesis): Promise<
   });
   if (!text) return undefined;
   const metricKey = await promptSelect(ctx.dialog, {
-    label: "Bind it to a fundamental?",
-    body: ["A bound pillar checks itself against the latest statements."],
+    label: "Bind it to a number?",
     defaultValue: "",
-    options: [{ label: "No, it is a judgment call", value: "" }, ...THESIS_METRIC_KEYS.map((entry) => ({ label: entry.label, value: entry.key }))],
+    options: [
+      { label: "No, it is a judgment call", value: "", description: "The review weighs news and filings against it." },
+      ...THESIS_METRIC_KEYS.map((entry) => ({ label: entry.label, value: entry.key, description: "Checked against the latest statements of the ticker it is about." })),
+      ...THESIS_SERIES_KEYS.map((entry) => ({ label: entry.label, value: entry.key, description: "Checked against FRED; not tied to a ticker." })),
+    ],
   });
   if (metricKey === undefined) return undefined;
   const pillar: ThesisPillar = { id: itemId(), text, kind: "qualitative", status: "unverified" };
+  const isSeries = metricKey.startsWith("series:");
   if (metricKey) {
     const op = await promptSelect(ctx.dialog, {
       label: "Holds while the value is",
       options: [{ label: "at or above the bound", value: ">=" }, { label: "at or below the bound", value: "<=" }],
     });
     if (!op) return undefined;
-    const unit = THESIS_METRIC_KEYS.find((entry) => entry.key === metricKey)?.unit;
+    const unit = [...THESIS_METRIC_KEYS, ...THESIS_SERIES_KEYS].find((entry) => entry.key === metricKey)?.unit;
     const value = await promptNumber(ctx.dialog, { label: `Bound${unit ? ` (${unit})` : ""}`, placeholder: "70" });
     if (value === undefined) return undefined;
     pillar.kind = "metric";
     pillar.metric = { key: metricKey, op: op as ">=" | "<=", value, ...(unit ? { unit } : {}) };
   }
-  if (thesis.document.instruments.length > 1) {
+  // A claim can be about a held instrument or about a ticker the thesis only
+  // listens to (a customer's capex); a macro series is about neither.
+  const scopes = [...thesis.document.instruments.map((entry) => entry.symbol), ...thesis.document.evidence.symbols];
+  if (!isSeries && scopes.length > 1) {
     const scope = await promptSelect(ctx.dialog, {
-      label: "About which instrument?",
+      label: "About which ticker?",
       defaultValue: "",
-      options: [{ label: "The thesis as a whole", value: "" }, ...thesis.document.instruments.map((entry) => ({ label: entry.symbol, value: entry.symbol }))],
+      options: [
+        { label: "The thesis as a whole", value: "" },
+        ...thesis.document.instruments.map((entry) => ({ label: entry.symbol, value: entry.symbol, description: "Held." })),
+        ...thesis.document.evidence.symbols.map((symbol) => ({ label: symbol, value: symbol, description: "Evidence only, not held." })),
+      ],
     });
     if (scope === undefined) return undefined;
     if (scope) pillar.scope = scope;
