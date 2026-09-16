@@ -85,7 +85,7 @@ override the rule with `isConfigured(values)`.
 
 Errors a plugin logs through `ctx.log.error` are counted per plugin and shown
 in the pane as `errors (n)`, with the last message in the detail view and the
-`l` key opening the debug log filtered to that plugin. Log real failures there
+`d` key opening the debug log filtered to that plugin. Log real failures there
 rather than swallowing them; it is how a user finds out that a plugin which
 loaded fine is failing at runtime.
 

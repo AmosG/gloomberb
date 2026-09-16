@@ -6,7 +6,7 @@ import {
   InputSearchBar,
   KeyValueRow,
   PaneStatusBody,
-  SegmentedControl,
+  Tabs,
   useExternalLinkFooter,
   type DataTableCell,
   type DataTableColumn,
@@ -254,15 +254,6 @@ export function PluginMarketplacePane({ focused, width, height }: PaneProps) {
   }, []);
   const blurSearch = useCallback(() => setSearchFocused(false), []);
 
-  const cycleCategory = useCallback(() => {
-    setCategory((current) => {
-      if (categories.length === 0) return null;
-      const index = current ? categories.indexOf(current) : -1;
-      const next = categories[index + 1];
-      return next ?? null;
-    });
-  }, [categories]);
-
   const confirm = useCallback((options: {
     title: string;
     body: string[];
@@ -466,14 +457,13 @@ export function PluginMarketplacePane({ focused, width, height }: PaneProps) {
       case "e": toggleSelected(); return true;
       case "s": setupSelected(); return true;
       case "p": openSelected(); return true;
-      case "l": openLog(); return true;
+      case "d": openLog(); return true;
       case "r": refresh(true); return true;
       case "b": setShowBuiltin((value) => !value); return true;
-      case "c": cycleCategory(); return true;
       case "/": focusSearch(); return true;
       default: return false;
     }
-  }, [cycleCategory, focusSearch, installSelected, openLog, openSelected, refresh, removeSelected, setupSelected, toggleSelected, updateSelected]);
+  }, [focusSearch, installSelected, openLog, openSelected, refresh, removeSelected, setupSelected, toggleSelected, updateSelected]);
 
   /**
    * Pane keys go through the table's key handler, which runs while the pane
@@ -509,7 +499,7 @@ export function PluginMarketplacePane({ focused, width, height }: PaneProps) {
   if (canToggle) hints.push({ id: "toggle", key: "e", label: selected?.enabled ? "disable" : "nable", onPress: toggleSelected });
   if (canSetup) hints.push({ id: "setup", key: "s", label: "etup", onPress: setupSelected });
   if (canOpen) hints.push({ id: "open-pane", key: "p", label: "ane", onPress: openSelected });
-  if (canLog) hints.push({ id: "log", key: "l", label: "og", onPress: openLog });
+  if (canLog) hints.push({ id: "log", key: "d", label: "ebug log", onPress: openLog });
   if (canRemove) hints.push({ id: "remove", key: "x", label: " remove", onPress: () => { void removeSelected(); } });
   hints.push({ id: "builtin", key: "b", label: showBuiltin ? "uilt in ✓" : "uilt in", onPress: () => setShowBuiltin((value) => !value) });
 
@@ -523,8 +513,11 @@ export function PluginMarketplacePane({ focused, width, height }: PaneProps) {
   });
 
   const columns = useMemo(() => buildColumns(width), [width]);
-  const categoryOptions = useMemo(
-    () => [{ label: "all", value: "" }, ...categories.map((entry) => ({ label: entry, value: entry }))],
+  const categoryTabs = useMemo(
+    () => [
+      { label: "All", value: "" },
+      ...categories.map((entry) => ({ label: entry.charAt(0).toUpperCase() + entry.slice(1), value: entry })),
+    ],
     [categories],
   );
 
@@ -561,14 +554,15 @@ export function PluginMarketplacePane({ focused, width, height }: PaneProps) {
               onQueryChange={setQuery}
             />
             {categories.length > 1 ? (
-              <Box height={1} width={width} paddingLeft={1}>
-                <SegmentedControl
-                  options={categoryOptions}
-                  value={category ?? ""}
-                  onChange={(value) => setCategory(value || null)}
-                  width={width - 2}
-                />
-              </Box>
+              <Tabs
+                tabs={categoryTabs}
+                activeValue={category ?? ""}
+                onSelect={(value) => setCategory(value || null)}
+                focused={focused && !searchFocused && !detailOpen}
+                variant="underline"
+                dense
+                scrollable
+              />
             ) : null}
           </Box>
         )}
