@@ -1,13 +1,15 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { act, useState } from "react";
 import { apiClient, type CloudProxyStatementListPayload, type CloudProxyStatementPayload } from "../../../api-client";
+import { ApiRequestError } from "../../../api-client/errors";
 import { PaneFooterBar, PaneFooterProvider } from "../../../components/layout/pane/footer";
-import { testRender } from "../../../renderers/opentui/test-utils";
+import { emitKeypress, testRender } from "../../../renderers/opentui/test-utils";
 import { createInitialState } from "../../../state/app/context";
 import { createTestPaneConfig, createTestTicker, TestPaneProvider } from "../../../test-support/pane";
 import { createTestPluginRuntime } from "../../../test-support/plugin-runtime";
+import { MemoryPluginPersistence } from "../../../test-support/plugin-persistence";
 import { Box } from "../../../ui";
-import { resetExecutivesPersistence } from "./data";
+import { attachExecutivesPersistence, loadProxyStatement, loadProxyStatements, resetExecutivesPersistence } from "./data";
 import { ExecutivesPane } from "./pane";
 
 function statement(ticker: string, year: number): CloudProxyStatementPayload {
@@ -128,4 +130,151 @@ test("a failed single-year request can be retried from the footer without changi
   expect(setup!.captureCharFrame()).toContain("ALPHA compensation 2026");
   expect(setup!.captureCharFrame()).not.toContain("Proxy temporarily unavailable");
   expect(detail).toHaveBeenCalledTimes(2);
+});
+
+function seedCache(stale = true) {
+  const persistence = new MemoryPluginPersistence();
+  const report = statement("ALPHA", 2026);
+  const list = { company: report.company, proxies: [report] };
+  const options = { sourceKey: "executives", schemaVersion: 1, stale, expired: stale };
+  persistence.seedResource("proxies", "ALPHA", list, options);
+  persistence.seedResource("proxy", "ALPHA:2026", report, options);
+  attachExecutivesPersistence(persistence);
+  return { persistence, report, list };
+}
+
+test("cached list and statement failures retain original age behind the warning indicator and refresh clears it", async () => {
+  const { persistence, report, list: payload } = seedCache();
+  const cacheOptions = { sourceKey: "executives", allowExpired: true };
+  const original = persistence.getResource("proxy", "ALPHA:2026", cacheOptions)!;
+  let unavailable = true;
+  const list = spyOn(apiClient, "getProxyStatements").mockImplementation(async () => {
+    if (unavailable) throw new Error("Discovery outage");
+    return payload;
+  });
+  const detail = spyOn(apiClient, "getProxyStatement").mockImplementation(async () => {
+    if (unavailable) throw new Error("Statement outage");
+    return report;
+  });
+  restore.push(() => list.mockRestore(), () => detail.mockRestore());
+  await mount();
+  let frame = setup!.captureCharFrame();
+  expect(frame).toContain("ALPHA compensation 2026");
+  expect(frame).toContain("filed Apr 01, 2026");
+  expect(frame).toContain("⚠");
+  expect(frame).not.toContain("Discovery outage");
+  expect(frame).not.toContain("Statement outage");
+  expect(persistence.getResource("proxy", "ALPHA:2026", cacheOptions)).toEqual(original);
+  await act(async () => setup!.mockInput.pressKey("!"));
+  await settle();
+  frame = setup!.captureCharFrame();
+  expect(frame).toContain("Discovery outage");
+  expect(frame).toContain("Statement outage");
+  expect(frame).toContain(new Date(original.fetchedAt).toISOString());
+  await emitKeypress(setup!, { name: "escape" });
+  await settle();
+  unavailable = false;
+  await act(async () => setup!.mockInput.pressKey("r"));
+  await settle();
+  frame = setup!.captureCharFrame();
+  expect(frame).toContain("ALPHA compensation 2026");
+  expect(frame).not.toContain("⚠");
+  const fresh = await loadProxyStatement("ALPHA", 2026);
+  expect(fresh.refreshError).toBeUndefined();
+  expect(fresh.fetchedAt).toBeGreaterThan(original.fetchedAt);
+  expect(fresh.data?.filedAt).toBe(report.filedAt);
+  expect(fresh.data?.updatedAt).toBe(report.updatedAt);
+});
+
+for (const status of [401, 402, 403, 404]) test(`authoritative ${status} responses never serve cached executive data`, async () => {
+  const { persistence } = seedCache(false);
+  const error = new ApiRequestError("Account not found", status);
+  const list = spyOn(apiClient, "getProxyStatements").mockRejectedValue(error);
+  const detail = spyOn(apiClient, "getProxyStatement").mockRejectedValue(error);
+  restore.push(() => list.mockRestore(), () => detail.mockRestore());
+  for (const load of [() => loadProxyStatements("ALPHA", { force: true }), () => loadProxyStatement("ALPHA", 2026, { force: true })]) {
+    if (status === 404) expect(await load()).toEqual({ data: null, fetchedAt: null });
+    else await expect(load()).rejects.toBe(error);
+  }
+  expect(persistence.getResource("proxies", "ALPHA", { sourceKey: "executives", allowExpired: true })).toBeNull();
+  expect(persistence.getResource("proxy", "ALPHA:2026", { sourceKey: "executives", allowExpired: true })).toBeNull();
+  await mount();
+  const frame = setup!.captureCharFrame();
+  expect(frame).not.toContain("ALPHA compensation");
+  expect(frame).not.toContain("pen filing");
+  expect(frame).not.toContain("⚠");
+  expect(frame).toContain(status === 404 ? "No proxy statement on file" : "Account not found");
+  if (status !== 404) expect(frame).not.toContain("No proxy statement on file");
+});
+
+test("an older forced request cannot replace a newer cached statement or mark its refresh failed", async () => {
+  const { persistence, report } = seedCache(false);
+  const old = deferred<CloudProxyStatementPayload>();
+  const current = { ...report, highlights: "Current revised extraction" };
+  const detail = spyOn(apiClient, "getProxyStatement")
+    .mockImplementationOnce(() => old.promise).mockResolvedValue(current);
+  restore.push(() => detail.mockRestore());
+  const older = loadProxyStatement("ALPHA", 2026, { force: true });
+  await Promise.resolve();
+  await loadProxyStatement("ALPHA", 2026, { force: true });
+  old.reject(new ApiRequestError("Retired request denied", 403));
+  await expect(older).rejects.toThrow("Retired request denied");
+  expect(persistence.getResource<CloudProxyStatementPayload>("proxy", "ALPHA:2026", { sourceKey: "executives" })?.value.highlights).toBe(current.highlights);
+  expect((await loadProxyStatement("ALPHA", 2026)).data?.highlights).toBe(current.highlights);
+  expect(detail).toHaveBeenCalledTimes(2);
+});
+
+test("failed forced refresh of fresh cached discovery is retried on reopen without resetting its age", async () => {
+  const { persistence, list: payload } = seedCache(false);
+  const original = persistence.getResource("proxies", "ALPHA", { sourceKey: "executives" })!;
+  const list = spyOn(apiClient, "getProxyStatements")
+    .mockRejectedValueOnce(new Error("Temporary discovery outage")).mockResolvedValue(payload);
+  restore.push(() => list.mockRestore());
+  const retained = await loadProxyStatements("ALPHA", { force: true });
+  expect(retained.fetchedAt).toBe(original.fetchedAt);
+  expect(retained.refreshError).toBe("Temporary discovery outage");
+  expect((await loadProxyStatements("ALPHA")).refreshError).toBeUndefined();
+  expect(list).toHaveBeenCalledTimes(2);
+});
+
+test("in-memory data survives a transient refresh but is removed when access is denied", async () => {
+  const report = statement("ALPHA", 2026);
+  let failure: Error | null = null;
+  const list = spyOn(apiClient, "getProxyStatements").mockImplementation(async () => {
+    if (failure) throw failure;
+    return { company: report.company, proxies: [report] };
+  });
+  const detail = spyOn(apiClient, "getProxyStatement").mockImplementation(async () => {
+    if (failure) throw failure;
+    return report;
+  });
+  restore.push(() => list.mockRestore(), () => detail.mockRestore());
+  await mount();
+  failure = new Error("Transient request failed");
+  await act(async () => setup!.mockInput.pressKey("r"));
+  await settle();
+  expect(setup!.captureCharFrame()).toContain("ALPHA compensation 2026");
+  expect(setup!.captureCharFrame()).toContain("⚠");
+  failure = new ApiRequestError("Account not found", 403);
+  await act(async () => setup!.mockInput.pressKey("r"));
+  await settle();
+  const frame = setup!.captureCharFrame();
+  expect(frame).toContain("Account not found");
+  expect(frame).not.toContain("ALPHA compensation");
+  expect(frame).not.toContain("pen filing");
+  expect(frame).not.toContain("⚠");
+});
+
+test("failed rediscovery after an explicit 404 reports the failure instead of reusing the empty state", async () => {
+  const list = spyOn(apiClient, "getProxyStatements")
+    .mockRejectedValueOnce(new ApiRequestError("No proxy statements", 404))
+    .mockRejectedValue(new Error("Discovery unavailable"));
+  restore.push(() => list.mockRestore());
+  await mount();
+  expect(setup!.captureCharFrame()).toContain("No proxy statement on file");
+  await act(async () => setup!.mockInput.pressKey("r"));
+  await settle();
+  expect(setup!.captureCharFrame()).toContain("Discovery unavailable");
+  expect(setup!.captureCharFrame()).not.toContain("No proxy statement on file");
+  expect(setup!.captureCharFrame()).not.toContain("⚠");
 });

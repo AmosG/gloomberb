@@ -7,6 +7,7 @@ import {
   EmptyState, PaneStatusBody, Prose, SectionHeading,
   Tabs,
   usePaneFooter,
+  usePaneNoticeFooter,
   type PaneFooterSegment
 } from "../../../components";
 import { useShortcut } from "../../../react/input";
@@ -23,7 +24,7 @@ import {
 } from "../../../ui";
 import { isPlainKey } from "../../../utils/keyboard";
 import { useBoundTicker } from "../shared/ticker-request";
-import { loadProxyStatement, loadProxyStatements } from "./data";
+import { discardProxyData, loadProxyStatement, loadProxyStatements } from "./data";
 import {
   equityShare,
   formatChange,
@@ -36,6 +37,13 @@ import {
 export const EXECUTIVES_PANE_ID = "executives";
 
 const MAX_PROSE_WIDTH = 100;
+
+function retainedDataNotice(subject: string, error: string, fetchedAt: number | null): string {
+  const retrieved = new Date(fetchedAt ?? Number.NaN);
+  const age = Number.isFinite(retrieved.getTime())
+    ? `retrieved ${retrieved.toISOString()}` : "with unavailable retrieval time";
+  return `${subject} refresh failed: ${error}. Retained data ${age}.`;
+}
 
 /** A figure and what it is, value first so the column of numbers is what the eye reads. */
 function FigureLine({
@@ -239,15 +247,26 @@ function ExecutiveResearch({ ticker, focused, width }: { ticker: string; focused
   const scrollRef = useRef<ScrollBoxRenderable | null>(null);
   const [selectedYear, setYear] = useState<number | null>(null);
   const loadYears = useCallback((force: boolean) => loadProxyStatements(ticker, { force }), [ticker]);
-  const list = useAsyncResource(loadYears);
-  const years = list.data?.proxies ?? [];
+  const list = useAsyncResource(loadYears, { clearOnError: discardProxyData });
+  const years = list.data?.data?.proxies ?? [];
   const year = years.some(entry => entry.proxyYear === selectedYear)
     ? selectedYear : years[0]?.proxyYear ?? null;
   const loadStatement = useCallback((force: boolean) => loadProxyStatement(ticker, year!, { force }), [ticker, year]);
-  const detail = useAsyncResource(year === null ? null : loadStatement);
-  const statement = detail.data;
+  const detail = useAsyncResource(year === null ? null : loadStatement, { clearOnError: discardProxyData });
+  const statement = detail.data?.data ?? null;
   const loading = list.loading || detail.loading;
-  const noProxy = list.error !== null && /404|not found|no proxy/i.test(list.error);
+  const listError = list.error ?? list.data?.refreshError;
+  const statementError = detail.error ?? detail.data?.refreshError;
+  usePaneNoticeFooter({
+    registrationId: `${EXECUTIVES_PANE_ID}:data-notices`,
+    notices: [
+      list.data?.data && listError
+        ? retainedDataNotice("Proxy list", listError, list.data.fetchedAt) : null,
+      detail.data?.data && statementError
+        ? retainedDataNotice(`${year} proxy`, statementError, detail.data.fetchedAt) : null,
+    ].filter((notice): notice is string => notice !== null),
+    focused,
+  });
   const refresh = useCallback(() => {
     void list.reload();
     if (year !== null) void detail.reload();
@@ -303,8 +322,8 @@ function ExecutiveResearch({ ticker, focused, width }: { ticker: string; focused
       ...(statement ? [{ id: "open", key: "o", label: "pen filing", onPress: openFiling }] : []),
       { id: "refresh", key: "r", label: "efresh", onPress: refresh },
     ];
-    return { info, hints, error: statement ? detail.error : undefined };
-  }, [loading, statement, detail.error, openFiling, refresh]);
+    return { info, hints };
+  }, [loading, statement, openFiling, refresh]);
 
   const figures = useMemo(
     () => (statement ? figuresOf(statement) : []),
@@ -317,13 +336,13 @@ function ExecutiveResearch({ ticker, focused, width }: { ticker: string; focused
     Math.max(4, ...figures.map((figure) => figure.value.length)),
   );
 
-  if (list.loading && !list.data) {
+  if (list.loading && !list.data?.data) {
     return <PaneStatusBody loading align="center" loadingLabel="Loading proxy statement..." />;
   }
-  if (noProxy || (!list.error && years.length === 0)) {
+  if (!list.error && years.length === 0) {
     return <EmptyState title={`No proxy statement on file for ${ticker}.`} />;
   }
-  if (list.error) {
+  if (list.error && !list.data?.data) {
     return <PaneStatusBody error={list.error} errorTitle="Could not load executive compensation." />;
   }
 
@@ -427,7 +446,8 @@ function ExecutiveResearch({ ticker, focused, width }: { ticker: string; focused
             )}
           </Box>
         ) : (
-          <PaneStatusBody loading={detail.loading} error={detail.error} errorTitle="Could not load this proxy statement." />
+          <PaneStatusBody loading={detail.loading} error={detail.error} errorTitle="Could not load this proxy statement."
+            empty={detail.data?.data === null} emptyTitle={`No ${year} proxy statement on file for ${ticker}.`} />
         )}
       </ScrollBox>
     </Box>

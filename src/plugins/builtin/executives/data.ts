@@ -3,6 +3,7 @@ import {
   type CloudProxyStatementListPayload,
   type CloudProxyStatementPayload,
 } from "../../../api-client";
+import { ApiRequestError } from "../../../api-client/errors";
 import type { PluginPersistence } from "../../../types/plugin";
 
 /**
@@ -27,17 +28,20 @@ const STATEMENT_CACHE_POLICY = {
   expireMs: 365 * 24 * 60 * 60 * 1000,
 } as const;
 
+interface ProxyResult<T> {
+  /** Null is an explicit 404, not a transient failure or access denial. */
+  data: T | null;
+  fetchedAt: number | null;
+  refreshError?: string;
+}
+type ActiveRequest<T> = { store: PluginPersistence | null; promise: Promise<ProxyResult<T>> };
 let persistence: PluginPersistence | null = null;
-const activeListFetches = new Map<
-  string,
-  Promise<CloudProxyStatementListPayload>
->();
-const activeStatementFetches = new Map<
-  string,
-  Promise<CloudProxyStatementPayload>
->();
+const activeListFetches = new Map<string, ActiveRequest<CloudProxyStatementListPayload>>();
+const activeStatementFetches = new Map<string, ActiveRequest<CloudProxyStatementPayload>>();
+const failedRefreshes = new Set<string>();
 
 export function attachExecutivesPersistence(value: PluginPersistence): void {
+  if (persistence !== value) resetExecutivesPersistence();
   persistence = value;
 }
 
@@ -45,95 +49,78 @@ export function resetExecutivesPersistence(): void {
   persistence = null;
   activeListFetches.clear();
   activeStatementFetches.clear();
+  failedRefreshes.clear();
 }
 
-function cached<T>(kind: string, key: string, allowExpired = false) {
-  return persistence?.getResource<T>(kind, key, {
-    sourceKey: CACHE_SOURCE,
-    schemaVersion: CACHE_SCHEMA_VERSION,
-    allowExpired,
-  });
+/** Removed or denied research must not be replaced by previously cached data. */
+export function discardProxyData(error: unknown): boolean {
+  const status = error instanceof ApiRequestError ? error.status : undefined;
+  return status !== undefined && status >= 400 && status < 500 && status !== 408 && status !== 429;
 }
 
-function remember<T>(
+function loadCached<T>(
   kind: string,
   key: string,
-  value: T,
+  active: Map<string, ActiveRequest<T>>,
   policy: { staleMs: number; expireMs: number },
-) {
-  persistence?.setResource(kind, key, value, {
-    sourceKey: CACHE_SOURCE,
-    schemaVersion: CACHE_SCHEMA_VERSION,
-    cachePolicy: policy,
-  });
+  force: boolean,
+  fetch: () => Promise<T>,
+): Promise<ProxyResult<T>> {
+  const store = persistence;
+  const options = { sourceKey: CACHE_SOURCE, schemaVersion: CACHE_SCHEMA_VERSION };
+  const failedKey = `${kind}:${key}`;
+  const hit = store?.getResource<T>(kind, key, options);
+  if (!force && !failedRefreshes.has(failedKey) && hit && !hit.stale) {
+    return Promise.resolve({ data: hit.value, fetchedAt: hit.fetchedAt });
+  }
+  const existing = active.get(key);
+  if (!force && existing?.store === store) return existing.promise;
+  const request: ActiveRequest<T> = { store, promise: null! };
+  const current = () => persistence === store && active.get(key) === request;
+  request.promise = Promise.resolve().then(fetch).then((data) => {
+    const fetchedAt = Date.now();
+    if (current()) {
+      failedRefreshes.delete(failedKey);
+      store?.setResource(kind, key, data, { ...options, cachePolicy: policy });
+    }
+    return { data, fetchedAt };
+  }).catch((error: unknown) => {
+    // A failed forced refresh must be retried on reopen even before the old TTL.
+    if (current()) failedRefreshes.add(failedKey);
+    if (discardProxyData(error)) {
+      if (current()) store?.deleteResource(kind, key, { sourceKey: CACHE_SOURCE });
+      if (error instanceof ApiRequestError && error.status === 404) {
+        return { data: null, fetchedAt: null };
+      }
+      throw error;
+    }
+    const fallback = store?.getResource<T>(kind, key, { ...options, allowExpired: true });
+    if (!fallback) throw error;
+    return {
+      data: fallback.value,
+      fetchedAt: fallback.fetchedAt,
+      refreshError: (error instanceof Error ? error.message : String(error)).trim() || "Request failed",
+    };
+  }).finally(() => { if (active.get(key) === request) active.delete(key); });
+  active.set(key, request);
+  return request.promise;
 }
 
 export async function loadProxyStatements(
   ticker: string,
   options?: { force?: boolean },
-): Promise<CloudProxyStatementListPayload> {
+): Promise<ProxyResult<CloudProxyStatementListPayload>> {
   const key = ticker.toUpperCase();
-  const force = options?.force ?? false;
-  const hit = cached<CloudProxyStatementListPayload>(LIST_KIND, key);
-  if (!force && hit && !hit.stale) return hit.value;
-
-  const active = activeListFetches.get(key);
-  if (active && !force) return active;
-
-  const request = apiClient
-    .getProxyStatements(key)
-    .then((payload) => {
-      remember(LIST_KIND, key, payload, LIST_CACHE_POLICY);
-      return payload;
-    })
-    .catch((error: unknown) => {
-      const expired = cached<CloudProxyStatementListPayload>(
-        LIST_KIND,
-        key,
-        true,
-      );
-      if (expired) return expired.value;
-      throw error;
-    })
-    .finally(() => {
-      if (activeListFetches.get(key) === request) activeListFetches.delete(key);
-    });
-  activeListFetches.set(key, request);
-  return request;
+  return loadCached(LIST_KIND, key, activeListFetches, LIST_CACHE_POLICY, options?.force ?? false,
+    () => apiClient.getProxyStatements(key));
 }
 
 export async function loadProxyStatement(
   ticker: string,
   year: number,
   options?: { force?: boolean },
-): Promise<CloudProxyStatementPayload> {
+): Promise<ProxyResult<CloudProxyStatementPayload>> {
   const key = `${ticker.toUpperCase()}:${year}`;
-  const force = options?.force ?? false;
-  const hit = cached<CloudProxyStatementPayload>(STATEMENT_KIND, key);
-  if (!force && hit && !hit.stale) return hit.value;
-
-  const active = activeStatementFetches.get(key);
-  if (active && !force) return active;
-
-  const request = apiClient
-    .getProxyStatement(ticker, year)
-    .then((payload) => {
-      remember(STATEMENT_KIND, key, payload, STATEMENT_CACHE_POLICY);
-      return payload;
-    })
-    .catch((error: unknown) => {
-      const expired = cached<CloudProxyStatementPayload>(
-        STATEMENT_KIND,
-        key,
-        true,
-      );
-      if (expired) return expired.value;
-      throw error;
-    })
-    .finally(() => {
-      if (activeStatementFetches.get(key) === request)
-        activeStatementFetches.delete(key);
-    });
-  activeStatementFetches.set(key, request);
-  return request;
+  return loadCached(STATEMENT_KIND, key, activeStatementFetches, STATEMENT_CACHE_POLICY, options?.force ?? false,
+    () => apiClient.getProxyStatement(ticker.toUpperCase(), year));
 }
