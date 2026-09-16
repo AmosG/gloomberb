@@ -31,12 +31,13 @@ import { useTwitterFeedKeyboard } from "./keyboard";
 
 export function TwitterTickerTab({ focused, width, height }: TickerResearchTabProps) {
   const { symbol } = usePaneTicker();
-  const load = useCallback(() => {
+  const load = useCallback((offset: number) => {
     if (!symbol) throw new Error("No ticker selected");
     return apiClient.getCloudTickerTweets({
       ticker: symbol,
       hours: DEFAULT_TWEET_HOURS,
       limit: DEFAULT_TWEET_LIMIT,
+      offset,
       includeReplies: false,
     });
   }, [symbol]);
@@ -235,13 +236,14 @@ export function TwitterFeedPane({ focused, width, height }: PaneProps) {
   const activeFeedQuery = activeFeed?.query.trim() ?? "";
   const activeFeedQueryType = activeFeed?.queryType ?? "Latest";
   const searchEnabled = activeFeedQuery.length > 0;
-  const loadActiveFeed = useCallback(() => {
+  const loadActiveFeed = useCallback((offset: number) => {
     if (!activeFeedQuery) throw new Error("No X feed selected");
     return apiClient.searchCloudTweets({
       query: activeFeedQuery,
       queryType: activeFeedQueryType,
       hours: DEFAULT_TWEET_HOURS,
       limit: DEFAULT_TWEET_LIMIT,
+      offset,
     });
   }, [activeFeedQuery, activeFeedQueryType]);
 

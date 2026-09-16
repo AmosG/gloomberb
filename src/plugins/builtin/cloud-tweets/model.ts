@@ -27,9 +27,22 @@ export type TweetSortColumnId = "time" | "likes" | "views";
 export type TweetSortDirection = "asc" | "desc";
 
 export interface TweetLoadState {
+  /** The pages loaded so far, merged into one response. */
   data: CloudTweetSearchResponse | null;
   loading: boolean;
   error: string | null;
+  loadingMore: boolean;
+  hasMore: boolean;
+}
+
+/** Pages overlap when tweets arrive while a feed is being read. */
+export function appendNewTweets(
+  current: CloudTweetPayload[],
+  incoming: CloudTweetPayload[],
+): CloudTweetPayload[] {
+  const known = new Set(current.map((tweet) => tweet.id));
+  const added = incoming.filter((tweet) => !known.has(tweet.id));
+  return added.length > 0 ? [...current, ...added] : current;
 }
 
 export interface TwitterFeed {
