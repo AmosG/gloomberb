@@ -1,10 +1,19 @@
 import { measurePerf } from "../../utils/perf-marks";
 
+/**
+ * Each streamed quote arrives in its own task, so a busy tape would otherwise
+ * commit and paint once per tick. Listeners hear about the first change at
+ * once and about the rest of a burst at most this often; a quote landing
+ * 100ms late is invisible, a render per tick is not.
+ */
+export const MARKET_DATA_NOTIFY_THROTTLE_MS = 100;
+
 export class MarketDataCoordinatorEvents {
   private version = 0;
   private pendingVersionBump = false;
   private pendingChangedKeys = new Set<string>();
   private pendingNotify = false;
+  private lastNotifyAt = Number.NEGATIVE_INFINITY;
   private pendingListeners = new Set<() => void>();
   private readonly listeners = new Set<() => void>();
   private readonly keyListeners = new Map<string, Set<() => void>>();
@@ -78,11 +87,16 @@ export class MarketDataCoordinatorEvents {
   private scheduleNotify(): void {
     if (this.pendingNotify) return;
     this.pendingNotify = true;
-    setTimeout(() => this.flushNotify(), 0);
+    const sinceLastNotify = performance.now() - this.lastNotifyAt;
+    const delay = sinceLastNotify >= MARKET_DATA_NOTIFY_THROTTLE_MS
+      ? 0
+      : Math.ceil(MARKET_DATA_NOTIFY_THROTTLE_MS - sinceLastNotify);
+    setTimeout(() => this.flushNotify(), delay);
   }
 
   private flushNotify(): void {
     this.pendingNotify = false;
+    this.lastNotifyAt = performance.now();
     const listeners = [...this.pendingListeners];
     this.pendingListeners.clear();
     for (const listener of listeners) {
