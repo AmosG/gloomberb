@@ -497,23 +497,19 @@ export async function challenge(ctx: FlowContext, thesis: CloudThesis, target: D
   }
 }
 
-export async function runReview(ctx: FlowContext, thesis: CloudThesis): Promise<{ summary: string; signals: ThesisSignal[] } | undefined> {
-  if (needsPro(ctx, "Reviewing a thesis")) return undefined;
-  ctx.notify({ body: `Reviewing ${thesis.title} against fundamentals and news…`, type: "info" });
+export async function runReview(ctx: FlowContext, thesis: CloudThesis): Promise<boolean> {
+  if (needsPro(ctx, "Reviewing a thesis")) return false;
   try {
-    const result = await thesisStore.review(thesis.id);
-    const open = result.signals.filter((signal) => signal.status === "open").length;
-    ctx.notify({
-      body: open === 0 ? `${thesis.title}: nothing challenges the thesis.` : `${thesis.title}: ${open} ${open === 1 ? "signal" : "signals"} to rule on.`,
-      type: open === 0 ? "success" : "info",
-    });
-    return result;
+    await thesisStore.review(thesis.id);
+    ctx.notify({ body: `Reviewing ${thesis.title} against fundamentals, filings, and news. You get a card when it lands.`, type: "info" });
+    return true;
   } catch (error) {
     if (error instanceof ApiRequestError && error.status === 402) {
       needsPro(ctx, "Reviewing a thesis");
-      return undefined;
+      return false;
     }
-    return failed(ctx, error, "The review failed.");
+    failed(ctx, error, "The review could not start.");
+    return false;
   }
 }
 

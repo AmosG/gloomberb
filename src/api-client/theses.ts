@@ -6,7 +6,6 @@ import type {
   ThesisDraft,
   ThesisPatch,
   ThesisRevision,
-  ThesisReviewResult,
   ThesisSignal,
   ThesisStatus,
 } from "./types";
@@ -155,9 +154,12 @@ export class CloudThesesApi {
     );
   }
 
-  /** Pro: audits every claim against fundamentals and news, filing signals. */
-  reviewThesis(id: string): Promise<ThesisReviewResult> {
-    return this.request<ThesisReviewResult>(`/theses/${encode(id)}/review`, { method: "POST" });
+  /**
+   * Pro: queues the audit of every claim against fundamentals and news. It
+   * runs in the background; the result arrives as a `thesis.signals` frame.
+   */
+  reviewThesis(id: string): Promise<{ queued: boolean }> {
+    return this.request<{ queued: boolean }>(`/theses/${encode(id)}/review`, { method: "POST" });
   }
 
   /** Pro: a structured draft from a sentence of reasoning plus company data. */

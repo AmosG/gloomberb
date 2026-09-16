@@ -1658,12 +1658,6 @@ export interface ThesisPatch {
   reviewed?: boolean;
 }
 
-export interface ThesisReviewResult {
-  summary: string;
-  signals: ThesisSignal[];
-  thesis: CloudThesis;
-}
-
 // Team collections
 
 export type TeamCollectionKind = "watchlist" | "portfolio";

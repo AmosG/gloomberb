@@ -25,6 +25,9 @@ interface ThesisEventFrame {
   title?: string;
   openSignals?: number;
   signalIds?: string[];
+  /** A review (manual or scheduled) just finished; `open` is what it filed for a ruling. */
+  review?: boolean;
+  open?: number;
 }
 
 type ThesisStoreClient = Pick<
@@ -198,10 +201,8 @@ class ThesisStore {
     return this.client.draftThesis(input);
   }
 
-  async review(thesisId: string) {
-    const result = await this.client.reviewThesis(thesisId);
-    this.upsert(result.thesis);
-    return result;
+  review(thesisId: string) {
+    return this.client.reviewThesis(thesisId);
   }
 
   /** Applies a thesis the server just returned, keeping health consistent. */
@@ -243,20 +244,34 @@ class ThesisStore {
   }
 
   private notifySignals(frame: ThesisEventFrame): void {
+    if (!this.notifier) return;
     const self = this.client.getCurrentUser()?.id ?? null;
-    // Your own review shows its findings in the pane; only other people's
-    // challenges and the server's scans deserve a card.
-    if (frame.actorId && frame.actorId === self) return;
-    const count = frame.signalIds?.length ?? 0;
-    if (count === 0 || !this.notifier) return;
     const title = frame.title ?? this.get(frame.id)?.title ?? "Thesis";
     const id = frame.id;
+    const action = id && this.openThesis ? { action: { label: "Open", onClick: () => this.openThesis?.(id) } } : {};
+    if (frame.review) {
+      // A review ran in the background; say how it went, whoever asked for it.
+      const open = frame.open ?? 0;
+      this.notifier({
+        title: `Thesis: ${title}`,
+        body: open === 0 ? "Reviewed: nothing challenges the thesis." : `Reviewed: ${open} ${open === 1 ? "signal" : "signals"} to rule on.`,
+        type: open === 0 ? "success" : "info",
+        desktop: "when-inactive",
+        ...action,
+      });
+      return;
+    }
+    // Your own challenge shows in the pane; only other people's and the
+    // server's scans deserve a card.
+    if (frame.actorId && frame.actorId === self) return;
+    const count = frame.signalIds?.length ?? 0;
+    if (count === 0) return;
     this.notifier({
       title: `Thesis: ${title}`,
       body: count === 1 ? "1 new signal to rule on." : `${count} new signals to rule on.`,
       type: "info",
       desktop: "when-inactive",
-      ...(id && this.openThesis ? { action: { label: "Open", onClick: () => this.openThesis?.(id) } } : {}),
+      ...action,
     });
   }
 }

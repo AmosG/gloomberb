@@ -271,10 +271,8 @@ export function ThesisDetail({ thesis, width, height, focused, footerId, onDelet
     if (await flows.challenge(ctx, current(), target)) await reloadSignals();
   }), [ctx, reloadSignals, run, selectedRow]);
 
-  const review = useCallback(() => run(async () => {
-    await flows.runReview(ctx, current());
-    await reloadSignals();
-  }), [ctx, reloadSignals, run]);
+  // The review lands over realtime; onSignals below refetches when it does.
+  const review = useCallback(() => run(() => flows.runReview(ctx, current())), [ctx, run]);
 
   const editMenu = useCallback(() => run(async () => {
     const choice = await promptChoice(ctx.dialog, thesis.title, [
