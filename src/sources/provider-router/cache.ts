@@ -3,6 +3,7 @@ import type { CachedResourceRecord, ResourceStore } from "../../data/resource-st
 import type { TimeRange } from "../../time-series/range";
 import type { BrokerContractRef } from "../../types/instrument";
 import type { PricePoint, Quote, TickerFinancials } from "../../types/financials";
+import { retractKnownCloudValuation } from "../gloomberb-cloud/valuation-observations";
 import type { CachePolicy, CachePolicyMap } from "../../types/persistence";
 import { canonicalExchange, parsePublicTickerKey, resolveExchangeTimeZone } from "../../utils/exchanges";
 import { redactUnavailableFundamentals, RETRACTABLE_VALUATION_FIELDS } from "../../utils/fundamentals";
@@ -208,6 +209,12 @@ export function listCachedResources<T>(
     // Legacy cloud aggregates lost the nested quote's stale flag. Retain valid
     // issuer data, but obtain the quote through its independent freshness route.
     let value = record.value as TickerFinancials;
+    const retracted = retractKnownCloudValuation(value, {
+      symbol: record.entityKey,
+      exchange: record.variantKey.match(/(?:^|;)exchange=([^;]+)/)?.[1],
+    });
+    const knownInvalidValuation = retracted !== value;
+    value = retracted;
     const legacyValuation = hasUnverifiedLegacyAsmlValuation(record, value);
     if (record.schemaVersion < 4) value = { ...value, quote: undefined, quoteContributions: undefined };
     // A new client can cache an old backend response during a rolling deploy.
@@ -221,7 +228,7 @@ export function listCachedResources<T>(
       dividendYield: undefined, dividendYieldBasis: undefined, dividendYieldSource: undefined } };
     if (legacyValuation) value = { ...value, fundamentals: redactUnavailableFundamentals({ ...value.fundamentals,
       unavailableFields: [...RETRACTABLE_VALUATION_FIELDS] }) };
-    return { ...record, stale: record.stale || legacyYield || legacyValuation, value: value as T };
+    return { ...record, stale: record.stale || legacyYield || legacyValuation || knownInvalidValuation, value: value as T };
   });
   if (records.length === 0) return [];
 

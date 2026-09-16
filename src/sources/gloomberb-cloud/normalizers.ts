@@ -19,6 +19,7 @@ import { resolveExchangeTimeZone } from "../../utils/exchanges";
 import { createProviderMiss } from "../provider-errors";
 import { reconcileQuoteDayRange } from "../../market-data/quotes/day-range";
 import { redactUnavailableFundamentals } from "../../utils/fundamentals";
+import { retractKnownCloudValuation } from "./valuation-observations";
 
 export const GLOOMBERB_CLOUD_PROVIDER_ID = "gloomberb-cloud" as const;
 
@@ -203,13 +204,15 @@ export function mapPricePoint(
 export function mapCloudFinancials(
   financials: CloudFinancialsPayload,
   providerMeta?: CloudProviderMeta,
+  target?: { symbol: string; exchange?: string },
 ): TickerFinancials {
   const rawQuote = financials.quote;
   const quote = rawQuote ? mapQuote(rawQuote, providerMeta) : undefined;
   const divisor = rawQuote ? resolveCurrencyUnit(rawQuote.currency).divisor : 1;
   const exchange = rawQuote?.listingExchangeName ?? rawQuote?.exchangeName ?? "";
-  return {
+  return retractKnownCloudValuation({
     quote,
+    quoteMetadata: financials.quoteMetadata,
     quoteContributions: financials.quoteContributions,
     profile: financials.profile,
     fundamentals: redactUnavailableFundamentals(financials.fundamentals),
@@ -222,7 +225,7 @@ export function mapCloudFinancials(
         ? point
         : mapPricePoint(point as unknown as CloudPricePointPayload, divisor, exchange),
     ),
-  };
+  }, target);
 }
 
 export function mapOptionsChain(

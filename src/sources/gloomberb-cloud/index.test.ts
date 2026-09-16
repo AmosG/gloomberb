@@ -34,6 +34,35 @@ const originalGetCloudNews = apiClient.getCloudNews.bind(apiClient);
 const originalGetCloudNewsStory = apiClient.getCloudNewsStory.bind(apiClient);
 const originalSubscribeQuotes = apiClient.subscribeQuotes.bind(apiClient);
 
+test("sparse single and batch SAP responses withdraw the captured observation before caching", async () => {
+  const data = { annualStatements: [], quarterlyStatements: [], priceHistory: [], fundamentals: {
+    source: "twelvedata", marketCapCurrency: "USD", sharesOutstanding: 1_154_204_232,
+    enterpriseValue: 4_095_338_359_014, enterpriseToRevenue: 92.879, revenue: 44_093_047_102,
+  } };
+  apiClient.getCloudFinancials = async () => ({ status: "partial", data });
+  apiClient.getCloudFinancialsBatch = async (requests) => ({ status: "success", data: { items:
+    requests.map((target) => ({ ...target, status: "partial", data })),
+  } });
+  const provider = new GloomberbCloudProvider();
+  const targets = [{ symbol: "SAP:XNYS" }, { symbol: "SAP", exchange: "NYSE" }, { symbol: "SAP" }];
+  const values = [
+    ...await Promise.all(targets.map((target) => provider.getTickerFinancials(target.symbol, target.exchange))),
+    ...await provider.getTickerFinancialsBatch(targets).then((items) => items.map((item) => item.financials!)),
+  ];
+  expect(values).toHaveLength(6);
+  for (const value of values) {
+    expect(value.fundamentals?.enterpriseValue).toBeUndefined();
+    expect(value.fundamentals?.enterpriseToRevenue).toBeUndefined();
+    expect(value.fundamentals?.unavailableFields).toEqual(["enterpriseValue", "enterpriseToRevenue"]);
+    expect(value.fundamentals?.revenue).toBe(44_093_047_102);
+  }
+  // The request cannot override source-declared foreign identity.
+  apiClient.getCloudFinancials = async () => ({ status: "partial", data: { ...data, quoteMetadata: {
+    symbol: "SAP", listingExchangeName: "XETRA", currency: "EUR", source: { providerId: "gloomberb-cloud" },
+  } } });
+  expect((await provider.getTickerFinancials("SAP:XNYS")).fundamentals?.enterpriseValue).toBe(4_095_338_359_014);
+});
+
 test("requests fifty years of cloud history for the ALL range", () => {
   const endDate = new Date("2026-07-30T20:00:00.000Z");
 

@@ -94,6 +94,8 @@ function ResolvedOverviewTab({ width, focused = false, ticker, financials }: Ove
     notices: [
       ...(!quote && financials ? [t("Current quote unavailable. Other research data is still available.")] : []),
       ...(priceSeries.warning ? [priceSeries.warning] : []),
+      ...(fundamentals?.unavailableFields?.includes("enterpriseValue")
+        ? [t("Enterprise value unavailable: the source observation failed validation.")] : []),
       ...(capitalization?.provenance.kind === "fundamentals"
         ? [`Market cap: ${describeFundamentalMarketCap(capitalization.provenance)}.`] : []),
     ],

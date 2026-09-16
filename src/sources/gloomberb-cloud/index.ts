@@ -268,6 +268,7 @@ export class GloomberbCloudProvider implements AssetDataProvider {
       return retainRequestedFinancialsSymbol(mapCloudFinancials(
         unwrapRequiredCloudResponse(response, `Cloud financials are unavailable for ${ticker}`),
         response.providerMeta,
+        target,
       ), ticker);
     }, `Cloud financials are unavailable for ${ticker}`);
   }
@@ -300,7 +301,7 @@ export class GloomberbCloudProvider implements AssetDataProvider {
         if ((item.status === "success" || item.status === "partial") && item.data) {
           return {
             target,
-            financials: retainRequestedFinancialsSymbol(mapCloudFinancials(item.data), target.symbol),
+            financials: retainRequestedFinancialsSymbol(mapCloudFinancials(item.data, undefined, cloudInstrumentTarget(target.symbol, target.exchange)), target.symbol),
           };
         }
         return {
