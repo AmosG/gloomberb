@@ -122,6 +122,8 @@ The benchmark request explicitly identifies SPY on NYSE Arca in USD, ISIN US7846
 
 Broker account-value history includes deposits and withdrawals. Investment returns require cash-flow adjustments. Broker-reported return series may not specify their calculation method. Currency values and percentage returns retain distinct axis labels. Account-value currency comes only from the history source; portfolio/display currency settings do not convert that history or establish its currency. The chart preserves elapsed calendar time and known missing dates. A later row at the same timestamp replaces the earlier row, including withdrawn values; missing values break the line instead of joining observations across the gap. Missing observations and cached data remain identified in the UI.
 
+Account summaries and Cash & Margin convert monetary totals only from the broker account's declared currency. Missing source currency or FX leaves those totals unavailable; missing cash is not a zero balance. PORT retains available account summaries and broker history after the last security position is sold. It does not derive a return from changes in account value or add cash-flow-adjusted return methods that the broker has not supplied.
+
 ## Dividends and sectors
 
 Dividend cash yield excludes taxes and reinvestment. SEC yield, tax components, and future payments are not modeled. Forward yield is an estimate rather than a guaranteed distribution. Dividend amounts and reference prices must use compatible listing currencies and units.
@@ -239,3 +241,9 @@ Yahoo keeps an explicitly dated but unavailable metric in its reporting period. 
 ## Financial growth display
 
 Financial tables abbreviate large growth percentages (for example, `+163k%`) so the sign and percent unit fit beside the reported value. Extreme finite values that cannot fit use an explicit bound; an unrepresentable growth rate is unavailable. Structured JSON retains finite numeric growth; formatted text and CSV use the compact display.
+
+## Executive compensation
+
+`EXEC` reads compensation from covered annual DEF 14A proxy statements. The year selector identifies the proxy filing year; the statement separately identifies the fiscal year of compensation. Stock and option awards use the filing’s grant-date valuation, which is not the amount eventually realized. Open the source filing through the existing footer action (`o`). No covered proxy means this view has no compensation data for that company; it does not establish that the company pays no executives.
+
+Refresh (`r`) reloads the covered years and selected statement. A temporary failure retains available data; the footer warning gives the failed request and original retrieval time. Missing or denied statements are cleared. A successful refresh removes the warning without changing the filing’s reported dates.

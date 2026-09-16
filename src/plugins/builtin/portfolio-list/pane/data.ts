@@ -136,6 +136,7 @@ export function buildTrackedCurrencies(
   baseCurrency: string,
 ): string[] {
   const currencies = new Set<string>([baseCurrency]);
+  if (accountState?.account.currency) currencies.add(accountState.account.currency);
 
   for (const ticker of tickers) {
     if (ticker.metadata.currency) {

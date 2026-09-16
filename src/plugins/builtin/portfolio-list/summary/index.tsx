@@ -380,7 +380,7 @@ export function buildPortfolioFooterSegments({
   if (!totals.hasPositions && !accountState && !accountStatusText) return [];
   const convertAccountValue = (value: number) => convertCurrency(
     value,
-    accountState?.account.currency || baseCurrency,
+    accountState?.account.currency ?? "",
     baseCurrency,
     exchangeRates,
   );

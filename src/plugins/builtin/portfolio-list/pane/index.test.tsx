@@ -25,6 +25,7 @@ import type { TickerRecord } from "../../../../types/ticker";
 import { MarketDataCoordinator, setSharedMarketDataCoordinator } from "../../../../market-data/coordinator";
 import { instrumentFromTicker } from "../../../../market-data/request-types";
 import { createTestPluginRuntime } from "../../../../test-support/plugin-runtime";
+import { createTestDataProvider } from "../../../../test-support/data-provider";
 import type { PluginRuntimeAccess } from "../../../runtime";
 import { PluginRegistry, setSharedMarketDataForTests, setSharedRegistryForTests } from "../../../registry";
 import { portfolioListModule } from "..";
@@ -485,6 +486,38 @@ afterEach(async () => {
 });
 
 describe("PortfolioListPane cash and margin UI", () => {
+  for (const source of ["unknown currency", "CAD", "missing cash"] as const) {
+    test(`cash drawer and footer preserve account units and missing values (${source})`, async () => {
+      const portfolioId = "broker:ibkr-flex:DU12345";
+      const requested: string[] = [];
+      sharedCoordinator = new MarketDataCoordinator(createTestDataProvider({
+        getQuote: async () => null,
+        getExchangeRate: async (currency) => { requested.push(currency); return 0.75; },
+      }));
+      setSharedMarketDataCoordinator(sharedCoordinator);
+      const config = createPortfolioConfig(portfolioId, [createBrokerInstance("flex")]);
+      config.baseCurrency = "USD";
+      await act(async () => {
+        testSetup = await testRender(<PaneFooterProvider>{(footer) => <Box flexDirection="column">
+          <PortfolioHarness config={config} collectionId={portfolioId} paneHeight={23}
+            paneWidth={160} brokerAccounts={{ "ibkr-flex": [{
+              accountId: "DU12345", name: "Fixture", source: "flex",
+              currency: source === "unknown currency" ? undefined : "CAD",
+              netLiquidation: 20000, totalCashValue: source === "missing cash" ? undefined : 18000,
+            }] }} />
+          <PaneFooterBar footer={footer} focused width={160} />
+        </Box>}</PaneFooterProvider>, { width: 160, height: 24 });
+      });
+      for (let index = 0; index < 6; index++) await flushFrame();
+      const frame = testSetup!.captureCharFrame();
+      expect(frame).toContain(source === "unknown currency" ? "Net Liq —" : "Net Liq 15k");
+      expect(frame).toContain(source === "CAD" ? "Cash 13.5k" : "Cash —");
+      expect(frame).not.toContain("Cash 0");
+      if (source !== "unknown currency") expect(requested).toContain("CAD");
+      else expect(frame).toContain("FX unavailable");
+    });
+  }
+
   test("opens the selected ticker on a second row click", async () => {
     const portfolioId = "broker:ibkr-flex:DU12345";
     const config = createPortfolioConfig(portfolioId, [createBrokerInstance("flex")]);

@@ -19,6 +19,16 @@ function createTotals(overrides: Partial<PortfolioSummaryTotals> = {}): Portfoli
 }
 
 describe("resolvePortfolioAccountMetrics", () => {
+  test("a zero daily-P&L denominator is unavailable rather than a zero return", () => {
+    for (const dailyPnl of [0, 100]) {
+      const account: BrokerAccount = { accountId: "test", name: "Test", dailyPnl, netLiquidation: dailyPnl };
+      const metrics = resolvePortfolioAccountMetrics(createTotals(), account);
+      expect(metrics.dailyPnl).toBe(dailyPnl);
+      expect(metrics.dailyPnlPct).toBeNaN();
+      expect(resolvePortfolioAccountMetrics(createTotals(), { ...account, netLiquidation: dailyPnl + 1000 }).dailyPnlPct).toBe(dailyPnl / 10);
+    }
+  });
+
   test("broker account profit cannot supply a missing or zero acquisition-cost denominator", () => {
     const account: BrokerAccount = { accountId: "test", name: "Test", unrealizedPnl: 200 };
     for (const cost of [Number.NaN, 0]) {

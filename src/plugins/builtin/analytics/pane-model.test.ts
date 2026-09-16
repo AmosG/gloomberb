@@ -86,6 +86,32 @@ test("converts every account balance while keeping leverage independent of displ
   expect(rows(1).has("margin-leverage")).toBe(false);
 });
 
+test("cash-only summary uses reported account metrics and preserves explicit zero", () => {
+  const accountState: ResolvedPortfolioAccountState = {
+    account: { accountId: "test", name: "Test", currency: "USD", netLiquidation: 6000, totalCashValue: 6000 },
+    sourceLabel: "Cached", sourceKind: "cached", visibleCashBalances: [],
+  };
+  const portfolioStats: PortfolioSummaryTotals = {
+    totalMktValue: 0, totalCostBasis: 0, dailyPnl: 0, dailyPnlPct: 0,
+    unrealizedPnl: 0, unrealizedPnlPct: 0, hasPositions: false, avgWatchlistChange: 0, watchlistCount: 0,
+  };
+  const rows = () => new Map(buildAnalyticsSummaryRows({
+    accountState, portfolioStats, activePortfolio: null, brokerPerformance: null,
+  }).map((row) => [row.id, row]));
+  expect([...rows().keys()]).toEqual(["net-liquidation", "cash", "account-source"]);
+
+  accountState.account.grossPositionValue = 0;
+  accountState.account.dailyPnl = 0;
+  accountState.account.unrealizedPnl = 0;
+  expect(rows().get("total-value")?.value).toBe("0");
+  expect(rows().get("margin-leverage")?.value).toBe("0.0x");
+  expect(rows().get("day-pnl")).toMatchObject({ value: "+0", detail: "(0.00%)" });
+  expect(rows().get("pnl")).toMatchObject({ value: "+0", detail: "(—)" });
+  delete accountState.account.netLiquidation;
+  expect(rows().get("day-pnl")?.detail).toBe("(—)");
+  expect(rows().has("margin-leverage")).toBe(false);
+});
+
 test("does not publish portfolio risk from just the valued portion when FX is missing", () => {
   const tickers = ["USD", "EUR"].map((currency): TickerRecord => ({ metadata: {
     ticker: currency === "USD" ? "AAPL" : "SAP", exchange: currency === "USD" ? "NASDAQ" : "XETRA", currency,

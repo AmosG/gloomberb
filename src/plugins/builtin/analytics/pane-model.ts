@@ -219,6 +219,7 @@ export function buildAnalyticsSummaryRows({
   const accountMetrics = resolvePortfolioAccountMetrics(portfolioStats, account, convertAccountValue);
   const accountFreshness = formatAccountFreshness(account);
   const totalMarketValue = resolvePortfolioMarketValue(portfolioStats, account, convertAccountValue);
+  const hasMarketValue = portfolioStats.hasPositions || finiteNumber(account?.grossPositionValue);
 
   if (portfolioStats.unavailableConversions?.length || (account && !Number.isFinite(convertAccountValue(1)))) {
     rows.push({
@@ -237,14 +238,16 @@ export function buildAnalyticsSummaryRows({
     });
   }
 
-  rows.push({
-    id: "total-value",
-    label: "Val",
-    value: formatCompact(totalMarketValue),
-    color: colors.text,
-  });
+  if (hasMarketValue) {
+    rows.push({
+      id: "total-value",
+      label: "Val",
+      value: formatCompact(totalMarketValue),
+      color: colors.text,
+    });
+  }
 
-  const marginLeverage = formatMarginLeverage(
+  const marginLeverage = hasMarketValue && formatMarginLeverage(
     account?.netLiquidation == null ? undefined : convertAccountValue(account.netLiquidation),
     totalMarketValue,
   );
@@ -266,20 +269,26 @@ export function buildAnalyticsSummaryRows({
     });
   }
 
-  rows.push({
-    id: "day-pnl",
-    label: "Day",
-    value: formatSignedCompact(accountMetrics.dailyPnl),
-    detail: `(${formatPercentRaw(accountMetrics.dailyPnlPct)})`,
-    color: priceColor(accountMetrics.dailyPnl),
-  });
-  rows.push({
-    id: "pnl",
-    label: "P&L",
-    value: formatSignedCompact(accountMetrics.unrealizedPnl),
-    detail: `(${formatPercentRaw(accountMetrics.unrealizedPnlPct)})`,
-    color: priceColor(accountMetrics.unrealizedPnl),
-  });
+  if (portfolioStats.hasPositions || finiteNumber(account?.dailyPnl)) {
+    const dailyPnlPct = portfolioStats.hasPositions || finiteNumber(account?.netLiquidation)
+      ? accountMetrics.dailyPnlPct : Number.NaN;
+    rows.push({
+      id: "day-pnl",
+      label: "Day",
+      value: formatSignedCompact(accountMetrics.dailyPnl),
+      detail: `(${formatPercentRaw(dailyPnlPct)})`,
+      color: priceColor(accountMetrics.dailyPnl),
+    });
+  }
+  if (portfolioStats.hasPositions || finiteNumber(account?.unrealizedPnl)) {
+    rows.push({
+      id: "pnl",
+      label: "P&L",
+      value: formatSignedCompact(accountMetrics.unrealizedPnl),
+      detail: `(${formatPercentRaw(accountMetrics.unrealizedPnlPct)})`,
+      color: priceColor(accountMetrics.unrealizedPnl),
+    });
+  }
   if (accountMetrics.realizedPnl != null) {
     rows.push({
       id: "realized-pnl",

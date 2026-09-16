@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
   DataTableView,
   KeyValueRow,
@@ -13,9 +13,10 @@ import type { ProjectedChartPoint } from "../../../components/chart/core/data";
 import { resolveChartPalette } from "../../../components/chart/core/palette";
 import { useAsyncResource } from "../../../react/async-resource";
 import { colors, priceColor } from "../../../theme/colors";
-import { Box, Text, TextAttributes } from "../../../ui";
+import { Box, ScrollBox, Text, TextAttributes, type ScrollBoxRenderable } from "../../../ui";
 import { formatDistributionAmount, formatPercentRaw } from "../../../utils/format";
 import { resolveCurrencyUnit } from "../../../utils/currency-units";
+import { isPlainKeyboardEvent } from "../../../utils/keyboard";
 import { handleRefreshKey, loadingErrorFooterInfo } from "../shared/table-pane";
 import { SignInWall } from "../cloud/auth-actions";
 import { isCloudSessionRequired, useResearchCloudSession } from "../shared/research-cloud-session";
@@ -95,12 +96,16 @@ function DividendSummary({
   metrics,
   currency,
   width,
+  height,
   chartPoints,
+  scrollRef,
 }: {
   metrics: DividendMetrics;
   currency: string;
   width: number;
+  height: number;
   chartPoints: ProjectedChartPoint[];
+  scrollRef: RefObject<ScrollBoxRenderable | null>;
 }) {
   const metricRows = buildMetricRows(metrics, currency);
   const minColumnWidth = Math.max(...metricRows.map((row) => row.label.length + 2 + Math.max(6, row.value.length)));
@@ -108,11 +113,13 @@ function DividendSummary({
   const colWidth = Math.max(1, Math.floor((width - 2) / columnCount));
   const rowCount = Math.ceil(metricRows.length / columnCount);
   const chartHeight = chartPoints.length >= 2 ? 6 : 0;
+  // Keep the history header and three cash rows usable in a short pane.
+  const summaryHeight = Math.min(rowCount + chartHeight, Math.max(1, height - 4));
   const palette = resolveChartPalette(colors, "positive");
 
   return (
-    <Box flexDirection="column">
-      <Box flexDirection="column" paddingX={1} height={rowCount}>
+    <ScrollBox ref={scrollRef} scrollY focusable={false} height={summaryHeight} flexShrink={0}>
+      <Box flexDirection="column" paddingX={1} height={rowCount} flexShrink={0}>
         {Array.from({ length: rowCount }, (_, i) => {
           const left = metricRows[i * columnCount]!;
           const right = columnCount > 1 ? metricRows[i * columnCount + 1] : undefined;
@@ -125,7 +132,7 @@ function DividendSummary({
         })}
       </Box>
       {chartPoints.length >= 2 && (
-        <Box flexDirection="column" paddingX={1} height={chartHeight}>
+        <Box flexDirection="column" paddingX={1} height={chartHeight} flexShrink={0}>
           <StaticChartSurface
             points={chartPoints}
             width={Math.max(10, width - 2)}
@@ -140,7 +147,7 @@ function DividendSummary({
           />
         </Box>
       )}
-    </Box>
+    </ScrollBox>
   );
 }
 
@@ -176,6 +183,8 @@ export function DividendYieldPane({ focused, width, height, loadData = fetchDivi
 
   const [sortPreference, setSortPreference] = useState<DividendSortPreference>(DEFAULT_SORT_PREFERENCE);
   const [selectedIdx, setSelectedIdx] = useState(0);
+  const summaryScrollRef = useRef<ScrollBoxRenderable | null>(null);
+  useEffect(() => { summaryScrollRef.current?.scrollTo(0); }, [symbol]);
   // Ten years of history must not be refetched on every live price tick, so the
   // quote is read through a ref instead of being an effect dependency.
   const quoteRef = useRef({ price: quotePrice, currency: quoteCurrency });
@@ -240,6 +249,18 @@ export function DividendYieldPane({ focused, width, height, loadData = fetchDivi
   }, []);
 
   const handleKeyDown = useCallback((event: DataTableKeyEvent) => {
+    if (isPlainKeyboardEvent(event) && (event.name === "pageup" || event.name === "pagedown")) {
+      const summary = summaryScrollRef.current;
+      const viewportHeight = summary?.viewport?.height ?? 0;
+      const max = Math.max(0, (summary?.scrollHeight ?? 0) - viewportHeight);
+      if (summary && max > 0) {
+        const delta = Math.max(1, viewportHeight - 1) * (event.name === "pageup" ? -1 : 1);
+        summary.scrollTo(Math.max(0, Math.min(max, summary.scrollTop + delta)));
+        event.preventDefault?.();
+        event.stopPropagation?.();
+        return true;
+      }
+    }
     return handleRefreshKey(event, refresh, { stopPropagation: true });
   }, [refresh]);
 
@@ -268,7 +289,9 @@ export function DividendYieldPane({ focused, width, height, loadData = fetchDivi
           metrics={metrics}
           currency={currency}
           width={width}
+          height={height}
           chartPoints={chartPoints}
+          scrollRef={summaryScrollRef}
         />
       ) : undefined}
       columns={columns}
