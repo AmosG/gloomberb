@@ -14,7 +14,7 @@ import type { SharedWorkflowDeps } from "./tickers";
 
 function holding(ticker = "ASML", patch: Partial<TickerMetadata> = {}): TickerRecord {
   return { metadata: {
-    ticker, name: ticker, exchange: "NASDAQ", currency: "USD", assetCategory: "STK",
+    ticker, name: ticker, exchange: "NASDAQ", currency: "USD", assetCategory: "Depositary Receipt",
     portfolios: ["main"], watchlists: ["watchlist"],
     positions: [{ portfolio: "main", shares: 10, avgCost: 500, currency: "USD", broker: "manual" }],
     tags: [], custom: {}, ...patch,
@@ -66,7 +66,7 @@ async function harness(saved = holding(), query = "ASML:XNAS") {
 test("typed and selected collection commands reach the existing owner after research created an empty venue key", async () => {
   for (const selected of [false, true]) {
     const h = await harness();
-    const amsterdam = holding("ASML:XAMS", { exchange: "AMS", currency: "EUR" });
+    const amsterdam = holding("ASML:XAMS", { exchange: "AMS", currency: "EUR", assetCategory: "Common Stock" });
     await h.tickerRepository.saveTicker(amsterdam);
     const amsterdamBefore = await h.tickerRepository.loadTicker("ASML:XAMS");
     h.state.tickers.set(amsterdam.metadata.ticker, amsterdam);
@@ -85,8 +85,11 @@ test("typed and selected collection commands reach the existing owner after rese
 });
 
 test("portfolio forms update the selected portfolio owner without duplicating research aliases", async () => {
-  for (const portfolios of [[], ["main"]]) {
-    const h = await harness(holding("ASML", { portfolios }));
+  for (const [assetCategory, portfolios] of [
+    ["Depositary Receipt", []], ["Depositary Receipt", ["main"]],
+    ["Common Stock", []], ["Common Stock", ["main"]],
+  ] as const) {
+    const h = await harness(holding("ASML", { assetCategory, portfolios: [...portfolios] }));
     await h.actions.addTickerMembershipFromWorkflow({ portfolioId: "main", ticker: "ASML:XNAS" });
     expect(h.writes).toEqual(portfolios.length ? [] : ["ASML"]);
     h.writes.length = 0;
