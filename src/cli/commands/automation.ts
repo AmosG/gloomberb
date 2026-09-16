@@ -1,7 +1,6 @@
-import {
-  PiAiRuntime,
-  type PiCatalog,
-  type PiTextRunController,
+import type {
+  PiCatalog,
+  PiTextRunController,
 } from "../../plugins/builtin/ai/pi";
 import {
   isAiProviderId,
@@ -73,7 +72,14 @@ interface HeadlessPiRuntime {
 }
 
 interface CreateAiCliCommandOptions {
-  createRuntime?: (dataDir: string) => HeadlessPiRuntime;
+  createRuntime?: (dataDir: string) => HeadlessPiRuntime | Promise<HeadlessPiRuntime>;
+}
+
+// The pi runtime drags in every provider SDK. Loading it here keeps those
+// out of the startup path of the TUI, which shares this command table.
+async function createPiRuntime(dataDir: string): Promise<HeadlessPiRuntime> {
+  const { PiAiRuntime } = await import("../../plugins/builtin/ai/pi");
+  return new PiAiRuntime({ dataDir });
 }
 
 function configuredAiSelection(config: Record<string, unknown> | undefined): {
@@ -101,7 +107,7 @@ function connectionFailure(provider: PiCatalog["providers"][number]): string {
 }
 
 export function createAiCliCommand(options: CreateAiCliCommandOptions = {}): CliCommandDef {
-  const createRuntime = options.createRuntime ?? ((dataDir: string) => new PiAiRuntime({ dataDir }));
+  const createRuntime = options.createRuntime ?? createPiRuntime;
   return {
     name: "ai",
     description: "Inspect AI providers and run guarded headless AI prompts",
@@ -126,7 +132,7 @@ export function createAiCliCommand(options: CreateAiCliCommandOptions = {}): Cli
       }
 
       await withConfigData(ctx, async (context) => {
-        const runtime = createRuntime(context.dataDir);
+        const runtime = await createRuntime(context.dataDir);
         const catalog = await runtime.getCatalog();
         if (action === "providers") {
           ctx.printResult({

@@ -78,6 +78,8 @@ interface AppInnerProps {
   onOnboardingComplete?: (config: AppConfig) => void | Promise<void>;
   /** Hosted browser terminal: nothing is reachable until a session exists. */
   signInGateActive?: boolean;
+  /** Fires once the startup state is in place and the first real layout can paint. */
+  onInitialized?: () => void;
 }
 
 function ThemedAppRoot({ children }: { children: ReactNode }) {
@@ -113,6 +115,7 @@ function AppInner({
   onboardingActive = false,
   onOnboardingComplete,
   signInGateActive = false,
+  onInitialized,
 }: AppInnerProps) {
   const dispatch = useAppDispatch();
   const stateRef = useAppStateRef();
@@ -123,6 +126,11 @@ function AppInner({
   const paneState = useAppSelector((state) => state.paneState);
   const focusedPaneId = useAppSelector((state) => state.focusedPaneId);
   const initialized = useAppSelector((state) => state.initialized);
+  const onInitializedRef = useRef(onInitialized);
+  onInitializedRef.current = onInitialized;
+  useEffect(() => {
+    if (initialized) onInitializedRef.current?.();
+  }, [initialized]);
   const commandBarOpen = useAppSelector((state) => state.commandBarOpen);
   const inputCaptured = useAppSelector((state) => state.inputCaptured);
   const updateAvailable = useAppSelector((state) => state.updateAvailable);
@@ -465,6 +473,8 @@ interface AppProps {
    * terminal sets this; desktop and the TUI keep sign-in optional.
    */
   requireSignIn?: boolean;
+  /** Fires once the startup state is in place and the first real layout can paint. */
+  onInitialized?: () => void;
 }
 
 export function App({
@@ -481,6 +491,7 @@ export function App({
   remoteControlAdapter,
   updatesEnabled = true,
   requireSignIn = false,
+  onInitialized,
 }: AppProps) {
   useAppLanguage();
   const externalPlugins = providedExternalPlugins ?? EMPTY_EXTERNAL_PLUGINS;
@@ -577,6 +588,7 @@ export function App({
           updatesEnabled={updatesEnabled}
           onboardingActive={showOnboarding}
           signInGateActive={signInGateActive}
+          onInitialized={onInitialized}
           onOnboardingComplete={(updatedConfig) => {
             setConfig(updatedConfig);
             setShowOnboarding(false);

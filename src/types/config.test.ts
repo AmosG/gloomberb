@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   createPaneInstance,
+  findPaneInstance,
   findPrimaryPaneInstance,
   materializeDetachedPanesAsFloating,
   resolveFollowBindingInstance,
@@ -17,6 +18,36 @@ function createLayout(instances: PaneInstanceConfig[]): LayoutConfig {
     detached: [],
   };
 }
+
+describe("findPaneInstance", () => {
+  // The lookup caches an index per instances array. In-place edits, which the
+  // screenshot CLI and chart settings still do, must not serve stale hits.
+  test("survives in-place replacement and removal in the same array", () => {
+    const first = createPaneInstance("ticker-detail", { instanceId: "ticker-detail:a" });
+    const second = createPaneInstance("ticker-detail", { instanceId: "ticker-detail:b" });
+    const layout = createLayout([first, second]);
+
+    expect(findPaneInstance(layout, "ticker-detail:b")).toBe(second);
+
+    const replacement = createPaneInstance("ticker-detail", { instanceId: "ticker-detail:c" });
+    layout.instances[1] = replacement;
+    expect(findPaneInstance(layout, "ticker-detail:b")).toBeUndefined();
+    expect(findPaneInstance(layout, "ticker-detail:c")).toBe(replacement);
+
+    layout.instances.splice(0, 1);
+    expect(findPaneInstance(layout, "ticker-detail:a")).toBeUndefined();
+    expect(findPaneInstance(layout, "ticker-detail:c")).toBe(replacement);
+
+    layout.instances.push(first);
+    expect(findPaneInstance(layout, "ticker-detail:a")).toBe(first);
+  });
+
+  test("returns the first instance when an id is duplicated", () => {
+    const first = createPaneInstance("chat", { instanceId: "chat:main" });
+    const duplicate = createPaneInstance("chat", { instanceId: "chat:main" });
+    expect(findPaneInstance(createLayout([first, duplicate]), "chat:main")).toBe(first);
+  });
+});
 
 describe("findPrimaryPaneInstance", () => {
   test("prefers the main non-fixed ticker pane", () => {

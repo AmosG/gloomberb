@@ -25,7 +25,6 @@ import { measurePerfAsync } from "../../utils/perf-marks";
 import type { CliLaunchRequest } from "../../types/plugin";
 import type { RemoteControlAdapter } from "../../remote/app-host";
 import { startRemoteControlServer, type RemoteControlServer } from "../../remote/server";
-import { createPiAiHost } from "../../plugins/builtin/ai/pi";
 import {
   installAiRunHost,
 } from "../../plugins/builtin/ai/runner";
@@ -37,6 +36,54 @@ import { flushPendingPersistence } from "../../state/persist-scheduler";
 setCurrentPluginTarget("tui");
 
 const AI_STARTUP_READINESS_TIMEOUT_MS = 5_000;
+
+/**
+ * The pi host pulls in every provider SDK (about 800 modules), and nothing on
+ * the first screen needs it: the catalog is published to a store the AI panes
+ * subscribe to, so they fill in when discovery completes, exactly as they do
+ * when discovery is slow. Evaluating those modules is main-thread work, so it
+ * waits for the frame that follows app initialization, which is the first
+ * one showing the real layout, rather than the blank frame before it.
+ */
+async function installAiHostAfterFirstLayout(
+  renderer: Awaited<ReturnType<typeof createOpenTuiHost>>["renderer"],
+  dataDir: string,
+  appLog: ReturnType<typeof debugLog.createLogger>,
+): Promise<void> {
+  await new Promise<void>((resolve) => {
+    const done = () => {
+      clearTimeout(fallback);
+      renderer.off("frame", done);
+      resolve();
+    };
+    const fallback = setTimeout(done, 1_000);
+    renderer.on("frame", done);
+  });
+  if (renderer.isDestroyed) return;
+  try {
+    const { createPiAiHost } = await measurePerfAsync(
+      "startup.opentui.load-ai-host",
+      () => import("../../plugins/builtin/ai/pi"),
+    );
+    const aiHost = createPiAiHost({ appKind: "tui", dataDir });
+    await measurePerfAsync(
+      "startup.opentui.ai-catalog",
+      () => installAiRunHost(aiHost, {
+        catalogTimeoutMs: AI_STARTUP_READINESS_TIMEOUT_MS,
+        timeoutMessage: "In-app AI provider discovery timed out during startup",
+        onCatalogError(error) {
+          appLog.warn("In-app AI provider discovery could not finish during startup", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        },
+      }),
+    );
+  } catch (error) {
+    appLog.warn("In-app AI providers could not be initialized", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
 
 export interface StartOpenTuiAppOptions {
   externalPlugins?: Awaited<ReturnType<typeof loadExternalPlugins>>;
@@ -124,30 +171,9 @@ export async function startOpenTuiApp(options: StartOpenTuiAppOptions = {}): Pro
 
     const config = await measurePerfAsync("startup.opentui.init-data-dir", () => initDataDir(dataDir));
     applyLanguageFromConfig(config);
-    try {
-      const aiHost = createPiAiHost({
-        appKind: "tui",
-        dataDir: config.dataDir,
-      });
-      await measurePerfAsync(
-        "startup.opentui.ai-catalog",
-        () => installAiRunHost(aiHost, {
-          catalogTimeoutMs: AI_STARTUP_READINESS_TIMEOUT_MS,
-          timeoutMessage: "In-app AI provider discovery timed out during startup",
-          onCatalogError(error) {
-            appLog.warn("In-app AI provider discovery could not finish during startup", {
-              error: error instanceof Error ? error.message : String(error),
-            });
-          },
-        }),
-      );
-    } catch (error) {
-      appLog.warn("In-app AI providers could not be initialized", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
     host = await measurePerfAsync("startup.opentui.create-host", () => createOpenTuiHost());
-    host.renderer.once("destroy", finishProcessExit);
+    const renderer = host.renderer;
+    renderer.once("destroy", finishProcessExit);
 
     host.render(
       <UiHostProvider ui={openTuiUiHost} renderer={host.rendererHost} nativeRenderer={host.nativeRenderer}>
@@ -166,6 +192,9 @@ export async function startOpenTuiApp(options: StartOpenTuiAppOptions = {}): Pro
                 plugins={getLoadablePlugins(externalPlugins)}
                 cliLaunchRequest={cliLaunchRequest}
                 remoteControlAdapter={remoteControlAdapter}
+                onInitialized={() => {
+                  void installAiHostAfterFirstLayout(renderer, config.dataDir, appLog);
+                }}
               />
             </OpenTuiDialogHostProvider>
           </ToastHostProvider>
