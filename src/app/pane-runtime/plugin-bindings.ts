@@ -42,6 +42,13 @@ import type {
   PinTickerOptions,
 } from "../../types/plugin";
 import type { TickerOpenTarget } from "../../tickers/open-target";
+import { instrumentFromTicker } from "../../market-data/request-types";
+import { tickerInstrumentLabel } from "../../tickers/instrument-label";
+import { stableStringify } from "../../remote/revision";
+
+// Registry callbacks are rebound on renders. Request ownership must survive
+// that rebinding, while separate source panes retain independent navigation.
+const tickerNavigationRequests = new WeakMap<PluginRegistry, Map<string | null, symbol>>();
 
 interface BindAppPanePluginRegistryOptions {
   activatePane: (paneId: string, layout?: LayoutConfig) => void;
@@ -211,15 +218,25 @@ export function bindAppPanePluginRegistry({
   pluginRegistry.navigateTickerFn = (rawSymbol, options) => {
     if (isDetachedWindow) return;
     const sourcePaneId = options?.sourcePaneId ?? stateRef.current.focusedPaneId;
+    const requests = tickerNavigationRequests.get(pluginRegistry) ?? new Map<string | null, symbol>();
+    tickerNavigationRequests.set(pluginRegistry, requests);
+    const request = Symbol();
+    requests.set(sourcePaneId, request);
+    const ownsRequest = () => requests.get(sourcePaneId) === request;
+    const originalPane = resolveTickerNavigationReplacementPane(stateRef.current.config.layout, sourcePaneId);
+    const originalBinding = originalPane ? stableStringify(originalPane.binding) : null;
     (async () => {
       try {
         const target = await resolveOpenTickerTarget(rawSymbol);
-        if (!target) return;
+        if (!target || !ownsRequest()) return;
         const symbol = target.symbol;
 
         const currentState = stateRef.current;
         const currentLayout = currentState.config.layout;
         const detailPane = resolveTickerNavigationReplacementPane(currentLayout, sourcePaneId);
+        // A direct command or another UI action can retarget/close the pane
+        // without calling navigateTickerFn. That newer choice also owns it.
+        if (originalPane && (!detailPane || stableStringify(detailPane.binding) !== originalBinding)) return;
         const focusIfStillOwned = (paneId: string, layout: LayoutConfig) => {
           if (!shouldFocusTickerNavigationTarget({
             sourcePaneId,
@@ -233,11 +250,17 @@ export function bindAppPanePluginRegistry({
 
         if (detailPane) {
           publishTickerOpenTarget(target);
+          const instrument = target.instrument !== undefined ? target.instrument
+            : instrumentFromTicker(target.ticker)?.instrument ?? undefined;
+          const binding = { kind: "fixed" as const, symbol,
+            ...(instrument !== undefined ? { instrument } : {}),
+            ...(target.listing ? { listing: target.listing } : {}),
+          };
           const nextLayout = {
             ...currentLayout,
             instances: currentLayout.instances.map((instance) => (
               instance.instanceId === detailPane.instanceId
-                ? { ...instance, title: symbol, binding: { kind: "fixed" as const, symbol } }
+                ? { ...instance, title: tickerInstrumentLabel(symbol, instrument), binding }
                 : instance
             )),
           };
@@ -251,8 +274,11 @@ export function bindAppPanePluginRegistry({
           placePinnedTickerTarget(target, { floating: false });
         }
       } catch (err) {
+        if (!ownsRequest()) return;
         const message = err instanceof Error ? err.message : String(err);
         pluginRegistry.notify({ body: `Failed to navigate to ${rawSymbol}: ${message}`, type: "error" });
+      } finally {
+        if (ownsRequest()) requests.delete(sourcePaneId);
       }
     })();
   };
