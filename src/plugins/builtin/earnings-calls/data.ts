@@ -95,20 +95,28 @@ function listLimit(value: number | undefined): number {
     ? Math.max(1, Math.min(200, Math.floor(value))) : 50;
 }
 
-function listKey(ticker: string | null, limit: number): string {
-  return JSON.stringify([ticker, limit]);
+function listOffset(value: number | undefined): number {
+  return value !== undefined && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+}
+
+function listKey(ticker: string | null, limit: number, offset: number): string {
+  return offset > 0 ? JSON.stringify([ticker, limit, offset]) : JSON.stringify([ticker, limit]);
 }
 
 export async function loadEarningsCallsWithClient(
   client: EarningsCallsApiClient,
   ticker: string | null,
-  options?: { force?: boolean; limit?: number },
+  options?: { force?: boolean; limit?: number; offset?: number },
 ): Promise<EarningsCallsResult> {
   const normalizedTicker = ticker?.trim().toUpperCase() || null;
   const limit = listLimit(options?.limit);
-  const key = listKey(normalizedTicker, limit);
+  const offset = listOffset(options?.offset);
+  const key = listKey(normalizedTicker, limit, offset);
   const force = options?.force ?? false;
-  const store = persistence;
+  // Only the first page is worth keeping. A later page is an artefact of how
+  // far somebody scrolled, over a shelf that reorders as transcripts publish,
+  // so it is fetched live and never serves as the cached answer for the pane.
+  const store = offset > 0 ? null : persistence;
   const sourceScope = (calls: CloudEarningsCallPayload[]) => ({
     sourceLimit: limit,
     sourceLimitReached: calls.length >= limit,
@@ -129,6 +137,7 @@ export async function loadEarningsCallsWithClient(
     .getCloudEarningsCalls({
       ticker: normalizedTicker ?? undefined,
       limit,
+      ...(offset > 0 ? { offset } : {}),
     })
     .then((payload) => {
       const calls = payload.calls ?? [];
@@ -186,7 +195,7 @@ export async function loadEarningsCallsWithClient(
 
 export function loadEarningsCalls(
   ticker: string | null,
-  options?: { force?: boolean; limit?: number },
+  options?: { force?: boolean; limit?: number; offset?: number },
 ): Promise<EarningsCallsResult> {
   return loadEarningsCallsWithClient(apiClient, ticker, options);
 }
