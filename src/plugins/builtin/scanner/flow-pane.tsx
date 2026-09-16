@@ -87,6 +87,15 @@ function buildColumns(width: number): DataTableColumn[] {
   ];
 }
 
+// Stable table adapters so memoized rows survive feed ticks.
+const eventKey = (event: ScannerFlowEvent) => event.id;
+const renderRow = (
+  event: ScannerFlowEvent,
+  column: DataTableColumn,
+  _index: number,
+  rowState: { selected: boolean },
+) => renderCell(event, column, rowState);
+
 function renderCell(
   event: ScannerFlowEvent,
   column: DataTableColumn,
@@ -239,9 +248,9 @@ function FlowPane({ focused, width, height }: PaneProps) {
         sortColumnId={null}
         sortDirection="desc"
         onHeaderClick={() => {}}
-        getItemKey={(event) => event.id}
+        getItemKey={eventKey}
         onActivate={(event) => pinTicker(event.underlying, { floating: true, paneType: TICKER_RESEARCH_PANE_ID })}
-        renderCell={(event, column, _index, rowState) => renderCell(event, column, rowState)}
+        renderCell={renderRow}
         emptyContent={feed.payload ? undefined : <PaneStatusBody loading loadingLabel="Waiting for the scanner..." />}
         emptyStateTitle={emptyState.title}
         emptyStateHint={emptyState.hint}

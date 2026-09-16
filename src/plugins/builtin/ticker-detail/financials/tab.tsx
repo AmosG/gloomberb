@@ -69,6 +69,12 @@ export function FinancialsTab({
   );
 }
 
+const noop = () => {};
+const financialRowKey = (row: FinancialTableRow) => row.id;
+const financialRowBackground = (row: FinancialTableRow) => (
+  row.kind === "group" && row.depth === 0 ? colors.panel : undefined
+);
+
 export function ResolvedFinancialsTab({
   focused,
   financials,
@@ -82,8 +88,17 @@ export function ResolvedFinancialsTab({
   bodyScrollId?: string;
   allowArrowSubTabNavigation?: boolean;
 }) {
-  const annualStatements = [...(financials?.annualStatements ?? [])].sort((a, b) => a.date.localeCompare(b.date));
-  const quarterlyStatements = [...(financials?.quarterlyStatements ?? [])].sort((a, b) => a.date.localeCompare(b.date));
+  // Keyed on the snapshot so the derived statement lists, columns, and rows
+  // below keep their identity across renders that only move the selection;
+  // the table memoizes rows on exactly those references.
+  const annualStatements = useMemo(
+    () => [...(financials?.annualStatements ?? [])].sort((a, b) => a.date.localeCompare(b.date)),
+    [financials],
+  );
+  const quarterlyStatements = useMemo(
+    () => [...(financials?.quarterlyStatements ?? [])].sort((a, b) => a.date.localeCompare(b.date)),
+    [financials],
+  );
   const comparisonCurrency = financialStatementCurrency(financials, [...annualStatements, ...quarterlyStatements]);
   const hasAnnualStatements = annualStatements.length > 0;
   const hasQuarterlyStatements = quarterlyStatements.length > 0;
@@ -252,10 +267,11 @@ export function ResolvedFinancialsTab({
 
   const resolvedPeriod = resolveFinancialPeriod(period, hasAnnualStatements, hasQuarterlyStatements);
   const isAnnual = resolvedPeriod === "annual";
-  const { statements: displayStatements, previousStatementMap } = selectFinancialStatements(
-    resolvedPeriod, subTab.key, annualStatements, quarterlyStatements,
+  const { statements: displayStatements, previousStatementMap } = useMemo(
+    () => selectFinancialStatements(resolvedPeriod, subTab.key, annualStatements, quarterlyStatements),
+    [annualStatements, quarterlyStatements, resolvedPeriod, subTab.key],
   );
-  const columns: FinancialTableColumn[] = [
+  const columns = useMemo<FinancialTableColumn[]>(() => [
     {
       id: "metric",
       kind: "metric",
@@ -272,31 +288,12 @@ export function ResolvedFinancialsTab({
       align: "right",
       headerColor: statement.date === "TTM" ? colors.textBright : colors.textDim,
     })),
-  ];
-  const rows = buildFinancialRows(subTab.rows, displayStatements, collapsedGroups);
-  useEffect(() => {
-    if (rows.length === 0) {
-      if (selectedRowId !== null) setSelectedRowId(null);
-      return;
-    }
-    if (selectedRowId && rows.some((row) => row.id === selectedRowId)) return;
-    setSelectedRowId(rows[0]!.id);
-  }, [rows, selectedRowId]);
-
-  // A null snapshot is still in flight; only a loaded one can say "no coverage".
-  if (!financials || (!hasAnnualStatements && !hasQuarterlyStatements)) {
-    return (
-      <PaneStatusBody
-        loading={!financials}
-        empty={!!financials}
-        subject="financials"
-        emptyTitle="No financial statements."
-        emptyMessage="This ticker has no annual or quarterly statement coverage."
-      />
-    );
-  }
-
-  const renderCell = (
+  ], [comparisonCurrency, displayStatements, isAnnual]);
+  const rows = useMemo(
+    () => buildFinancialRows(subTab.rows, displayStatements, collapsedGroups),
+    [collapsedGroups, displayStatements, subTab.rows],
+  );
+  const renderCell = useCallback((
     row: FinancialTableRow,
     column: FinancialTableColumn,
   ): DataTableCell => {
@@ -364,7 +361,28 @@ export function ResolvedFinancialsTab({
         </Box>
       ),
     };
-  };
+  }, [comparisonCurrency, previousStatementMap, toggleGroup]);
+  useEffect(() => {
+    if (rows.length === 0) {
+      if (selectedRowId !== null) setSelectedRowId(null);
+      return;
+    }
+    if (selectedRowId && rows.some((row) => row.id === selectedRowId)) return;
+    setSelectedRowId(rows[0]!.id);
+  }, [rows, selectedRowId]);
+
+  // A null snapshot is still in flight; only a loaded one can say "no coverage".
+  if (!financials || (!hasAnnualStatements && !hasQuarterlyStatements)) {
+    return (
+      <PaneStatusBody
+        loading={!financials}
+        empty={!!financials}
+        subject="financials"
+        emptyTitle="No financial statements."
+        emptyMessage="This ticker has no annual or quarterly statement coverage."
+      />
+    );
+  }
 
   return (
     <Box
@@ -397,12 +415,12 @@ export function ResolvedFinancialsTab({
         }}
         sortColumnId={null}
         sortDirection="desc"
-        onHeaderClick={() => {}}
-        getItemKey={(row) => row.id}
+        onHeaderClick={noop}
+        getItemKey={financialRowKey}
         onActivate={(row) => {
           if (row.kind === "group" && row.toggleable) toggleGroup(row.id);
         }}
-        getRowBackgroundColor={(row) => row.kind === "group" && row.depth === 0 ? colors.panel : undefined}
+        getRowBackgroundColor={financialRowBackground}
         renderCell={renderCell}
         emptyStateTitle="No financial data"
         showHorizontalScrollbar

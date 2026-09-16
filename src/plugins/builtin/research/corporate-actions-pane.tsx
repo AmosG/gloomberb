@@ -53,6 +53,8 @@ type EventColumn = DataTableColumn & { id: EventColumnId };
 const SEC_EVENT_FILING_LIMIT = 50;
 const SEC_EVENT_MATCH_WINDOW_DAYS = 7;
 
+const eventRowKey = (row: EventRow) => row.id;
+
 function todayDateKey(): string {
   const now = new Date();
   const year = now.getFullYear();
@@ -360,6 +362,10 @@ export function CorporateActionsView({
   const detailScrollRef = useRef<ScrollBoxRenderable>(null);
   const todayKey = todayDateKey();
   const futureRowBackground = blendHex(colors.bg, colors.positive, 0.16);
+  // Memoized so the table's row memo holds while the selection moves.
+  const rowBackground = useCallback((row: EventRow) => (
+    row.date > todayKey ? futureRowBackground : undefined
+  ), [futureRowBackground, todayKey]);
   const loading = actionsLoading || analystLoading;
   const authWall = !loading && !actionsData && !analystData && (isCloudSessionRequired(actionsError) || isCloudSessionRequired(analystError));
   // Parallel requests fail with the same message ("No ticker selected"), so the
@@ -577,11 +583,9 @@ export function CorporateActionsView({
       sortColumnId={null}
       sortDirection="desc"
       onHeaderClick={() => {}}
-      getItemKey={(row) => row.id}
+      getItemKey={eventRowKey}
       renderCell={renderCell}
-      getRowBackgroundColor={(row) => (
-        row.date > todayKey ? futureRowBackground : undefined
-      )}
+      getRowBackgroundColor={rowBackground}
       emptyStateTitle={loading
         ? (variant === "earnings-estimates" ? "Loading earnings estimates..." : "Loading events...")
         : error ?? sourceNotice?.text ?? (variant === "earnings-estimates" ? "No earnings estimates" : "No events")}
