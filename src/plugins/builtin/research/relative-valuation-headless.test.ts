@@ -4,6 +4,31 @@ import { createTestDataProvider } from "../../../test-support/data-provider";
 import { comparableMarketCap, relativeValuationValues } from "./relative-valuation-model";
 import { relativeValuationHeadless } from "./relative-valuation-headless";
 
+test("fresh quotes do not hide stale fundamentals in a peer research report", async () => {
+  const symbols = ["BAC", "JPM"];
+  let stale = true;
+  const ctx = { signal: new AbortController().signal, marketData: createTestDataProvider({
+    async getTickerFinancials(symbol) {
+      return { annualStatements: [], quarterlyStatements: [], priceHistory: [],
+        quote: { symbol, price: 60, change: 0, changePercent: 0, currency: "USD", lastUpdated: 1789567200000, stale: false, marketCap: 420e9 },
+        fundamentals: { trailingPE: 13.94, financialCurrency: "USD", source: "yahoo" as const,
+          fetchedAt: "2026-09-14T17:23:38.462Z", stale: symbol === "BAC" && stale },
+      };
+    },
+  }) } as HeadlessPaneContext;
+  const args = { symbols, argument: symbols, rawArgument: symbols.join(" "), options: {} };
+  const report = await relativeValuationHeadless.load(args, ctx);
+  expect(report.complete).toBe(false);
+  expect(report.metadata?.staleFundamentalsSymbols).toEqual(["BAC"]);
+  expect(report.errors).toEqual(["BAC: Fundamentals stale: retained values may be out of date"]);
+  expect(report.rows[0]).toMatchObject({ price: 60, trailingPE: 13.94, fundamentalsProvenance: { stale: true } });
+  stale = false;
+  const refreshed = await relativeValuationHeadless.load(args, ctx);
+  expect(refreshed.complete).toBe(true);
+  expect(refreshed.errors).toEqual([]);
+  expect(refreshed.metadata?.staleFundamentalsSymbols).toEqual([]);
+});
+
 test("relative valuations share derived metrics, preserve zeroes, and identify missing peers", async () => {
   const symbols = ["GOOD", "ZERO", "EMPTY", "MISSING"];
   const ctx = {

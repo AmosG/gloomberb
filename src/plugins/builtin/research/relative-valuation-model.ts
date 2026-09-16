@@ -4,6 +4,7 @@ import type { TickerFinancials } from "../../../types/financials";
 export { convertMarketCapitalization as comparableMarketCap } from "../../../utils/market-capitalization";
 
 export const RELATIVE_VALUATION_STALE_QUOTE_NOTICE = "Quote stale: quote-based values unavailable";
+export const RELATIVE_VALUATION_STALE_FUNDAMENTALS_NOTICE = "Fundamentals stale: retained values may be out of date";
 
 export function relativeValuationValues(financials: TickerFinancials | null) {
   const quote = financials?.quote;

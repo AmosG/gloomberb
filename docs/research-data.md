@@ -32,9 +32,9 @@ Fund overview does not currently model expense ratios, NAV premiums or discounts
 
 Daily, weekly, and monthly comparisons use shared calendar dates, with each market retaining its source timestamps. Intraday comparisons require exact shared timestamps. Exchange closing times may differ; weekly and monthly bars can cover a partial period. See [comparison alignment and baselines](price-comparisons.md).
 
-Correlation and relationship views calculate close-to-close returns between shared observations. Missing dates are not filled to manufacture a sample. Returns use local prices without currency conversion; different exchanges can close at different times. Correlation requires enough shared returns and nonzero variance.
+Correlation and relationship views calculate close-to-close returns between shared observations. They request daily bars regardless of chart preset resolution and clip buffered history to the selected range. Missing dates are not filled to manufacture a sample. Returns use local prices without cash distributions or currency conversion; different exchanges can close at different times. Correlation requires enough shared returns and nonzero variance.
 
-Relationship graph controls stay in the footer: `t` cycles the time range, `p` cycles the rolling observation window, `c` toggles correlation, and `f` toggles the fit line. Each action is clickable and shows its current state. In narrow panes, `+` means enabled and `−` means disabled.
+Relationship graph controls stay in the footer: `t` cycles the time range, `p` cycles the rolling observation window, `c` toggles correlation, and `f` toggles the fit line. Each action is clickable and shows its current state. In both correlation views, `r` refreshes the selected histories. A failed refresh retains the last complete result with its original retrieval time behind the existing warning indicator; a new relationship pair or range cannot inherit that result. A rolling correlation requires the entire selected observation window and nonzero variance in that window; an older valid correlation does not replace a missing latest value. Headless results retain these limitations and the price-return basis. In narrow panes, `+` means enabled and `−` means disabled.
 
 Dated missing closing prices remain gaps through history caching and chart extraction, including responses with no usable prices. An alternate source can recover a gap at the same reported timestamp; unresolved dates remain gaps. Missing prices do not establish usable coverage or advance price freshness. An explicit finite zero or negative source price is retained as reported; individual calculations apply their own eligibility rules.
 
@@ -77,6 +77,10 @@ Market capitalization can come from a financial snapshot when a current quote do
 Relative Valuation excludes explicitly stale quote prices, changes, and quote market caps from comparisons. Its exports retain the original quote, source timestamp and stale status, and identify incomplete output. Separately reported fundamentals and fallback market caps retain their own source and retrieval time; these are not dated by the rejected quote.
 
 Bank capital metrics and REIT FFO/AFFO depend on source coverage. Operating cash flow is not a substitute for FFO/AFFO. Missing measures are available through the financial view’s warning indicator.
+
+Relative valuation retains stale fundamentals for inspection and marks them through the existing warning indicator, independently of quote freshness. Its CSV export includes quote observation time and fundamentals source, retrieval time, and stale status. Structured reports preserve the same provenance and report incomplete freshness until the source recovers. Retrieval time does not establish a ratio's valuation date.
+
+The current overview and peer table do not provide P/B, P/tangible book, CET1, or FFO/AFFO multiples. Financial-statement common equity and ordinary shares are dated balance-sheet inputs; weighted-average EPS shares belong to an earnings period and cannot replace period-end shares in a book-value calculation. A provider's tangible-book amount may differ from the bank's reported tangible common equity because of its adjustment policy. Compare issuer definitions and periods before combining these values. REIT GAAP P/E and generic cash-flow yield do not establish FFO/AFFO valuation or distribution coverage.
 
 ## Insider filings
 
@@ -199,6 +203,8 @@ Event EPS and consensus can use an unspecified accounting basis, while TTM value
 Consensus estimates are forecasts for the stated fiscal period. The provider's prior-year input can itself be an estimate; it does not establish a reported result. Fetched timestamps identify retrieval, not when consensus was revised. Filing evidence corroborates a fiscal period without verifying every reported metric.
 
 Split-feed factors may include spinoff price adjustments. Merger terms, spinoff distributions, and security conversions are not covered. Source failures and unavailable event data remain visible rather than appearing as an empty event calendar.
+
+IPO offering prices are distinct from exchange trades. The Cloud CRCL US history captured on September 16, 2026 inserted the [June 4, 2025 $31 offering](https://www.circle.com/pressroom/circle-announces-pricing-of-upsized-initial-public-offering) before NYSE trading began June 5, carried that open/low into its inception aggregates, and inserted the offer into the first trading day’s intraday bars before the opening auction. Requests containing that exact source defect use another available history provider or remain unavailable; the app does not remove the first bar and silently shorten the window or invent replacement OHLC. A corrected source response is accepted. Valid zero-volume observations, other listings, and partial inception buckets with traded prices remain unchanged. Older embedded financial snapshots lose the affected price history while their statements and quotes remain available. Their fixed-horizon returns become unavailable; that snapshot contract does not retain a separate history-rejection reason. Direct history/chart requests retain the source failure when no valid fallback is available. This targeted check does not establish complete IPO or corporate-action coverage.
 
 ## Earnings estimate comparisons
 

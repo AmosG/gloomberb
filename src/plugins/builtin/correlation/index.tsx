@@ -1,6 +1,6 @@
 import { Box, ScrollBox, Text, type InputRenderable } from "../../../ui";
 import { useCallback, useMemo, useRef, useState } from "react";
-import { InputSearchBar, SegmentedControl, usePaneFooter } from "../../../components";
+import { InputSearchBar, SegmentedControl, usePaneFooter, usePaneNoticeFooter } from "../../../components";
 import type { PaneProps } from "../../../types/plugin";
 import type { PluginModule } from "../plugin-module";
 import { TICKER_RESEARCH_PANE_ID } from "../../../types/config";
@@ -8,6 +8,8 @@ import { colors } from "../../../theme/colors";
 import { usePluginTickerActions } from "../../runtime";
 import { useAppSelector, usePaneInstance, usePaneSettingValue } from "../../../state/app/context";
 import { useChartQueries } from "../../../market-data/hooks";
+import { getSharedMarketDataCoordinator } from "../../../market-data/coordinator";
+import { useShortcut } from "../../../react/input";
 import { buildChartKey } from "../../../market-data/selectors";
 import { formatTickerListInput } from "../../../tickers/list";
 import { formatCorrelation } from "./compute";
@@ -89,10 +91,10 @@ function CorrelationMatrixPane({ focused, width, height }: PaneProps) {
       const request = chartRequests[i]!;
       const key = buildChartKey(request);
       const entry = chartEntries.get(key);
-      map.set(instrument.symbol, getSeriesForEntry(instrument.symbol, entry));
+      map.set(instrument.symbol, getSeriesForEntry(instrument.symbol, entry, settings.rangePreset));
     }
     return map;
-  }, [chartEntries, chartRequests, instruments]);
+  }, [chartEntries, chartRequests, instruments, settings.rangePreset]);
 
   const symbols = instruments.map((instrument) => instrument.symbol);
   const symbolsKey = symbols.join(",");
@@ -106,6 +108,23 @@ function CorrelationMatrixPane({ focused, width, height }: PaneProps) {
     [symbolsKey, seriesBySymbol, matrix.sampleMin, matrix.sampleMax, matrix.hasThinPair],
   );
 
+  const refresh = useCallback(() => {
+    const coordinator = getSharedMarketDataCoordinator();
+    for (const request of chartRequests) void coordinator?.loadChart(request, { forceRefresh: true });
+  }, [chartRequests]);
+  useShortcut((event) => {
+    if (!focused || symbolsEditing || event.ctrl || event.alt || event.meta || event.super || event.shift || event.name !== "r") return;
+    event.preventDefault();
+    event.stopPropagation();
+    refresh();
+  });
+  usePaneNoticeFooter({
+    registrationId: "correlation-warnings", focused,
+    notices: [...seriesBySymbol.values()].flatMap((series) => series.refreshError
+      ? [`${series.symbol}: ${series.refreshError}${series.fetchedAt ? ` Retained history retrieved ${new Date(series.fetchedAt).toISOString()}.` : ""}`]
+      : []),
+  });
+
   // The ticker set and range are visible in-pane, so the footer only carries
   // load state and errors.
   usePaneFooter("correlation", () => ({
@@ -114,7 +133,8 @@ function CorrelationMatrixPane({ focused, width, height }: PaneProps) {
       : statusSummary
         ? [{ id: "status", parts: [{ text: statusSummary, tone: "muted" as const }] }]
         : [],
-  }), [settings.symbolsError, statusSummary]);
+    hints: [{ id: "refresh", key: "r", label: "efresh", onPress: refresh }],
+  }), [settings.symbolsError, statusSummary, refresh]);
 
   const openSymbol = useCallback((symbol: string) => {
     if (tickers.has(symbol)) {

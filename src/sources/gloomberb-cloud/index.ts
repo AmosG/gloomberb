@@ -1,3 +1,4 @@
+import { assertTradingPriceHistory } from "../listing-history";
 import { exchangeRateMetadata } from "../../utils/exchange-rate-snapshot";
 import type { ExchangeRateSnapshot } from "../../types/exchange-rate";
 import type { TimeRange } from "../../time-series/range";
@@ -162,7 +163,7 @@ function mapCloudPriceHistory(
   ) {
     throw createProviderMiss(`Cloud chart data failed OHLC validation for ${ticker}`);
   }
-  return points;
+  return assertTradingPriceHistory(points, { symbol: ticker, exchange }, "provider:gloomberb-cloud");
 }
 
 function quoteTargetKey(symbol: string, exchange?: string): string {
@@ -268,6 +269,7 @@ export class GloomberbCloudProvider implements AssetDataProvider {
       return retainRequestedFinancialsSymbol(mapCloudFinancials(
         unwrapRequiredCloudResponse(response, `Cloud financials are unavailable for ${ticker}`),
         response.providerMeta,
+        target,
       ), ticker);
     }, `Cloud financials are unavailable for ${ticker}`);
   }
@@ -300,7 +302,7 @@ export class GloomberbCloudProvider implements AssetDataProvider {
         if ((item.status === "success" || item.status === "partial") && item.data) {
           return {
             target,
-            financials: retainRequestedFinancialsSymbol(mapCloudFinancials(item.data), target.symbol),
+            financials: retainRequestedFinancialsSymbol(mapCloudFinancials(item.data, undefined, cloudInstrumentTarget(target.symbol, target.exchange)), target.symbol),
           };
         }
         return {

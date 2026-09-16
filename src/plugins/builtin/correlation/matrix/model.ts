@@ -4,6 +4,7 @@ import { colors } from "../../../../theme/colors";
 import type { PricePoint } from "../../../../types/financials";
 import { dailyCloses, correlateDailyCloses, type CorrelationResult, type DailyClose } from "../compute";
 import type { CorrelationRangePreset } from "../settings";
+import { clipPriceHistoryToRange } from "../../../../time-series/history-window";
 
 export const ROW_HEADER_WIDTH = 7;
 export const MATRIX_CELL_WIDTH = 10;
@@ -18,6 +19,9 @@ export interface CorrelationSeries {
   status: SeriesStatus;
   observationCount: number;
   integrity?: PriceHistoryIntegrity[];
+  loading?: boolean;
+  refreshError?: string;
+  fetchedAt?: number | null;
 }
 
 export function displaySymbol(symbol: string): string {
@@ -43,6 +47,7 @@ function formatSeriesSymbolList(symbols: string[], seriesBySymbol: Map<string, C
 export function getSeriesForEntry(
   symbol: string,
   entry: QueryEntry<PricePoint[]> | undefined,
+  range?: CorrelationRangePreset,
 ): CorrelationSeries {
   const priceHistory = entry?.data ?? entry?.lastGoodData ?? null;
 
@@ -56,12 +61,18 @@ export function getSeriesForEntry(
         prices: [],
         status: "error",
         observationCount: 0,
+        refreshError: entry.error?.message,
       };
     }
     return { symbol, prices: [], status: "loading", observationCount: 0 };
   }
 
-  return buildCorrelationSeries(symbol, priceHistory);
+  return {
+    ...buildCorrelationSeries(symbol, range ? clipPriceHistoryToRange(priceHistory, range) : priceHistory),
+    loading: entry?.phase === "loading" || entry?.phase === "refreshing",
+    refreshError: entry?.error?.message,
+    fetchedAt: entry?.fetchedAt,
+  };
 }
 
 export function buildCorrelationSeries(symbol: string, history: readonly PricePoint[]): CorrelationSeries {
@@ -141,7 +152,7 @@ export function buildStatusSummary(
   const parts: string[] = [];
   const byStatus = (status: SeriesStatus) => symbols.filter((symbol) => seriesBySymbol.get(symbol)?.status === status);
 
-  const loading = byStatus("loading");
+  const loading = symbols.filter((symbol) => seriesBySymbol.get(symbol)?.status === "loading" || seriesBySymbol.get(symbol)?.loading);
   const errors = [...byStatus("error"), ...byStatus("empty")];
   const insufficient = byStatus("insufficient");
   const invalid = byStatus("invalid");
