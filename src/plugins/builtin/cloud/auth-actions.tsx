@@ -29,10 +29,10 @@ export function InlineAuthActions({ showSignup = true }: { showSignup?: boolean 
   const { openCommandBar } = usePluginAppActions();
   return (
     <Box flexDirection="row">
-      <Button label={t("Log In")} variant="ghost" compact stopPropagation onPress={() => openAuth(openCommandBar, "login")} />
+      <Button label={t("Log In")} variant="plain" compact stopPropagation onPress={() => openAuth(openCommandBar, "login")} />
       {showSignup && <>
         <Text fg={colors.textDim}> / </Text>
-        <Button label={t("Sign Up")} variant="ghost" compact stopPropagation onPress={() => openAuth(openCommandBar, "signup")} />
+        <Button label={t("Sign Up")} variant="plain" compact stopPropagation onPress={() => openAuth(openCommandBar, "signup")} />
       </>}
     </Box>
   );

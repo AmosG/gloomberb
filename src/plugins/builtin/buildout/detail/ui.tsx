@@ -288,7 +288,7 @@ export function FavoriteCell({
       displayLabel={busy ? "*" : starred ? "★" : "☆"}
       width={2}
       compact
-      variant="ghost"
+      variant="plain"
       active={selected || starred}
       disabled={busy || !onPress}
       stopPropagation

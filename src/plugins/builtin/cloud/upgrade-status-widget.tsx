@@ -37,5 +37,5 @@ export function CloudUpgradeStatusWidget({ controller = chatController }: CloudU
     ? tf("Pro trial {days}d", { days: access.trialDaysLeft })
     : t("delayed data · upgrade");
 
-  return <Button label={label} variant="ghost" compact stopPropagation onPress={trial ? openPlan : openUpgrade} />;
+  return <Button label={label} variant="plain" compact stopPropagation onPress={trial ? openPlan : openUpgrade} />;
 }

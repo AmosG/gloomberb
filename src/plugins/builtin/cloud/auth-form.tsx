@@ -206,7 +206,7 @@ export function AuthForm({
           >
             {t("Password")}
           </Text>
-          <Button stopPropagation label={showPassword ? t("Hide password") : t("Show password")} displayLabel={showPassword ? t("hide") : t("show")} variant="ghost" compact onPress={() => setShowPassword((current) => !current)} />
+          <Button stopPropagation label={showPassword ? t("Hide password") : t("Show password")} displayLabel={showPassword ? t("hide") : t("show")} variant="plain" compact onPress={() => setShowPassword((current) => !current)} />
         </Box>
         <TextField
           value={password}
@@ -256,7 +256,7 @@ export function AuthForm({
         <Box flexDirection="row" width={AUTH_FIELD_WIDTH}>
           <Button stopPropagation
             label={t("Forgot password?")}
-            variant="ghost"
+            variant="plain"
             disabled={submitting || resetState === "sending"}
             onPress={requestReset}
           />

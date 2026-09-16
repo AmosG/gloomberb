@@ -436,7 +436,7 @@ export function KellySizerPane({ focused, width, height }: PaneProps) {
               }}
             />
           ) : (
-            <Button label="Change ticker" variant="ghost" compact stopPropagation onPress={focusTickerSearch}>
+            <Button label="Change ticker" variant="plain" compact stopPropagation onPress={focusTickerSearch}>
               <Text fg={colors.textBright} attributes={TextAttributes.BOLD}>
                 {truncateText(summaryLine, Math.max(8, width - 2))}
               </Text>
