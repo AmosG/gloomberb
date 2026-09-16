@@ -41,6 +41,7 @@ function runtime() {
   const placed: TickerOpenTarget[] = [];
   const notifications: unknown[] = [];
   const requests = new Map<string, ReturnType<typeof deferred<TickerOpenTarget | null>>>();
+  const feedbackOwners = new Map<string, (() => boolean) | undefined>();
   const registry = { panes: new Map(), getTermSizeFn: () => ({ width: 120, height: 40 }),
     notify: (message: unknown) => notifications.push(message) } as any;
   const persistLayout = (layout: LayoutConfig) => {
@@ -54,14 +55,15 @@ function runtime() {
     openPaneSettings: async () => {}, openPinnedTicker: async () => {}, persistConfig() {}, persistLayout,
     placePaneInstance() {}, placePinnedTickerTarget: (value) => placed.push(value), pluginRegistry: registry,
     publishTickerOpenTarget: (value) => published.push(value),
-    resolveOpenTickerTarget: (symbol) => {
+    resolveOpenTickerTarget: (symbol, _publicOnly, canPresentFeedback) => {
+      feedbackOwners.set(symbol, canPresentFeedback);
       const request = deferred<TickerOpenTarget | null>(); requests.set(symbol, request); return request.promise;
     },
     resolvePaneTarget: () => null, selectTickerInPane() {}, showPane() {}, state: stateRef.current, stateRef,
     switchTickerResearchTab() {}, tickerRepository: {} as any,
   });
   rebind();
-  return { stateRef, registry, requests, published, focused, placed, notifications, rebind, persistLayout,
+  return { stateRef, registry, requests, feedbackOwners, published, focused, placed, notifications, rebind, persistLayout,
     binding: (id = "first") => stateRef.current.config.layout.instances.find(pane => pane.instanceId === id)!.binding,
   };
 }
@@ -90,6 +92,8 @@ test("a newer navigation owns the pane across registry rebinding and stale failu
     app.registry.navigateTickerFn("OLD", { sourcePaneId: "first" });
     app.rebind();
     app.registry.navigateTickerFn("NEW", { sourcePaneId: "first" });
+    expect(app.feedbackOwners.get("OLD")?.()).toBe(false);
+    expect(app.feedbackOwners.get("NEW")?.()).toBe(true);
     const selected = target("NEW", null);
     app.requests.get("NEW")!.resolve(selected);
     await settle();
@@ -109,6 +113,8 @@ test("independent pane navigation completes without reclaiming focus from the ot
   app.stateRef.current = { ...app.stateRef.current, focusedPaneId: "second" };
   app.rebind();
   app.registry.navigateTickerFn("RIGHT", { sourcePaneId: "second" });
+  expect(app.feedbackOwners.get("LEFT")?.()).toBe(false);
+  expect(app.feedbackOwners.get("RIGHT")?.()).toBe(true);
   app.requests.get("RIGHT")!.resolve(target("RIGHT", future));
   await settle();
   app.requests.get("LEFT")!.resolve(target("LEFT", null));
@@ -127,6 +133,7 @@ test("a pending result cannot overwrite an intervening direct selection or reope
     const replacement: PaneBinding = { kind: "fixed", symbol: "DIRECT", instrument: future };
     app.persistLayout({ ...layout, instances: close ? layout.instances.filter(pane => pane.instanceId !== "first")
       : layout.instances.map(pane => pane.instanceId === "first" ? { ...pane, binding: replacement } : pane) });
+    expect(app.feedbackOwners.get("SLOW")?.()).toBe(false);
     app.requests.get("SLOW")!.resolve(target("SLOW", null));
     await settle();
     expect(app.published).toEqual([]);

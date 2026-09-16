@@ -78,7 +78,11 @@ interface BindAppPanePluginRegistryOptions {
   placePinnedTickerTarget: (target: TickerOpenTarget, options?: PinTickerOptions) => void;
   pluginRegistry: PluginRegistry;
   publishTickerOpenTarget: (target: TickerOpenTarget) => void;
-  resolveOpenTickerTarget: (rawSymbol: string) => Promise<TickerOpenTarget | null>;
+  resolveOpenTickerTarget: (
+    rawSymbol: string,
+    publicOnly?: boolean,
+    canPresentFeedback?: () => boolean,
+  ) => Promise<TickerOpenTarget | null>;
   resolvePaneTarget: (paneId: string, layout?: LayoutConfig) => string | null;
   selectTickerInPane: (symbol: string, preferredPaneId?: string | null) => void;
   showPane: (paneId: string) => void;
@@ -225,18 +229,27 @@ export function bindAppPanePluginRegistry({
     const ownsRequest = () => requests.get(sourcePaneId) === request;
     const originalPane = resolveTickerNavigationReplacementPane(stateRef.current.config.layout, sourcePaneId);
     const originalBinding = originalPane ? stableStringify(originalPane.binding) : null;
+    const ownsDestination = () => {
+      if (!ownsRequest()) return false;
+      if (!originalPane) return true;
+      const currentPane = resolveTickerNavigationReplacementPane(stateRef.current.config.layout, sourcePaneId);
+      // Direct commands and pane closure also supersede a pending navigation.
+      return !!currentPane && stableStringify(currentPane.binding) === originalBinding;
+    };
+    const canPresentFeedback = () => ownsDestination() && shouldFocusTickerNavigationTarget({
+      sourcePaneId,
+      currentFocusedPaneId: stateRef.current.focusedPaneId,
+      targetPaneId: originalPane?.instanceId ?? null,
+    });
     (async () => {
       try {
-        const target = await resolveOpenTickerTarget(rawSymbol);
-        if (!target || !ownsRequest()) return;
+        const target = await resolveOpenTickerTarget(rawSymbol, false, canPresentFeedback);
+        if (!target || !ownsDestination()) return;
         const symbol = target.symbol;
 
         const currentState = stateRef.current;
         const currentLayout = currentState.config.layout;
         const detailPane = resolveTickerNavigationReplacementPane(currentLayout, sourcePaneId);
-        // A direct command or another UI action can retarget/close the pane
-        // without calling navigateTickerFn. That newer choice also owns it.
-        if (originalPane && (!detailPane || stableStringify(detailPane.binding) !== originalBinding)) return;
         const focusIfStillOwned = (paneId: string, layout: LayoutConfig) => {
           if (!shouldFocusTickerNavigationTarget({
             sourcePaneId,
@@ -274,7 +287,7 @@ export function bindAppPanePluginRegistry({
           placePinnedTickerTarget(target, { floating: false });
         }
       } catch (err) {
-        if (!ownsRequest()) return;
+        if (!canPresentFeedback()) return;
         const message = err instanceof Error ? err.message : String(err);
         pluginRegistry.notify({ body: `Failed to navigate to ${rawSymbol}: ${message}`, type: "error" });
       } finally {

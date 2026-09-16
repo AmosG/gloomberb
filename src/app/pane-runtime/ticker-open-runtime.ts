@@ -57,7 +57,11 @@ export function useAppTickerOpenRuntime({
   stateRef,
   tickerRepository,
 }: UseAppTickerOpenRuntimeOptions) {
-  const resolveOpenTickerTarget = useCallback(async (rawSymbol: string, publicOnly = false): Promise<TickerOpenTarget | null> => {
+  const resolveOpenTickerTarget = useCallback(async (
+    rawSymbol: string,
+    publicOnly = false,
+    canPresentFeedback: () => boolean = () => true,
+  ): Promise<TickerOpenTarget | null> => {
     try {
       const target = await resolveTickerOpenTarget({
         query: rawSymbol, publicOnly,
@@ -65,11 +69,12 @@ export function useAppTickerOpenRuntime({
         dataProvider,
         tickerRepository,
       });
-      if (!target) {
+      if (!target && canPresentFeedback()) {
         pluginRegistry.notify({ body: `Could not open ${rawSymbol}.`, type: "error" });
       }
       return target;
     } catch (err) {
+      if (!canPresentFeedback()) return null;
       if (err instanceof AmbiguousTickerError) {
         dispatch({ type: "SET_COMMAND_BAR", open: true, query: rawSymbol,
           launch: { kind: "ticker-search", query: rawSymbol } });
