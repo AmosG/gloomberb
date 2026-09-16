@@ -37,6 +37,13 @@ export function useTickers(): AppState["tickers"] {
  */
 export { AppContext, PaneInstanceProvider, useAppDispatch, useAppSelector, usePaneSettingValue, usePaneTitle } from "../state/app/context";
 
+/**
+ * Pane state at the top level rather than inside the plugin's namespace, for
+ * the few values the app itself resolves across panes: the cursor symbol a
+ * follower pane reads is the clearest case.
+ */
+export { usePaneStateValue } from "../state/app/context";
+
 export const usePaneInstanceId = usePaneInstanceIdInternal;
 export const usePaneCollection = usePaneCollectionInternal;
 export const usePaneTicker = usePaneTickerInternal;

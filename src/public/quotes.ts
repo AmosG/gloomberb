@@ -14,8 +14,10 @@
  * Compatibility commitment: see the note in `./utils.ts`.
  */
 
-// Subscribing a list of targets and reading the entries as they update.
-export { DEFAULT_QUOTE_POLL_INTERVAL_MS, useLiveQuoteEntries } from "../state/hooks/quote-streaming";
+// Subscribing a list of targets and reading the entries as they update, or
+// only keeping them warm in the host's store when the pane reads quotes
+// through the financials it already holds.
+export { DEFAULT_QUOTE_POLL_INTERVAL_MS, useLiveQuoteEntries, useQuoteUpdates } from "../state/hooks/quote-streaming";
 export type { QuoteUpdateOptions } from "../state/hooks/quote-streaming";
 export type { QuoteSubscriptionTarget } from "../types/data-provider";
 export type { QueryEntry } from "../market-data/result-types";

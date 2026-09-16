@@ -9,8 +9,6 @@ import { createInitialState } from "../../../../../state/app/context";
 import { createStatefulTestPluginRuntime } from "../../../../../test-support/plugin-runtime";
 import { createDefaultConfig } from "../../../../../types/config";
 import { Box } from "../../../../../ui";
-import { setDetectedProviders } from "../../../ai/providers";
-import { setAiRunHost } from "../../../ai/runner";
 import { BreakingPane } from "./pane";
 import { TestPaneProvider } from "../../../../../test-support/pane";
 
@@ -105,8 +103,6 @@ function createHarness() {
 
 afterEach(async () => {
   setSharedNewsService(null);
-  setAiRunHost(null);
-  setDetectedProviders(null);
   if (testSetup) {
     await act(async () => {
       testSetup!.renderer.destroy();
@@ -116,28 +112,9 @@ afterEach(async () => {
 });
 
 describe("BreakingPane", () => {
-  test("does not run local AI providers when breaking news is mounted", async () => {
-    let runCalls = 0;
+  test("reads the wire through the shared news service when it is mounted", async () => {
     const newsService = createReadyNewsService([makeArticle()]);
     setSharedNewsService(newsService.service);
-    setDetectedProviders([
-      {
-        id: "anthropic",
-        name: "Claude",
-        available: true,
-        status: "ready",
-        outputModes: ["plain", "structured", "screener"],
-      },
-    ]);
-    setAiRunHost({
-      run() {
-        runCalls += 1;
-        return {
-          done: Promise.resolve("digest"),
-          cancel: () => {},
-        };
-      },
-    });
 
     await act(async () => {
       testSetup = await testRender(createHarness(), { width: 90, height: 18 });
@@ -146,7 +123,6 @@ describe("BreakingPane", () => {
       await testSetup.renderOnce();
     });
 
-    expect(runCalls).toBe(0);
     expect(newsService.getQueryStateCalls()).toBeGreaterThan(0);
   });
 });

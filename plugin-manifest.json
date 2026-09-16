@@ -2,20 +2,6 @@
   "version": 1,
   "plugins": [
     {
-      "id": "ai",
-      "name": "AI",
-      "description": "Use AI providers with your financial data.",
-      "categories": [
-        "ai"
-      ],
-      "toggleable": true,
-      "contributes": {
-        "panes": [],
-        "capabilities": [],
-        "broker": false
-      }
-    },
-    {
       "id": "alerts",
       "name": "Alerts",
       "description": "Price trigger alerts with desktop notifications",

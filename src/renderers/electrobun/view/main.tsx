@@ -12,7 +12,7 @@ import {
   replaceElectrobunCapabilityManifests,
   setElectrobunRemoteRequestHandler,
 } from "./backend-rpc";
-import { installElectrobunAiHost } from "./ai-host";
+import { installElectrobunCapabilityStreamClient } from "./capability-stream-client";
 import { installFocusScopeRelease } from "./host/focus-scope";
 import { installElectrobunBrokerRemoteClient } from "./broker-remote-client";
 import { installElectrobunConfigStoreHost } from "./config-host";
@@ -103,7 +103,7 @@ async function boot() {
   installElectrobunCloudApiFetchTransport();
   installElectrobunUpdateHost();
   const init = await measurePerfAsync("startup.electrobun.backend-init", () => backendInitPromise);
-  installElectrobunAiHost();
+  installElectrobunCapabilityStreamClient();
   installFocusScopeRelease();
   installElectrobunWindowFullscreenTracking();
   installScreenshotWatermark();

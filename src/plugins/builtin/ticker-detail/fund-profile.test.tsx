@@ -9,7 +9,6 @@ import { buildTickerReport, ticker as runTickerCommand } from "../../../cli/comm
 import type { MarketContext } from "../../../cli/types";
 import type { TickerFinancials } from "../../../types/financials";
 import { OverviewTab } from "./overview-tab";
-import { buildTickerAiContext } from "../ai/ticker-context";
 
 const config = createDefaultConfig("/tmp/gloom-fund-profile-test-unused");
 const ticker = createTestTicker("CLASSA", "Controlled accumulating fund", { assetCategory: "STK", exchange: "XETRA", currency: "EUR" });
@@ -87,7 +86,7 @@ for (const scenario of ["zero", "nonfinite", "empty", "legacy-return", "covered-
 });
 
 
-test("blank source type cannot hide retained fund classification from AI while reports skip blanks", async () => {
+test("blank source type cannot hide retained fund classification while reports skip blanks", async () => {
   const savedFund = createTestTicker("CLASSA", "Controlled fund", { assetCategory: "ETF" });
   for (const quoted of [true, false]) {
     const financials: TickerFinancials = {
@@ -95,7 +94,6 @@ test("blank source type cannot hide retained fund classification from AI while r
       quoteMetadata: { symbol: "CLASSA", instrumentType: quoted ? "ETF" : " ", source: {} },
       profile, annualStatements: [], quarterlyStatements: [], priceHistory: [],
     };
-    expect(buildTickerAiContext(savedFund, financials, "USD")).toContain("Instrument type: ETF");
     expect(await buildTickerReport({ symbol: "CLASSA", tickerFile: savedFund, financials, config, toBase: async v => v })).toContain("Type ETF");
     expect(financials.quote?.instrumentType).toBe(quoted ? " " : undefined);
     expect(financials.quoteMetadata?.instrumentType).toBe(quoted ? "ETF" : " ");

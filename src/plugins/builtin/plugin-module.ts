@@ -6,6 +6,7 @@ import type {
 
 type PluginMetadataKey =
   | "id"
+  | "stateId"
   | "name"
   | "version"
   | "description"

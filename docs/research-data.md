@@ -230,7 +230,7 @@ Calendar fallback values keep their own unknown currency and fiscal period. Tren
 
 ## AI research context
 
-Ask AI and ticker attachments in the AI workspace use the available quote, summary fundamentals, and latest annual statement. Monetary amounts retain their original values and explicit source currency, including minor units such as GBp. The configured base currency is a preference; these inputs are not converted. Listing, summary, and statement currencies remain independent, and unknown units remain unknown. Zero values and numeric precision are preserved; margins, yields, and returns from fundamentals are identified as fractions.
+Ask AI and ticker attachments in the AI workspace come from the [BYOK AI plugin](https://github.com/gloom-sh/gloom-byok-ai) and use the available quote, summary fundamentals, and latest annual statement. Monetary amounts retain their original values and explicit source currency, including minor units such as GBp. The configured base currency is a preference; these inputs are not converted. Listing, summary, and statement currencies remain independent, and unknown units remain unknown. Zero values and numeric precision are preserved; margins, yields, and returns from fundamentals are identified as fractions.
 
 The context includes available source, observation, retrieval, stale-state, and statement-history failure information. Retrieval time does not establish a valuation date. Annual period identity, whole-row availability, and individual field availability remain distinct. This attachment is a snapshot of those inputs, not a complete filing or a guarantee that a provider's data is current.
 
