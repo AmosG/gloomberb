@@ -28,6 +28,10 @@ export function metricLabel(key: string): string {
   return THESIS_METRIC_KEYS.find((entry) => entry.key === key)?.label ?? key;
 }
 
+export function metricUnit(key: string): string {
+  return THESIS_METRIC_KEYS.find((entry) => entry.key === key)?.unit ?? "";
+}
+
 export function computeHealth(document: ThesisDocument): ThesisHealth {
   if (document.killConditions.some((condition) => condition.triggered)) return "broken";
   const statuses = document.pillars.map((pillar) => pillar.status);

@@ -21,6 +21,7 @@ import {
   healthTone,
   latestReviewSummary,
   metricLabel,
+  metricUnit,
   nextPillarStatus,
   openSignals,
   pillarGlyph,
@@ -49,6 +50,18 @@ const SECTION_LABEL: Record<Section, string> = {
   signals: "Signals",
   review: "Latest review",
 };
+
+/** A bound the way an analyst would say it: "≥ 70%", "≥ 120B", "≤ 2.5x". */
+function formatBound(metric: { key: string; op: string; value: number; unit?: string }): string {
+  const unit = metric.unit ?? metricUnit(metric.key);
+  const magnitude = Math.abs(metric.value);
+  const value = magnitude >= 1e9
+    ? `${(metric.value / 1e9).toFixed(magnitude >= 1e11 ? 0 : 1).replace(/\.0$/, "")}B`
+    : magnitude >= 1e6
+      ? `${(metric.value / 1e6).toFixed(magnitude >= 1e8 ? 0 : 1).replace(/\.0$/, "")}M`
+      : String(metric.value);
+  return `${metric.op === ">=" ? "≥" : "≤"} ${value}${unit}`;
+}
 
 function relative(iso: string | null | undefined): string {
   const days = daysSince(iso ?? null);
@@ -348,8 +361,7 @@ export function ThesisDetail({ thesis, width, height, focused, footerId, onDelet
     }
     if (row.kind === "pillar") {
       const pillar = row.item;
-      const detail = pillar.metric ? `${metricLabel(pillar.metric.key)} ${pillar.metric.op} ${pillar.metric.value}${pillar.metric.unit ?? ""}` : "";
-      const right = `${detail ? `${detail}  ` : ""}${pillar.status}`;
+      const right = pillar.metric ? `${formatBound(pillar.metric)}  ${pillar.status}` : pillar.status;
       const scope = pillar.scope ? `${pillar.scope}: ` : "";
       const { left, right: rightText } = twoColumn(` ${pillarGlyph(pillar.status)} ${scope}${pillar.text}`, right, contentWidth);
       const statusColor = pillar.status === "broken" ? colors.negative : pillar.status === "weakening" ? colors.warning : pillar.status === "intact" ? colors.positive : dim;
@@ -434,7 +446,7 @@ export function ThesisDetail({ thesis, width, height, focused, footerId, onDelet
       for (const line of wrap(row.item.reason, contentWidth, 3)) lines.push({ text: line, dim: false });
       if (row.item.confidence !== null) lines.push({ text: `confidence ${Math.round(row.item.confidence * 100)}%`, dim: true });
     } else if (row.kind === "pillar") {
-      if (row.item.metric) lines.push({ text: `Checks itself: ${metricLabel(row.item.metric.key)} ${row.item.metric.op} ${row.item.metric.value}${row.item.metric.unit ?? ""}`, dim: true });
+      if (row.item.metric) lines.push({ text: `Checks itself: ${metricLabel(row.item.metric.key)} ${formatBound(row.item.metric)}`, dim: true });
       if (row.item.note) for (const line of wrap(row.item.note, contentWidth, 2)) lines.push({ text: line, dim: false });
     } else if (row.kind === "kill" && row.item.note) {
       for (const line of wrap(row.item.note, contentWidth, 2)) lines.push({ text: line, dim: false });
@@ -480,6 +492,8 @@ export function ThesisDetail({ thesis, width, height, focused, footerId, onDelet
         onActivate={() => void activate()}
         renderRow={renderRow}
         scrollable
+        surface="plain"
+        rowGap={0}
         height={Math.max(3, height - headerHeight - stripHeight)}
         getRowBackgroundColor={(item, state) => (state.selected ? colors.selected : item.disabled ? colors.bg : undefined)}
         remoteRole="thesis"

@@ -200,7 +200,7 @@ describe("ThesisBoardPane", () => {
     expect(frame).toContain("challenges · Gross margin holds");
     expect(frame).toContain("10-Q: Q3 gross margin guide 72-73%");
     expect(frame).toContain("Data center revenue grows over 50% YoY");
-    expect(frame).toContain("Gross margin, latest quarter >= 70%");
+    expect(frame).toContain("≥ 70%  weakening");
     expect(frame).toContain("Hyperscaler capex cut over 20%");
     expect(frame).toContain("not fired");
     expect(frame).toContain("Q3 earnings");
