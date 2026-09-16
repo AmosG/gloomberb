@@ -239,3 +239,7 @@ Yahoo keeps an explicitly dated but unavailable metric in its reporting period. 
 ## Financial growth display
 
 Financial tables abbreviate large growth percentages (for example, `+163k%`) so the sign and percent unit fit beside the reported value. Extreme finite values that cannot fit use an explicit bound; an unrepresentable growth rate is unavailable. Structured JSON retains finite numeric growth; formatted text and CSV use the compact display.
+
+## Executive compensation
+
+`EXEC` reads compensation from covered annual DEF 14A proxy statements. The year selector identifies the proxy filing year; the statement separately identifies the fiscal year of compensation. Stock and option awards use the filing’s grant-date valuation, which is not the amount eventually realized. Open the source filing through the existing footer action (`o`). No covered proxy means this view has no compensation data for that company; it does not establish that the company pays no executives.

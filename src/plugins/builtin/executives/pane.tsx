@@ -2,15 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   CloudExecutiveRowPayload,
   CloudProxyStatementPayload,
-  CloudProxyStatementSummaryPayload,
 } from "../../../api-client";
 import {
-  EmptyState, PaneStatusBody, Prose, SectionHeading, Spinner,
+  EmptyState, PaneStatusBody, Prose, SectionHeading,
   Tabs,
   usePaneFooter,
   type PaneFooterSegment
 } from "../../../components";
 import { useShortcut } from "../../../react/input";
+import { useAsyncResource } from "../../../react/async-resource";
 import { colors, getChartIndicatorColor } from "../../../theme/colors";
 import {
   Box,
@@ -229,65 +229,29 @@ export function ExecutivesPane({
 }) {
   const { symbol } = useBoundTicker();
   const ticker = symbol ? symbol.toUpperCase() : null;
+  if (!ticker) return <EmptyState title="Pick a ticker to see its executives." />;
+  return <ExecutiveResearch key={ticker} ticker={ticker} focused={focused} width={width} />;
+}
+
+function ExecutiveResearch({ ticker, focused, width }: { ticker: string; focused: boolean; width: number }) {
   const nativePaneChrome = useUiCapabilities().nativePaneChrome === true;
   const rendererHost = useRendererHost();
-
-  const [years, setYears] = useState<CloudProxyStatementSummaryPayload[]>([]);
-  const [year, setYear] = useState<number | null>(null);
-  const [statement, setStatement] = useState<CloudProxyStatementPayload | null>(
-    null,
-  );
-  const [status, setStatus] = useState<
-    "idle" | "loading" | "loaded" | "none" | "error"
-  >("idle");
-  const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<ScrollBoxRenderable | null>(null);
-
-  useEffect(() => {
-    if (!ticker) return;
-    let cancelled = false;
-    setStatus("loading");
-    setStatement(null);
-    loadProxyStatements(ticker)
-      .then((payload) => {
-        if (cancelled) return;
-        setYears(payload.proxies);
-        setYear(payload.proxies[0]?.proxyYear ?? null);
-        setStatus(payload.proxies.length > 0 ? "loaded" : "none");
-      })
-      .catch((caught: unknown) => {
-        if (cancelled) return;
-        // No proxy on file answers 404, which is not an error worth a message.
-        const message =
-          caught instanceof Error ? caught.message : String(caught);
-        if (/404|not found|no proxy/i.test(message)) {
-          setYears([]);
-          setStatus("none");
-          return;
-        }
-        setError(message);
-        setStatus("error");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [ticker]);
-
-  useEffect(() => {
-    if (!ticker || year === null) return;
-    let cancelled = false;
-    loadProxyStatement(ticker, year)
-      .then((payload) => {
-        if (!cancelled) setStatement(payload);
-      })
-      .catch((caught: unknown) => {
-        if (!cancelled)
-          setError(caught instanceof Error ? caught.message : String(caught));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [ticker, year]);
+  const [selectedYear, setYear] = useState<number | null>(null);
+  const loadYears = useCallback((force: boolean) => loadProxyStatements(ticker, { force }), [ticker]);
+  const list = useAsyncResource(loadYears);
+  const years = list.data?.proxies ?? [];
+  const year = years.some(entry => entry.proxyYear === selectedYear)
+    ? selectedYear : years[0]?.proxyYear ?? null;
+  const loadStatement = useCallback((force: boolean) => loadProxyStatement(ticker, year!, { force }), [ticker, year]);
+  const detail = useAsyncResource(year === null ? null : loadStatement);
+  const statement = detail.data;
+  const loading = list.loading || detail.loading;
+  const noProxy = list.error !== null && /404|not found|no proxy/i.test(list.error);
+  const refresh = useCallback(() => {
+    void list.reload();
+    if (year !== null) void detail.reload();
+  }, [list.reload, detail.reload, year]);
 
   useEffect(() => {
     const scrollBox = scrollRef.current;
@@ -312,6 +276,8 @@ export function ExecutivesPane({
     (event) => {
       if (isPlainKey(event, "o")) {
         openFiling();
+      } else if (isPlainKey(event, "r")) {
+        refresh();
       } else if (isPlainKey(event, "j", "down")) {
         scrollBy(1);
       } else if (isPlainKey(event, "k", "up")) {
@@ -323,7 +289,7 @@ export function ExecutivesPane({
 
   usePaneFooter(EXECUTIVES_PANE_ID, () => {
     const info: PaneFooterSegment[] = [];
-    if (status === "loading")
+    if (loading)
       info.push({ id: "loading", parts: [{ text: "loading", tone: "muted" }] });
     if (statement) {
       info.push({
@@ -333,11 +299,12 @@ export function ExecutivesPane({
         ],
       });
     }
-    const hints = statement
-      ? [{ id: "open", key: "o", label: "pen filing", onPress: openFiling }]
-      : [];
-    return { info, hints };
-  }, [status, statement, openFiling]);
+    const hints = [
+      ...(statement ? [{ id: "open", key: "o", label: "pen filing", onPress: openFiling }] : []),
+      { id: "refresh", key: "r", label: "efresh", onPress: refresh },
+    ];
+    return { info, hints, error: statement ? detail.error : undefined };
+  }, [loading, statement, detail.error, openFiling, refresh]);
 
   const figures = useMemo(
     () => (statement ? figuresOf(statement) : []),
@@ -350,25 +317,14 @@ export function ExecutivesPane({
     Math.max(4, ...figures.map((figure) => figure.value.length)),
   );
 
-  if (!ticker)
-    return <EmptyState title="Pick a ticker to see its executives." />;
-  if (status === "loading" && !statement) {
-    return (
-      <PaneStatusBody loading align="center" loadingLabel="Loading proxy statement..." />
-    );
+  if (list.loading && !list.data) {
+    return <PaneStatusBody loading align="center" loadingLabel="Loading proxy statement..." />;
   }
-  if (status === "none") {
-    return (
-      <EmptyState
-        title={`No proxy statement on file for ${ticker}.`}
-        message="Executive pay comes from the annual DEF 14A. Funds, SPACs and foreign filers do not file one with a compensation table."
-      />
-    );
+  if (noProxy || (!list.error && years.length === 0)) {
+    return <EmptyState title={`No proxy statement on file for ${ticker}.`} />;
   }
-  if (status === "error") {
-    return (
-      <PaneStatusBody error={error ?? "Could not load executive compensation."} errorTitle="Could not load executive compensation." />
-    );
+  if (list.error) {
+    return <PaneStatusBody error={list.error} errorTitle="Could not load executive compensation." />;
   }
 
   return (
@@ -469,15 +425,9 @@ export function ExecutivesPane({
                 ))}
               </Box>
             )}
-            <Box height={1} marginTop={1}>
-              <Text fg={colors.textDim}>
-                Read from the DEF 14A and checked against the filing. Equity
-                valued at grant. Press o to open the filing.
-              </Text>
-            </Box>
           </Box>
         ) : (
-          <Spinner label="Loading..." />
+          <PaneStatusBody loading={detail.loading} error={detail.error} errorTitle="Could not load this proxy statement." />
         )}
       </ScrollBox>
     </Box>
