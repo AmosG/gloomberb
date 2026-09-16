@@ -1,9 +1,10 @@
-import { useEffect, type Dispatch } from "react";
+import { useCallback, useEffect, type Dispatch } from "react";
 import { loadPersistedBrokerAccountMap } from "../../brokers/account-cache";
 import type { AppSessionSnapshot } from "../../core/state/session-persistence";
 import type { AppTickerRepositoryPort } from "../../core/app-service-ports";
 import type { MarketDataCoordinator } from "../../market-data/coordinator";
-import { instrumentFromTicker } from "../../market-data/request-types";
+import { instrumentFromTicker, type InstrumentRef } from "../../market-data/request-types";
+import { useSavedLayoutWarmup } from "./layout-warmup";
 import { chatController } from "../../plugins/builtin/chat/controller";
 import { PLUGIN_MARKETPLACE_PANE_ID } from "../../plugins/builtin/plugin-marketplace/ids";
 import type { LoadedExternalPlugin } from "../../plugins/loader";
@@ -162,4 +163,15 @@ export function useAppStartupRuntime({
     });
     marketData.prefetchTicker(instrumentFromTicker(ticker, ticker.metadata.ticker));
   }, [focusedTickerSymbol, marketData, state.tickers]);
+
+  const prefetchInstrument = useCallback((instrument: InstrumentRef) => {
+    marketData.prefetchTicker(instrument);
+  }, [marketData]);
+  useSavedLayoutWarmup({
+    appActive,
+    config: state.config,
+    initialized: state.initialized,
+    prefetch: prefetchInstrument,
+    tickers: state.tickers,
+  });
 }
