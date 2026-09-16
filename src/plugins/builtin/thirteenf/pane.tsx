@@ -502,7 +502,7 @@ function FundDetailView({
   useShortcut((event) => {
     if (event.defaultPrevented || event.propagationStopped) return;
     if (!focused || event.targetEditable) return;
-    if (isPlainKey(event, "r")) {
+    if (isPlainKey(event, "r") && !openFiling) {
       event.preventDefault?.();
       event.stopPropagation?.();
       refresh();
