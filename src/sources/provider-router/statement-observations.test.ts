@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import type { IncomeStatementSource } from "../../types/financials";
 import { AppPersistence } from "../../data/app-persistence";
 import { parseCompanyFactsFinancialStatements } from "../sec-edgar";
 import { deriveQuarterlyStatements } from "../../time-series/fundamentals";
@@ -97,4 +98,29 @@ test("withdrawals require source, listing, reporting currency and quarter; malfo
     expect(redactWithdrawnStatement({ ...row, withdrawnObservations: metadata as any }).totalRevenue).toBe(row.totalRevenue);
   }
   expect(redactWithdrawnStatement({ ...row, date: "2024-12-31", withdrawnObservations: ["bac-2025q4-revenue"] }).totalRevenue).toBe(row.totalRevenue);
+});
+
+test("direct SEC income that matches a rejected vendor number stays stable through repeated withdrawals and cache reads", () => {
+  const evidence: IncomeStatementSource = { source: "sec", concept: "NetIncomeLoss", basis: "parent", unit: "USD",
+    startDate: "2025-10-01", endDate: "2025-12-31", filed: "2026-02-25", accessionNumber: "controlled-direct-fact" };
+  const raw = captured();
+  raw.quarterlyStatements = raw.quarterlyStatements.map(row => row.date === evidence.endDate
+    ? { ...row, fieldSources: { netIncome: evidence } } : row);
+  const cleaned = withdrawKnownProviderStatements(raw, target, "provider:gloomberb-cloud");
+  const row = q4(cleaned.quarterlyStatements);
+  expect(row.netIncome).toBe(7_528_000_000);
+  expect(row.fieldSources?.netIncome).toEqual(evidence);
+  expect(row.withdrawnObservations).toEqual(["bac-2025q4-revenue", "bac-2025q4-common-income", "bac-2025q4-pretax", "bac-2025q4-tax"]);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const repeated = withdrawKnownProviderStatements(cleaned, target, "provider:gloomberb-cloud");
+    expect(repeated).toBe(cleaned);
+    expect(q4(repeated.quarterlyStatements)).toBe(row);
+  }
+  const store = new AppPersistence(":memory:");
+  try {
+    cacheRouterResource(store.resources, "financials", "BAC", "exchange=NYSE", "provider:gloomberb-cloud", cleaned, policy);
+    const record = listCachedResources<typeof cleaned>(store.resources, "financials", "BAC", ["exchange=NYSE"], ["provider:gloomberb-cloud"], true)[0]!;
+    expect(record.stale).toBe(false);
+    expect(q4(record.value.quarterlyStatements).fieldSources?.netIncome).toEqual(evidence);
+  } finally { store.close(); }
 });

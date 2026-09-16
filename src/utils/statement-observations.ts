@@ -26,11 +26,15 @@ export function hasStatementWithdrawals(row: FinancialStatement): boolean {
   return withdrawals(row).length > 0;
 }
 
-export function isWithdrawnStatementValue(row: FinancialStatement, field: string, value: number): boolean {
+function hasDirectSecIncome(row: FinancialStatement, field: string): boolean {
   // A directly reported SEC fact has its own filing evidence. This registry
   // does not invalidate a later source correction or infer its accounting basis.
-  if (isIncomeStatementField(field) && row.fieldSources?.[field]?.source === "sec"
-    && row.fieldSources[field]?.endDate === row.date && row.fieldSources[field]?.unit === row.currency) return false;
+  return isIncomeStatementField(field) && row.fieldSources?.[field]?.source === "sec"
+    && row.fieldSources[field]?.endDate === row.date && row.fieldSources[field]?.unit === row.currency;
+}
+
+export function isWithdrawnStatementValue(row: FinancialStatement, field: string, value: number): boolean {
+  if (hasDirectSecIncome(row, field)) return false;
   return withdrawals(row).some(item => item.field === field && item.rejected.includes(value));
 }
 
@@ -82,7 +86,7 @@ function withdrawQuarter<T extends Pick<TickerFinancials, "annualStatements" | "
   let changed = quarters !== financials.quarterlyStatements;
   quarters = quarters.map(row => {
     if (row.date !== "2025-12-31" || row.currency !== "USD") return row;
-    const ids = rules.filter(item => item.rejected.includes(row[item.field]!) || (row[item.field] === undefined
+    const ids = rules.filter(item => (item.rejected.includes(row[item.field]!) && !hasDirectSecIncome(row, item.field)) || (row[item.field] === undefined
       && conflictingBacAnnual && ["totalRevenue", "netIncome", "netIncomeCommonStockholders"].includes(item.field))).map(item => item.id);
     if (!ids.length && !row.withdrawnObservations) return row;
     const combined = [...new Set([...(Array.isArray(row.withdrawnObservations) ? row.withdrawnObservations : []), ...ids])];
