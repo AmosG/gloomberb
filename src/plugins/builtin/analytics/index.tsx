@@ -216,7 +216,8 @@ function PortfolioAnalyticsPane({ focused, width, height }: PaneProps) {
     : sortedSectorRows[0]?.id ?? null;
   const sectorColumns = useMemo(() => buildSectorColumns(width), [width]);
   const hasPositions = portfolioTickers.length > 0;
-  const hasAccountData = accountState != null || brokerPerformance.performance != null;
+  const hasAccountContent = accountState != null || brokerPerformance.performance != null
+    || brokerPerformance.loading || brokerPerformance.error != null;
 
   const summaryRows = useMemo(
     () => buildAnalyticsSummaryRows({
@@ -230,8 +231,8 @@ function PortfolioAnalyticsPane({ focused, width, height }: PaneProps) {
         baseCurrency,
         effectiveExchangeRates,
       ),
-    }).filter((row) => hasPositions || accountState != null || row.id === "historical-return"),
-    [accountState, activePortfolio, baseCurrency, brokerPerformance.performance, effectiveExchangeRates, hasPositions, portfolioStats],
+    }),
+    [accountState, activePortfolio, baseCurrency, brokerPerformance.performance, effectiveExchangeRates, portfolioStats],
   );
 
   const riskRows = useMemo(
@@ -260,7 +261,7 @@ function PortfolioAnalyticsPane({ focused, width, height }: PaneProps) {
     registrationId: "analytics:data-notices",
     notices: [...allocationNotices.map((notice) => notice.text), ...(historyNote ? [historyNote] : [])],
     focused,
-    enabled: hasPositions || hasAccountData,
+    enabled: hasPositions || hasAccountContent,
     title: "Portfolio data",
   });
   const availableHistoryChartHeight = height - metricsHeight - 7;
@@ -309,7 +310,7 @@ function PortfolioAnalyticsPane({ focused, width, height }: PaneProps) {
             </Box>
           </Box>
 
-          {!hasPositions && !hasAccountData ? (
+          {!hasPositions && !hasAccountContent ? (
             <Box paddingX={1} paddingY={1}>
               <EmptyState
                 title="No positions in this portfolio."

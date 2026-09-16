@@ -262,10 +262,69 @@ describe("PortfolioAnalyticsPane", () => {
       expect(frame).not.toContain("P&L           +0");
     }
     expect(frame).toContain("Broker return +10.00%");
+    expect(frame).not.toContain("Day           +0");
+    expect(frame).not.toContain("P&L           +0");
     expect(frame).toContain("Portfolio History");
     expect(frame).toContain("Value (USD)");
     expect(frame).not.toContain("Current-weight basket estimates");
     expect(frame).not.toContain("Holdings by sector");
+  });
+
+  test("an identity-only account cannot establish zero holdings values or P&L", async () => {
+    const config = createAnalyticsConfig(BROKER_PORTFOLIO_ID);
+    config.brokerInstances = [{ id: "ibkr-flex", brokerType: "ibkr", config: {} }];
+    const ticker = createSharedTicker();
+    ticker.metadata.positions = [];
+    await act(async () => {
+      testSetup = await testRender(<AnalyticsHarness config={config} ticker={ticker}
+        brokerAccounts={{ "ibkr-flex": [{ accountId: "DU12345", name: "Fixture", currency: "USD" }] }} />,
+      { width: 100, height: 24 });
+    });
+    await flushFrame();
+    const frame = testSetup!.captureCharFrame();
+    expect(frame).toContain("Source        Cached");
+    expect(frame).not.toContain("Val           0");
+    expect(frame).not.toContain("Day           +0");
+    expect(frame).not.toContain("P&L           +0");
+    expect(frame).not.toContain("Net Liq");
+    expect(frame).not.toContain("Cash");
+  });
+
+  test("statement-only history shows loading and failure without inventing an empty account", async () => {
+    const config = createAnalyticsConfig(BROKER_PORTFOLIO_ID);
+    config.brokerInstances = [{ id: "ibkr-flex", brokerType: "ibkr", config: {} }];
+    const ticker = createSharedTicker();
+    ticker.metadata.positions = [];
+    let rejectHistory!: (reason: Error) => void;
+    const history = new Promise<BrokerPortfolioPerformance>((_resolve, reject) => { rejectHistory = reject; });
+    const adapter: BrokerAdapter = {
+      id: "ibkr", name: "Fixture", configSchema: [], validate: async () => true, importPositions: async () => [],
+      getPortfolioPerformance: async () => history,
+    };
+    await act(async () => {
+      testSetup = await testRender(<AnalyticsHarness config={config} ticker={ticker}
+        runtime={createTestPluginRuntime({ getBrokerAdapter: () => adapter })} />, { width: 100, height: 24 });
+    });
+    await flushFrame();
+    let frame = testSetup!.captureCharFrame();
+    expect(frame).toContain("Loading account history");
+    expect(frame).not.toContain("No positions");
+    expect(frame).not.toContain("Val           0");
+
+    await act(async () => { rejectHistory(new Error("Statement service unavailable")); });
+    await flushFrame();
+    frame = testSetup!.captureCharFrame();
+    expect(frame).toContain("Account history unavailable.");
+    expect(frame).toContain("Statement service unavailable");
+    expect(frame).not.toContain("No positions");
+    expect(frame).not.toContain("P&L           +0");
+
+    await act(async () => { testSetup!.mockInput.pressArrow("left"); });
+    await flushFrame();
+    frame = testSetup!.captureCharFrame();
+    expect(frame).toContain("No positions in this portfolio.");
+    expect(frame).not.toContain("Statement service unavailable");
+    expect(frame).not.toContain("Loading account history");
   });
 
   test("switching accounts hides prior performance while the next account is pending", async () => {
