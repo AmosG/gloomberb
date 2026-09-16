@@ -82,6 +82,8 @@ Relative valuation retains stale fundamentals for inspection and marks them thro
 
 The current overview and peer table do not provide P/B, P/tangible book, CET1, or FFO/AFFO multiples. Financial-statement common equity and ordinary shares are dated balance-sheet inputs; weighted-average EPS shares belong to an earnings period and cannot replace period-end shares in a book-value calculation. A provider's tangible-book amount may differ from the bank's reported tangible common equity because of its adjustment policy. Compare issuer definitions and periods before combining these values. REIT GAAP P/E and generic cash-flow yield do not establish FFO/AFFO valuation or distribution coverage.
 
+Confirmed quarterly observations that conflict with issuer filings are withdrawn through caches, statement merges and chart completion. Structured reports retain the withdrawal identifiers; a corrected observation can restore the field. See [the source comparison and limits](data-quality/quarterly-statement-revisions.md).
+
 ### SEC income attribution
 
 SEC `NetIncomeLoss` supplies parent-attributable net income. `ProfitLoss` is shown separately as **Income incl. NCI**, and `NetIncomeLossAvailableToCommonStockholdersBasic` supplies **Income Common**. These measures are not interchangeable. A period with SEC income coverage retains its concept, unit, accession, start/end dates and filing date per field in structured financial exports.

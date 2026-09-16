@@ -1,6 +1,7 @@
 import type { SecFilingDocument, SecFilingItem } from "../types/data-provider";
 import type { FinancialStatement, IncomeStatementSource } from "../types/financials";
 import { INCOME_STATEMENT_FIELDS } from "../utils/income-statement";
+import { withdrawKnownSecQuarter } from "../utils/statement-observations";
 import { createSecEpsBasisResolver } from "../utils/sec-eps-basis";
 import { truncateWithEllipsis } from "../utils/text-wrap";
 import { decodeHtmlEntities } from "../utils/html-entities";
@@ -675,10 +676,10 @@ export function parseCompanyFactsFinancialStatements(payload: unknown): SecCompa
   }
 
   const resolveEps = createSecEpsBasisResolver(payload);
-  return {
+  return withdrawKnownSecQuarter({
     annualStatements: finalizeCompanyFactsStatements(annualRows, annualSelectedFacts, resolveEps),
     quarterlyStatements: finalizeCompanyFactsStatements(quarterlyRows, quarterlySelectedFacts, resolveEps),
-  };
+  }, companyFactsRecord(payload)?.cik);
 }
 
 export class SecEdgarClient {

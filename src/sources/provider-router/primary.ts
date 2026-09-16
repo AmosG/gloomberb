@@ -1,4 +1,5 @@
 import { sanitizeListingFinancialHistory } from "../listing-history";
+import { withdrawKnownProviderStatements } from "../../utils/statement-observations";
 import { selectCachedResource } from "./cache";
 import { financialHistoryVariants, hasReusableExtendedHistory } from "./statement-history";
 import type { MarketDataRequestContext } from "../../types/data-provider";
@@ -81,6 +82,7 @@ export class ProviderRouterPrimaryRoutes {
         }
         value = sanitizeShellFinancialHistory(value, { symbol: ticker, exchange }, sourceKey);
         value = sanitizeListingFinancialHistory(value, { symbol: ticker, exchange }, sourceKey);
+        value = withdrawKnownProviderStatements(value, { symbol: ticker, exchange }, sourceKey);
         const cacheValue = primaryResult
           ? {
             financialCurrency: value.financialCurrency,

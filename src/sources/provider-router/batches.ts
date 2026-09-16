@@ -1,4 +1,5 @@
 import { sanitizeListingFinancialHistory } from "../listing-history";
+import { withdrawKnownProviderStatements } from "../../utils/statement-observations";
 import type {
   CachedFinancialsTarget,
   MarketDataRequestContext,
@@ -160,6 +161,7 @@ export class ProviderRouterBatchRoutes {
         if (!value) continue;
         const sourceKey = this.deps.providerSourceKey(batchProvider);
         value = sanitizeListingFinancialHistory(value, item.target, sourceKey);
+        value = withdrawKnownProviderStatements(value, item.target, sourceKey);
         for (const entry of providerIndexes.get(key) ?? []) {
           const entityKey = this.deps.getEntityKey(entry.target.symbol, entry.target.instrument ?? undefined);
           const variantKey = this.deps.getTickerVariantCandidates(entry.target.exchange)[0] ?? "";

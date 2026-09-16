@@ -4,6 +4,7 @@ import type {
 } from "../types/financials";
 import { areNearbyFinancialPeriodEnds, completeAvailability, statementFieldAvailability } from "../utils/financial-statements";
 import { copyIncomeField, incomeFieldKnowledgeDate, incomeFieldOwner, isIncomeStatementField } from "../utils/income-statement";
+import { hasStatementWithdrawals, isWithdrawnStatementValue, mergeStatementWithdrawals, redactWithdrawnStatement } from "../utils/statement-observations";
 import { canonicalTimeSeriesFieldId, getTimeSeriesField } from "./field-catalog";
 import { reportingCurrencySeries } from "./reporting-currency";
 import { createValuationCurrencyContext, type ValuationCurrencyContext } from "./valuation-currency";
@@ -210,6 +211,7 @@ function mergeStatementPeriodGroup(statements: readonly InternalStatement[]): In
   const dateSource = periodDateSource(statements);
   const merged: InternalStatement = { date: dateSource.date, currency: dateSource.currency };
   const compatibleStatements = statements.filter((statement) => statement.currency === dateSource.currency);
+  mergeStatementWithdrawals(merged, compatibleStatements);
   const derivedFields: NumericStatementField[] = [];
   const fieldAvailability: Record<string, string> = {};
   const record = merged as unknown as Record<string, unknown>;
@@ -230,6 +232,7 @@ function mergeStatementPeriodGroup(statements: readonly InternalStatement[]): In
         && incomeFieldOwner(field, statement)) return [];
       const value = statementNumber(statement, field);
       if (value === null) return [];
+      if (isWithdrawnStatementValue({ ...merged, fieldSources: statement.fieldSources }, field, value)) return [];
       return [{
         statement,
         value,
@@ -259,7 +262,7 @@ function mergeStatementPeriodGroup(statements: readonly InternalStatement[]): In
     merged.availableAt = completeAvailability([dateSource.availableAt]);
   }
   if (derivedFields.length > 0) merged.__timeSeriesDerivedFields = derivedFields;
-  return merged;
+  return redactWithdrawnStatement(merged);
 }
 
 function mergeStatementsByPeriod(
@@ -269,7 +272,8 @@ function mergeStatementsByPeriod(
   const sorted = [...statements].sort((left, right) => left.date.localeCompare(right.date));
   for (const statement of sorted) {
     const lastGroup = groups.at(-1);
-    if (lastGroup && areNearbyFinancialPeriodEnds(lastGroup[0]!.date, statement.date)) {
+    if (lastGroup && areNearbyFinancialPeriodEnds(lastGroup[0]!.date, statement.date)
+      && (lastGroup[0]!.date === statement.date || (!hasStatementWithdrawals(statement) && !lastGroup.some(hasStatementWithdrawals)))) {
       lastGroup.push(statement as InternalStatement);
     } else groups.push([statement as InternalStatement]);
   }
@@ -352,6 +356,7 @@ export function deriveQuarterlyStatements(
       const annualTotal = annualValue * (QUARTERLY_AVERAGE_FIELDS.includes(field) ? 4 : 1);
       const derived = annualTotal - previousInputs.reduce((sum, input) => sum + input.value, 0);
       if (!Number.isFinite(derived)) continue;
+      if (isWithdrawnStatementValue(target, field, derived)) continue;
       const availableAt = completeAvailability([
         statementFieldAvailability(annualStatement, field),
         ...previousInputs.map((input) => input.availableAt),
