@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { act } from "react";
+import { act, useState } from "react";
 import { testRender, settleFrame, takeSavedTextFile } from "../../../../renderers/opentui/test-utils";
 import { createInitialState } from "../../../../state/app/context";
 import { exportPaneTable } from "../../../../state/pane-table-export-registry";
@@ -9,11 +9,67 @@ import { createTestPluginRuntime } from "../../../../test-support/plugin-runtime
 import { renderHeadlessPaneText } from "../../../../cli/pane-functions/headless";
 import { historicalPricesHeadless } from "../headless";
 import { HistoricalPricesPane } from "./historical-prices";
+import type { PricePoint } from "../../../../types/financials";
 
 let setup: Awaited<ReturnType<typeof testRender>> | undefined;
 afterEach(async () => {
   if (setup) await act(async () => setup!.renderer.destroy());
   setup = undefined;
+});
+
+test("history exports retain listing ownership and active caveats through failed refresh and a pending listing switch", async () => {
+  const paneId = "history:export-ownership";
+  let selectListing!: (symbol: string) => void;
+  let finishUs!: (points: PricePoint[]) => void;
+  const us = new Promise<PricePoint[]>((resolve) => { finishUs = resolve; });
+  const provider = createTestDataProvider({ getPriceHistory: async (symbol, _exchange, _range, context) => {
+    if (symbol === "VOD:XNAS") return us;
+    if (context?.cacheMode === "refresh") throw new Error("=provider, unavailable");
+    return [{ date: new Date("2026-09-15"), open: 2, high: 1, low: 1.2, close: 1.31 }];
+  } });
+  const runtime = createTestPluginRuntime({ getMarketData: () => provider });
+  function Harness() {
+    const [symbol, setSymbol] = useState("VOD:XLON");
+    selectListing = setSymbol;
+    const state = createInitialState(createTestPaneConfig("/tmp/gloom-history-export-unused", {
+      instanceId: paneId, paneId: "historical-prices", binding: { kind: "fixed", symbol },
+    }));
+    state.tickers.set(symbol, createTestTicker(symbol));
+    return <TestPaneProvider state={state} paneId={paneId} pluginId="ticker-research" runtime={runtime}>
+      <HistoricalPricesPane paneId={paneId} paneType="historical-prices" focused width={120} height={14} />
+    </TestPaneProvider>;
+  }
+  await act(async () => { setup = await testRender(<Harness />, { width: 120, height: 14 }); });
+  await settleFrame(setup!, 8);
+  const exportCsv = async () => {
+    await exportPaneTable(paneId, "history.csv");
+    return takeSavedTextFile()!.text;
+  };
+  const initial = await exportCsv();
+  expect(initial).toContain("Ticker,VOD:XLON");
+  expect(initial).toContain("Warning,");
+  expect(initial).toContain("2026-09-15");
+  await act(async () => { setup!.mockInput.pressKey("r"); });
+  await settleFrame(setup!, 8);
+  const retained = await exportCsv();
+  expect(retained).toContain("2026-09-15");
+  expect(retained).toContain("Retained after refresh failure");
+  expect(retained).toContain('Error,"\'=provider, unavailable"');
+  await act(async () => { selectListing("VOD:XNAS"); });
+  await settleFrame(setup!, 3);
+  const pending = await exportCsv();
+  expect(pending).toContain("Ticker,VOD:XNAS");
+  expect(pending).toContain("Status,Loading");
+  expect(pending).not.toContain("2026-09-15");
+  expect(pending).not.toContain("Warning,");
+  expect(pending).not.toContain("Error,");
+  await act(async () => { finishUs([{ date: new Date("2026-09-16"), close: 17.56 }]); });
+  await settleFrame(setup!, 3);
+  const current = await exportCsv();
+  expect(current).toContain("17.56");
+  expect(current).toContain("Ticker,VOD:XNAS");
+  expect(current).not.toContain("VOD:XLON");
+  expect(current).toContain("Status,Available");
 });
 
 for (const [symbol, prior, close] of [
