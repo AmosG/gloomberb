@@ -25,7 +25,20 @@ export interface PricePointsToResolvedSeriesOptions {
   timeBasis?: ResolvedSeriesMarketTimeBasis;
 }
 
+// A chart re-resolves its series on every quote tick to append one live
+// point; the history points behind it never change identity, so their
+// resolved form is kept per point and provider.
+const resolvedPoints = new WeakMap<PricePoint, { providerId: string | undefined; resolved: TimeSeriesPoint | null }>();
+
 function normalizePricePoint(point: PricePoint, providerId?: string): TimeSeriesPoint | null {
+  const cached = resolvedPoints.get(point);
+  if (cached && cached.providerId === providerId) return cached.resolved;
+  const resolved = normalizePricePointUncached(point, providerId);
+  resolvedPoints.set(point, { providerId, resolved });
+  return resolved;
+}
+
+function normalizePricePointUncached(point: PricePoint, providerId?: string): TimeSeriesPoint | null {
   const date = point.date instanceof Date ? new Date(point.date) : new Date(point.date as unknown as string | number);
   if (!Number.isFinite(date.getTime())) return null;
   const { integrity, ...values } = pricePointValues(point);
