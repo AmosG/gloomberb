@@ -70,6 +70,7 @@ export type CloudNewsParams = {
 export type CloudTickerTweetsParams = {
   ticker: string;
   limit?: number;
+  offset?: number;
   hours?: number;
   includeReplies?: boolean;
 };
@@ -78,6 +79,7 @@ export type CloudTweetSearchParams = {
   query: string;
   queryType?: CloudTweetQueryType;
   limit?: number;
+  offset?: number;
   hours?: number;
 };
 
@@ -429,6 +431,7 @@ export function cloudNewsPath(params: CloudNewsParams = {}): string {
 export function cloudTickerTweetsPath(params: CloudTickerTweetsParams): string {
   const search = new URLSearchParams({ ticker: params.ticker });
   if (params.limit != null) search.set("limit", String(params.limit));
+  if (params.offset) search.set("offset", String(params.offset));
   if (params.hours != null) search.set("hours", String(params.hours));
   if (params.includeReplies != null)
     search.set("includeReplies", String(params.includeReplies));
@@ -439,6 +442,7 @@ export function cloudTweetSearchPath(params: CloudTweetSearchParams): string {
   const search = new URLSearchParams({ query: params.query });
   if (params.queryType) search.set("queryType", params.queryType);
   if (params.limit != null) search.set("limit", String(params.limit));
+  if (params.offset) search.set("offset", String(params.offset));
   if (params.hours != null) search.set("hours", String(params.hours));
   return appendQuery("/news/tweets/search", search);
 }

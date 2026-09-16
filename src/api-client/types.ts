@@ -1033,6 +1033,9 @@ export interface CloudTweetSearchResponse {
   since: string;
   until: string;
   limit: number;
+  offset?: number;
+  /** More tweets sit behind this page. Absent on servers without paging. */
+  hasMore?: boolean;
   hours: number;
   includeReplies?: boolean;
   cached: boolean;
