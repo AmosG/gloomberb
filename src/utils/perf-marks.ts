@@ -5,6 +5,15 @@ const PERF_ERROR_MS = 200;
 
 const perfLog = debugLog.createLogger("perf");
 
+/**
+ * `GLOOMBERB_PERF_TRACE=1` mirrors every sample to stderr as one line with the
+ * elapsed process time, so a tmux-driven run yields a startup timeline without
+ * opening the in-app log. Resolved once: the check sits on every measured call.
+ */
+const traceToStderr = typeof process !== "undefined"
+  && !!process.env?.GLOOMBERB_PERF_TRACE
+  && typeof process.stderr?.write === "function";
+
 function now(): number {
   return typeof performance !== "undefined" && typeof performance.now === "function"
     ? performance.now()
@@ -20,6 +29,10 @@ function logSlowPerfSample(
     durationMs: Math.round(durationMs * 10) / 10,
     ...(metadata ?? {}),
   };
+  if (traceToStderr) {
+    const detail = metadata ? ` ${JSON.stringify(metadata)}` : "";
+    process.stderr.write(`perf ${name} ${payload.durationMs}ms t=${Math.round(now())}${detail}\n`);
+  }
   if (durationMs >= PERF_ERROR_MS) {
     perfLog.error(name, payload);
   } else if (durationMs >= PERF_WARN_MS) {
