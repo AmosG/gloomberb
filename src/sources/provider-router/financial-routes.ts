@@ -21,6 +21,7 @@ import {
 import { withBrokerTimeout } from "./brokers";
 import {
   hasMeaningfulProfile,
+  needsFinancialProfile,
   isProviderQuoteUsableForCurrentSession,
   hasShallowStatementHistory,
   mergeCachedFinancialRecords,
@@ -142,7 +143,7 @@ export class ProviderRouterFinancialRoutes {
     });
     const forceRefresh = context?.cacheMode === "refresh";
     if (cached.value && !forceRefresh && (context?.statementHistory !== "extended" || hasReusableExtendedHistory(cached.value))) {
-      if (context?.statementHistory === "extended" && !cached.stale) return cached.value;
+      if (context?.statementHistory === "extended" && !cached.stale && !needsFinancialProfile(cached.value)) return cached.value;
       if (isOptionTicker && !cached.value.quote) {
         return quoteOnlyFinancials(cached.value);
       }

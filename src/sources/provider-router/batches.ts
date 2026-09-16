@@ -16,6 +16,7 @@ import { selectCachedResource } from "./cache";
 import {
   dropUnusableProviderQuote,
   hasDeepStatementHistory,
+  needsFinancialProfile,
   hasDetailedStatementRows,
   isProviderQuoteUsableForCurrentSession,
   providerFinancialsMatchTarget,
@@ -42,7 +43,7 @@ export class ProviderRouterBatchRoutes {
   constructor(private readonly deps: ProviderRouterBatchDeps) {}
 
   private needsSingleFinancialsRoute(value: TickerFinancials): boolean {
-    return !value.quote || !(hasDetailedStatementRows(value) && hasDeepStatementHistory(value));
+    return !value.quote || needsFinancialProfile(value) || !(hasDetailedStatementRows(value) && hasDeepStatementHistory(value));
   }
 
   async getQuotesBatch(
@@ -132,7 +133,7 @@ export class ProviderRouterBatchRoutes {
     targets.forEach((target, index) => {
       const context = this.deps.contextFromCachedTarget(target);
       const cached = this.deps.readCachedMergedFinancialsSelection(target.symbol, target.exchange, context, true);
-      if (cached.value?.quote && !forceRefresh && target.statementHistory !== "extended") {
+      if (cached.value?.quote && !forceRefresh && target.statementHistory !== "extended" && !needsFinancialProfile(cached.value)) {
         results[index] = { target, financials: cached.value };
         return;
       }

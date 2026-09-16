@@ -212,6 +212,28 @@ export function hasMeaningfulProfile(data: TickerFinancials | null | undefined):
   );
 }
 
+/** A statement response can be complete while its company profile is missing. */
+export function needsFinancialProfile(data: TickerFinancials | null | undefined): boolean {
+  return hasStatementRows(data) && !hasMeaningfulProfile(data);
+}
+
+/** Company classification may only cross sources for the same explicit listing. */
+export function profileForSameListing(source: TickerFinancials, target: TickerFinancials): TickerFinancials["profile"] {
+  if (!hasMeaningfulProfile(source)) return undefined;
+  const identity = (value: TickerFinancials) => mergeQuoteMetadata(
+    value.quote ? quoteMetadataFromQuote(value.quote) : undefined, value.quoteMetadata,
+  );
+  const actual = identity(source);
+  const requested = identity(target);
+  if (!actual || !requested || typeof actual.symbol !== "string" || typeof requested.symbol !== "string") return undefined;
+  const listing = requested.listingExchangeName || parsePublicTickerKey(requested.symbol).exchange;
+  const actualListing = actual.listingExchangeName || parsePublicTickerKey(actual.symbol).exchange;
+  if (typeof listing !== "string" || typeof actualListing !== "string" || !listing.trim() || !actualListing.trim()
+    || !quoteMetadataMatchesTarget(requested, requested.symbol, listing)
+    || !quoteMetadataMatchesTarget(actual, requested.symbol, listing)) return undefined;
+  return source.profile;
+}
+
 export function hasStatementRows(data: TickerFinancials | null | undefined): boolean {
   return !!data && (
     data.annualStatements.length > 0 ||
@@ -251,6 +273,7 @@ export function hasShallowStatementHistory(data: TickerFinancials | null | undef
 export function mergeMissingStatementArrays(primary: TickerFinancials, fallback: TickerFinancials): TickerFinancials {
   return excludeNonCompanyFinancials({
     ...primary,
+    profile: mergeDefinedObject(primary.profile, profileForSameListing(fallback, primary)),
     statementHistory: fallback.statementHistory?.status === "available" ? fallback.statementHistory : primary.statementHistory ?? fallback.statementHistory,
     financialCurrency: primary.financialCurrency ?? (hasStatementRows(primary) ? undefined : fallback.financialCurrency),
     annualStatements: mergeFinancialStatementRows(primary.annualStatements, fallback.annualStatements),

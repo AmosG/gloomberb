@@ -8,11 +8,14 @@ import { normalizeTickerFinancialsPriceHistory } from "../../utils/price-history
 import { resolveTickerFinancialsQuoteState } from "../../market-data/quotes/resolution";
 import { shouldLogProviderError } from "../provider-errors";
 import { sanitizeShellFinancialHistory } from "../history-coverage";
+import { quoteMetadataFromQuote } from "../../market-data/quotes/metadata";
 import {
   dropUnusableProviderQuote,
   hasDetailedStatementRows,
   hasDeepStatementHistory,
   hasStatementRows,
+  needsFinancialProfile,
+  profileForSameListing,
   isProviderQuoteUsableForCurrentSession,
   providerFinancialsMatchTarget,
   mergeMissingStatementArrays,
@@ -83,8 +86,11 @@ export class ProviderRouterPrimaryRoutes {
         value = sanitizeShellFinancialHistory(value, { symbol: ticker, exchange }, sourceKey);
         value = sanitizeListingFinancialHistory(value, { symbol: ticker, exchange }, sourceKey);
         value = withdrawKnownProviderStatements(value, { symbol: ticker, exchange }, sourceKey);
+        const fallbackProfile = primaryResult ? profileForSameListing(value, primaryResult.value) : undefined;
         const cacheValue = primaryResult
           ? {
+            profile: fallbackProfile,
+            quoteMetadata: value.quoteMetadata ?? (value.quote ? quoteMetadataFromQuote(value.quote) : undefined),
             financialCurrency: value.financialCurrency,
             statementHistory: value.statementHistory,
             annualStatements: value.annualStatements,
@@ -104,7 +110,7 @@ export class ProviderRouterPrimaryRoutes {
         );
         if (!primaryResult) {
           primaryResult = { sourceKey, value };
-          if (context?.statementHistory === "extended" ? value.statementHistory?.status === "available" : hasDetailedStatementRows(value) && hasDeepStatementHistory(value)) return primaryResult;
+          if (!needsFinancialProfile(value) && (context?.statementHistory === "extended" ? value.statementHistory?.status === "available" : hasDetailedStatementRows(value) && hasDeepStatementHistory(value))) return primaryResult;
           continue;
         }
         if (!primaryResult.value.quote && value.quote) {
@@ -118,12 +124,12 @@ export class ProviderRouterPrimaryRoutes {
             }) ?? primaryResult.value,
           };
         }
-        if (hasStatementRows(value)) {
+        if (hasStatementRows(value) || fallbackProfile) {
           primaryResult = {
             sourceKey: primaryResult.sourceKey,
             value: mergeMissingStatementArrays(primaryResult.value, value),
           };
-          if (context?.statementHistory === "extended" ? primaryResult.value.statementHistory?.status === "available" : hasDetailedStatementRows(primaryResult.value) && hasDeepStatementHistory(primaryResult.value)) return primaryResult;
+          if (!needsFinancialProfile(primaryResult.value) && (context?.statementHistory === "extended" ? primaryResult.value.statementHistory?.status === "available" : hasDetailedStatementRows(primaryResult.value) && hasDeepStatementHistory(primaryResult.value))) return primaryResult;
         }
       } catch (error) {
         if (shouldLogProviderError(error)) {

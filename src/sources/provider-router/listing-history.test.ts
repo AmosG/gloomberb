@@ -118,6 +118,7 @@ test("fresh financial batches sanitize both immediate deep results and retained 
     try {
       let singleCalls = 0;
       const financials = makeFinancials({ quote: makeQuote({ symbol: "CRCL", listingExchangeName: "NYSE", providerId: "gloomberb-cloud" }),
+        profile: { description: "Issuer" },
         annualStatements: deep ? Array.from({ length: 5 }, (_, index) => ({ date: `${2020 + index}-12-31`, inventory: 100 })) : [],
         priceHistory: [offer, first, next] });
       const provider = { ...fallbackProvider, id: "gloomberb-cloud",
