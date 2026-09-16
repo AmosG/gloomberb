@@ -433,8 +433,10 @@ export async function resolveSignal(ctx: FlowContext, thesis: CloudThesis, signa
       label: "Accept",
       description: applies
         ? signal.verdict === "breaks"
-          ? signal.targetKind === "kill" ? "The kill condition fired." : "The pillar is broken."
-          : signal.verdict === "challenges" ? "The pillar is weakening." : "Confirmed."
+          ? signal.targetKind === "kill" ? "The kill condition fired." : signal.targetKind === "catalyst" ? "The catalyst was missed." : "The pillar is broken."
+          : signal.verdict === "challenges"
+            ? signal.targetKind === "kill" ? "Noted as getting close. The condition stays unfired." : signal.targetKind === "catalyst" ? "The catalyst was missed." : "The pillar is weakening."
+            : "Confirmed."
         : "Noted.",
     },
     { id: "dismissed", label: "Dismiss", description: "Not material, or already priced in. Say why so it is not raised again." },
