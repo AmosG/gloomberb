@@ -2,8 +2,6 @@ import {
   createContext,
   useContext,
   useEffect,
-  useId,
-  useMemo,
   useRef,
   type ReactNode,
 } from "react";
@@ -97,14 +95,24 @@ export function useRemoteUiRegistry(): RemoteUiRegistry | null {
   return useContext(RemoteUiRegistryContext);
 }
 
+let nextRemoteNodeSequence = 0;
+
+/**
+ * Every Box and Text on screen passes through here, and almost none of them
+ * are interactive. The id and the registration wrapper are created the first
+ * time a node registers, so a plain element costs two refs and an effect that
+ * returns at once.
+ */
 export function useRemoteUiNode(registration: RemoteUiNodeRegistration | null | undefined): string | null {
   const registry = useRemoteUiRegistry();
-  const generatedId = useId();
-  const nodeId = useMemo(() => `ui:${generatedId.replace(/:/g, "")}`, [generatedId]);
+  const nodeIdRef = useRef<string | null>(null);
   const registrationRef = useRef(registration);
   registrationRef.current = registration;
   const dynamicRegistrationRef = useRef<RemoteUiNodeRegistration | null>(null);
-  if (!dynamicRegistrationRef.current) {
+  const registered = registration != null;
+  if (registered && !nodeIdRef.current) {
+    nextRemoteNodeSequence += 1;
+    nodeIdRef.current = `ui:${nextRemoteNodeSequence.toString(36)}`;
     dynamicRegistrationRef.current = {
       get role() { return registrationRef.current?.role ?? "unknown"; },
       get label() { return registrationRef.current?.label; },
@@ -114,10 +122,10 @@ export function useRemoteUiNode(registration: RemoteUiNodeRegistration | null | 
       get getMetadata() { return registrationRef.current?.getMetadata; },
     };
   }
-  const registered = registration != null;
+  const nodeId = nodeIdRef.current;
 
   useEffect(() => {
-    if (!registry) return;
+    if (!registry || !nodeId) return;
     if (!registered) {
       registry.unregister(nodeId);
       return;

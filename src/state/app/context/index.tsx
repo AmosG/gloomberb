@@ -43,6 +43,7 @@ import {
 } from "../../../core/state/app/state";
 import type { AppAction, AppState } from "../../../core/state/app/state";
 import { scheduleConfigSave } from "../../config-save-scheduler";
+import { LOW_PRIORITY_CONFIG_SAVE_DEBOUNCE_MS } from "../../persist-scheduler";
 
 export {
   appReducer,
@@ -211,6 +212,36 @@ export function usePaneInstance(): PaneInstanceConfig | null {
   return useAppSelector((state) => (paneId ? findPaneInstance(state.config.layout, paneId) ?? null : null));
 }
 
+function sameConfigOutsideLayoutMirror(previous: AppConfig, next: AppConfig): boolean {
+  const previousKeys = Object.keys(previous) as Array<keyof AppConfig>;
+  if (previousKeys.length !== Object.keys(next).length) return false;
+  for (const key of previousKeys) {
+    if (key === "layouts" || key === "activeLayoutIndex") continue;
+    if (!Object.is(previous[key], next[key])) return false;
+  }
+  return true;
+}
+
+/**
+ * The config for panes that read settings and collections but never the saved
+ * layouts. Every pane-state update mirrors the live pane state into
+ * `config.layouts`, which replaces the config object; a pane subscribed to the
+ * whole config re-renders on every cursor move in every other pane. This
+ * keeps the previous reference while nothing outside that mirror changed.
+ * Anything that writes config back must read the live `state.config` instead,
+ * because `SET_CONFIG` reapplies the saved pane state it carries.
+ */
+export function usePaneAppConfig(): AppConfig {
+  const lastRef = useRef<AppConfig | null>(null);
+  return useAppSelector((state) => {
+    const next = state.config;
+    const previous = lastRef.current;
+    if (previous && (previous === next || sameConfigOutsideLayoutMirror(previous, next))) return previous;
+    lastRef.current = next;
+    return next;
+  });
+}
+
 export function usePaneTicker(paneId?: string) {
   const paneContextId = useContext(PaneContext);
   const needsFocusedPane = paneId == null && paneContextId == null;
@@ -328,9 +359,10 @@ function useScopedPaneId(paneId?: string): string {
   return id;
 }
 
-function useUpdatePaneLayout() {
+function useUpdatePaneLayout(options: { saveDelayMs?: number } = {}) {
   const dispatch = useAppDispatch();
   const stateRef = useAppStateRef();
+  const { saveDelayMs } = options;
   return useCallback((update: (layout: AppConfig["layout"]) => AppConfig["layout"]) => {
     const state = stateRef.current;
     const layout = update(state.config.layout);
@@ -339,14 +371,16 @@ function useUpdatePaneLayout() {
       { ...state.config, layout }, state.paneState, state.focusedPaneId, state.activePanel,
     );
     dispatch({ type: "SET_CONFIG", config });
-    scheduleConfigSave(config);
-  }, [dispatch, stateRef]);
+    scheduleConfigSave(config, { delayMs: saveDelayMs });
+  }, [dispatch, saveDelayMs, stateRef]);
 }
 
 /** Keep a content-derived pane title in its saved layout, without exposing config writes. */
 export function usePaneTitle(title: string, paneId?: string): void {
   const id = useScopedPaneId(paneId);
-  const updateLayout = useUpdatePaneLayout();
+  // A follower's title changes with every cursor move in its source; that is
+  // not worth a config write per step.
+  const updateLayout = useUpdatePaneLayout({ saveDelayMs: LOW_PRIORITY_CONFIG_SAVE_DEBOUNCE_MS });
   useEffect(() => {
     updateLayout((layout) => {
       const pane = findPaneInstance(layout, id);
@@ -466,7 +500,12 @@ export function AppProvider({
   useEffect(() => {
     if (sameStringList(previousRecentTickers.current, state.recentTickers)) return;
     previousRecentTickers.current = state.recentTickers;
-    scheduleConfigSave({ ...state.config, recentTickers: state.recentTickers });
+    // Assembled when the write fires so it carries whatever config and recent
+    // tickers are current by then, not the ones from this cursor move.
+    scheduleConfigSave(
+      () => ({ ...stateRef.current.config, recentTickers: stateRef.current.recentTickers }),
+      { delayMs: LOW_PRIORITY_CONFIG_SAVE_DEBOUNCE_MS },
+    );
   }, [state.config, state.recentTickers]);
 
   useEffect(() => {

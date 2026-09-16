@@ -303,13 +303,26 @@ async function flushFrame() {
   });
 }
 
+// Answers for the fixture rows repeat what their cache was primed with, so a
+// snapshot the pane warms for a row near the cursor cannot reorder the list;
+// only SIVE, the row under test, has a quote the cache lacks.
 function makeSortWarmupQuote(symbol: string): Quote {
+  if (symbol === "SIVE") {
+    return makeQuote({
+      symbol,
+      price: 46.7,
+      change: -9.6,
+      changePercent: -17.05,
+      previousClose: 56.3,
+      listingExchangeName: "NASDAQ",
+    });
+  }
+  const index = Number(symbol.replace(/^T/, ""));
   return makeQuote({
     symbol,
-    price: symbol === "SIVE" ? 46.7 : 100,
-    change: symbol === "SIVE" ? -9.6 : 0,
-    changePercent: symbol === "SIVE" ? -17.05 : 0,
-    previousClose: symbol === "SIVE" ? 56.3 : 100,
+    price: 100 + index,
+    change: index,
+    changePercent: index,
     listingExchangeName: "NASDAQ",
   });
 }

@@ -14,6 +14,8 @@ interface FloatingPaneWrapperProps {
   width: number;
   height: number;
   zIndex: number;
+  /** Fully covered by windows above it: skip drawing, keep the tree mounted. */
+  hidden?: boolean;
   focused: boolean;
   windowModeSelected?: boolean;
   locked?: boolean;
@@ -62,6 +64,7 @@ export function FloatingPaneWrapper({
   width,
   height,
   zIndex,
+  hidden = false,
   focused,
   windowModeSelected = false,
   locked = false,
@@ -97,6 +100,7 @@ export function FloatingPaneWrapper({
       width={width}
       height={height}
       zIndex={zIndex}
+      visible={!hidden}
       backgroundColor={bg}
       flexDirection="column"
       overflow="hidden"

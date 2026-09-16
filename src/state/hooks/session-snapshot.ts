@@ -30,17 +30,22 @@ export function usePersistSessionSnapshot(
     schemaVersion,
   };
 
-  const schedulerRef = useRef<ReturnType<typeof createPersistScheduler<AppSessionSnapshot>> | null>(null);
+  // The snapshot is built when the debounce fires, not on every state change
+  // that schedules it: a cursor move would otherwise pay for a full snapshot
+  // that the next move replaces before it is ever written.
+  const schedulerRef = useRef<ReturnType<typeof createPersistScheduler<() => AppSessionSnapshot | null>> | null>(null);
   if (!schedulerRef.current) {
-    schedulerRef.current = createPersistScheduler<AppSessionSnapshot>({
+    schedulerRef.current = createPersistScheduler<() => AppSessionSnapshot | null>({
       delayMs: SESSION_SAVE_DEBOUNCE_MS,
-      save: (snapshot) => {
+      save: (build) => {
         const {
           sessionStore: currentStore,
           sessionId: currentSessionId,
           schemaVersion: currentSchemaVersion,
         } = latestRef.current;
         if (!currentStore) return;
+        const snapshot = build();
+        if (!snapshot) return;
         measurePerf("persist.session.save", () => {
           currentStore.set(currentSessionId, snapshot, currentSchemaVersion);
         }, { sessionId: currentSessionId });
@@ -75,8 +80,7 @@ export function usePersistSessionSnapshot(
   useEffect(() => {
     if (!sessionStore) return;
     if (!state.initialized && state.tickers.size === 0) return;
-    const snapshot = buildSnapshot();
-    if (snapshot) schedulerRef.current?.schedule(snapshot);
+    schedulerRef.current?.schedule(buildSnapshot);
   }, [
     sessionStore,
     sessionId,

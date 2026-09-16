@@ -1,6 +1,6 @@
 import { Button } from "../../../components/ui/button";
 import { useEffect, useState } from "react";
-import { useAppSelector } from "../../../state/app/context";
+import { usePaneAppConfig } from "../../../state/app/context";
 import { colors } from "../../../theme/colors";
 import { Box, Span, Text, TextAttributes, useUiCapabilities } from "../../../ui";
 import { usePluginAppActions } from "../../runtime";
@@ -54,7 +54,7 @@ function CloudStatusIcon() {
 
 export function ChatStatusWidget({ controller = chatController }: ChatStatusWidgetProps) {
   const { createPaneFromTemplate } = usePluginAppActions();
-  const config = useAppSelector((state) => state.config);
+  const config = usePaneAppConfig();
   const cloudPluginDisabled = config.disabledPlugins.includes("gloomberb-cloud");
   const initialSnapshot = controller.getSnapshot();
   const [username, setUsername] = useState<string | null>(initialSnapshot.user?.username ?? null);

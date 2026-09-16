@@ -16,8 +16,32 @@ import { usePluginRenderContext } from "./context";
 
 const DEFAULT_PLUGIN_PANE_STATE_COMMIT_DELAY_MS = 300;
 
-import { getPluginPaneStateValue } from "../pane-state";
+import { deletePluginPaneStateValue, getPluginPaneStateValue } from "../pane-state";
 export { deletePluginPaneStateValue, getPluginPaneStateValue, setPluginPaneStateValue } from "../pane-state";
+
+/**
+ * Removes this plugin's pane-state keys that match `shouldDrop`. Pane state is
+ * mirrored into the saved layout and written to disk, so a plugin that keys
+ * a cache by symbol must drop the symbols it no longer shows, or the pane
+ * grows with every ticker visited and every update pays for copying it.
+ */
+export function usePrunePluginPaneState(paneId?: string): (shouldDrop: (key: string) => boolean) => void {
+  const { pluginId } = usePluginRenderContext();
+  const contextPaneId = useOptionalPaneInstanceId();
+  const scopedPaneId = paneId ?? contextPaneId;
+  if (!scopedPaneId) throw new Error("usePrunePluginPaneState requires a pane id or PaneInstanceProvider");
+  const dispatch = useAppDispatch();
+  const stateRef = useAppStateRef();
+  return useCallback((shouldDrop: (key: string) => boolean) => {
+    let paneState = stateRef.current.paneState[scopedPaneId];
+    const keys = Object.keys(paneState?.pluginState?.[pluginId] ?? {}).filter(shouldDrop);
+    if (keys.length === 0) return;
+    for (const key of keys) {
+      paneState = { ...paneState, pluginState: deletePluginPaneStateValue(paneState, pluginId, key) };
+    }
+    dispatch({ type: "UPDATE_PANE_STATE", paneId: scopedPaneId, patch: { pluginState: paneState?.pluginState } });
+  }, [dispatch, pluginId, scopedPaneId, stateRef]);
+}
 
 export function usePluginPaneState<T>(key: string, fallback: T, paneId?: string): [T, (value: SetStateAction<T>) => void] {
   const { pluginId } = usePluginRenderContext();

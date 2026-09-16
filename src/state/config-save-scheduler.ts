@@ -9,16 +9,28 @@ import {
 
 const log = debugLog.createLogger("persist");
 
-const configSaveScheduler = createPersistScheduler<AppConfig>({
+type ConfigSource = AppConfig | (() => AppConfig);
+
+function resolveConfig(source: ConfigSource): AppConfig {
+  return typeof source === "function" ? source() : source;
+}
+
+const configSaveScheduler = createPersistScheduler<ConfigSource>({
   delayMs: CONFIG_SAVE_DEBOUNCE_MS,
-  save: (config) => measurePerfAsync("persist.config.save", () => saveConfig(config)),
+  save: (source) => measurePerfAsync("persist.config.save", () => saveConfig(resolveConfig(source))),
   onError: (error) => {
     log.warn("config.save.failed", { error: error instanceof Error ? error.message : String(error) });
   },
 });
 
-export function scheduleConfigSave(config: AppConfig): void {
-  configSaveScheduler.schedule(config);
+/**
+ * A function source is resolved when the write happens, so a caller that
+ * schedules often (every cursor move updates recent tickers) can defer the
+ * cost of assembling the config until it is actually persisted, and a longer
+ * delay keeps such a save from queueing behind every keystroke.
+ */
+export function scheduleConfigSave(config: ConfigSource, options: { delayMs?: number } = {}): void {
+  configSaveScheduler.schedule(config, options.delayMs);
 }
 
 export async function saveConfigImmediately(config: AppConfig): Promise<void> {

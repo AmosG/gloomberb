@@ -12,6 +12,7 @@ import {
   usePaneInstance,
   usePaneStateValue,
   usePaneTicker,
+  usePaneAppConfig,
 } from "../../../state/app/context";
 import { useQuoteUpdates } from "../../../state/hooks/quote-streaming";
 import { getCollectionName, getCollectionTickerCount } from "../../../state/selectors";
@@ -67,7 +68,7 @@ function useRegistryTickerResearchTabsSnapshot(registry: ReturnType<typeof getSh
 
 export function TickerResearchPane({ focused, width, height }: PaneProps) {
   const dispatch = useAppDispatch();
-  const config = useAppSelector((state) => state.config);
+  const config = usePaneAppConfig();
   const paneInstance = usePaneInstance();
   const { ticker, financials, error: instrumentError } = usePaneTicker();
   const liveStreaming = useLiveStreamingSetting();

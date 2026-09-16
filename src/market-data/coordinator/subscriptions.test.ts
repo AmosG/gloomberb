@@ -1,5 +1,6 @@
 import { describe, expect, jest, test } from "bun:test";
 import { MarketDataCoordinator } from "./index";
+import { MARKET_DATA_NOTIFY_THROTTLE_MS } from "./events";
 import { buildQuoteKey } from "../selectors";
 import { QUOTE_STREAM_UPDATE_THROTTLE_MS } from "../quotes/cadence";
 import { createTestDataProvider } from "../../test-support/data-provider";
@@ -47,6 +48,12 @@ function quote(symbol: string, price: number, overrides: Partial<Quote> = {}): Q
 async function flushCoordinator(): Promise<void> {
   await Promise.resolve();
   await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/** Waits out the notify throttle too, so consecutive stream ticks each reach listeners. */
+async function flushCoordinatorNotify(): Promise<void> {
+  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, MARKET_DATA_NOTIFY_THROTTLE_MS + 10));
 }
 
 describe("MarketDataCoordinator key subscriptions", () => {
@@ -433,11 +440,11 @@ describe("MarketDataCoordinator key subscriptions", () => {
 
       Date.now = () => firstTimestamp;
       emitQuote({ symbol: "AAPL", exchange: "NASDAQ" }, quote("AAPL", 100, { lastUpdated: firstTimestamp }));
-      await flushCoordinator();
+      await flushCoordinatorNotify();
 
       Date.now = () => firstTimestamp + 10_000;
       emitQuote({ symbol: "AAPL", exchange: "NASDAQ" }, quote("AAPL", 100, { lastUpdated: firstTimestamp + 10_000 }));
-      await flushCoordinator();
+      await flushCoordinatorNotify();
 
       expect(calls).toBe(2);
       expect(coordinator.getQuoteEntry(aapl).data?.lastUpdated).toBe(firstTimestamp + 10_000);
@@ -445,7 +452,7 @@ describe("MarketDataCoordinator key subscriptions", () => {
 
       Date.now = () => firstTimestamp + 20_000;
       emitQuote({ symbol: "AAPL", exchange: "NASDAQ" }, quote("AAPL", 101, { lastUpdated: firstTimestamp + 10_000 }));
-      await flushCoordinator();
+      await flushCoordinatorNotify();
 
       expect(calls).toBe(3);
       expect(coordinator.getQuoteEntry(aapl).data?.price).toBe(101);
@@ -479,11 +486,11 @@ describe("MarketDataCoordinator key subscriptions", () => {
         stale: false,
       });
       emitQuote(option, heartbeat);
-      await flushCoordinator();
+      await flushCoordinatorNotify();
 
       Date.now = () => firstTimestamp + 60_000;
       emitQuote(option, heartbeat);
-      await flushCoordinator();
+      await flushCoordinatorNotify();
 
       expect(calls).toBe(2);
       expect(coordinator.getQuoteEntry(option).data).toMatchObject({
