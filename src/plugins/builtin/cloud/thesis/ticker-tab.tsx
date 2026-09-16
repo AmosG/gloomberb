@@ -87,7 +87,7 @@ export function ThesisTickerTab({ focused, width, height }: TickerResearchTabPro
   });
 
   usePaneFooter("ticker-thesis-empty", () => (active || !signedIn ? null : {
-    hints: [{ id: "start", key: "n", label: "Start a thesis", onPress: () => void start() }],
+    hints: [{ id: "start", key: "n", label: "ew thesis", onPress: () => void start() }],
   }), [active, signedIn, start]);
 
   if (!ticker) return <Text fg={colors.textDim}>Select a ticker to see its thesis.</Text>;

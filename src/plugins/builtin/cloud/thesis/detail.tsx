@@ -324,19 +324,20 @@ export function ThesisDetail({ thesis, width, height, focused, footerId, onDelet
     const kind = selectedRow?.kind;
     const list: PaneHint[] = [];
     if (kind === "signal") {
-      list.push({ id: "rule", key: "enter", label: "Rule", onPress: () => void activate() });
-      if (selectedRow?.kind === "signal" && selectedRow.item.source?.url) list.push({ id: "open", key: "o", label: "Source", onPress: openSource });
-    } else if (kind === "pillar" || kind === "kill" || kind === "catalyst") {
-      list.push({ id: "edit", key: "enter", label: "Edit", onPress: () => void activate() });
-      list.push({ id: "status", key: "s", label: kind === "kill" ? (selectedRow?.kind === "kill" && selectedRow.item.triggered ? "Reset" : "Fired") : "Status", onPress: () => void cycleStatus() });
-      list.push({ id: "remove", key: "d", label: "Remove", onPress: () => void remove() });
+      if (selectedRow?.kind === "signal" && selectedRow.item.source?.url) list.push({ id: "open", key: "o", label: "pen source", onPress: openSource });
+    } else if (kind === "pillar" || kind === "catalyst") {
+      list.push({ id: "status", key: "s", label: "tatus", onPress: () => void cycleStatus() });
+      list.push({ id: "remove", key: "d", label: "elete", onPress: () => void remove() });
+    } else if (kind === "kill") {
+      list.push({ id: "status", key: "s", label: selectedRow?.kind === "kill" && selectedRow.item.triggered ? " reset" : " fired", onPress: () => void cycleStatus() });
+      list.push({ id: "remove", key: "d", label: "elete", onPress: () => void remove() });
     }
-    list.push({ id: "add", key: "n", label: "Add", onPress: () => void addToSection(sectionOf) });
-    if (isTeam) list.push({ id: "challenge", key: "c", label: "Challenge", onPress: () => void challengeSelected() });
-    list.push({ id: "review", key: "r", label: plan.hasProAccess ? "Review" : "Review (Pro)", onPress: () => void review() });
-    list.push({ id: "more", key: "e", label: "More", onPress: () => void editMenu() });
+    list.push({ id: "add", key: "n", label: "ew", onPress: () => void addToSection(sectionOf) });
+    if (isTeam) list.push({ id: "challenge", key: "c", label: "hallenge", onPress: () => void challengeSelected() });
+    list.push({ id: "review", key: "r", label: plan.hasProAccess ? "eview" : "eview (Pro)", onPress: () => void review() });
+    list.push({ id: "edit", key: "e", label: "dit", onPress: () => void editMenu() });
     return list;
-  }, [activate, addToSection, challengeSelected, cycleStatus, editMenu, isTeam, openSource, plan.hasProAccess, remove, review, sectionOf, selectedRow]);
+  }, [addToSection, challengeSelected, cycleStatus, editMenu, isTeam, openSource, plan.hasProAccess, remove, review, sectionOf, selectedRow]);
 
   usePaneFooter(footerId, () => ({
     info: [

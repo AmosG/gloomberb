@@ -314,8 +314,8 @@ export function ThesisBoardPane({ focused, width, height }: PaneProps) {
   }, [atRisk, exposure.bookValue, exposures, mode, snapshot.error, snapshot.loading, snapshot.offline, snapshot.theses.length, untracked.length]);
 
   const hints = useMemo<PaneHint[]>(() => [
-    { id: "new", key: "n", label: "New", onPress: () => void startFor() },
-    { id: "mode", key: "w", label: mode === "board" ? "Weights" : "Board", onPress: () => setMode(mode === "board" ? "weights" : "board") },
+    { id: "new", key: "n", label: "ew", onPress: () => void startFor() },
+    { id: "mode", key: "w", label: mode === "board" ? "eights" : " board", onPress: () => setMode(mode === "board" ? "weights" : "board") },
   ], [mode, setMode, startFor]);
 
   usePaneFooter("thesis-board", () => (openId || !signedIn ? null : { info: footerInfo, hints }), [footerInfo, hints, openId, signedIn]);

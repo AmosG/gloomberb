@@ -174,8 +174,8 @@ describe("ThesisBoardPane", () => {
     expect(frame).toContain("ASML");
     expect(frame).toContain("Positions without a thesis");
     expect(frame).toContain("AAPL");
-    expect(frame).toContain("[n]New");
-    expect(frame).toContain("[w]Weights");
+    expect(frame).toContain("[n]ew");
+    expect(frame).toContain("[w]eights");
   });
 
   test("enter opens the thesis: pillars, kill conditions, catalysts, and the open signal with its source", async () => {
@@ -204,8 +204,7 @@ describe("ThesisBoardPane", () => {
     expect(frame).toContain("Hyperscaler capex cut over 20%");
     expect(frame).toContain("not fired");
     expect(frame).toContain("Q3 earnings");
-    expect(frame).toContain("[enter]Rule");
-    expect(frame).toContain("[r]Review");
+        expect(frame).toContain("[r]eview");
   });
 
   test("w switches to conviction against weight", async () => {
@@ -222,6 +221,6 @@ describe("ThesisBoardPane", () => {
     const frame = setup!.captureCharFrame();
     if (process.env.PRINT_FRAMES) console.log(frame);
     expect(frame).toContain("Gap");
-    expect(frame).toContain("[w]Board");
+    expect(frame).toContain("[w] board");
   });
 });

@@ -1,45 +1,143 @@
-import { ChoiceDialog, ConfirmDialog, type ChoiceDialogChoice } from "../../../../components";
-import {
-  PaneTemplateInputStep,
-  PaneTemplateSelectStep,
-  PaneTemplateTextareaStep,
-} from "../../../../components/pane-template-wizard";
-import type { WizardStep } from "../../../../types/plugin";
-import type { DialogApi, PromptContext } from "../../../../ui/dialog";
+import { useEffect, useRef, useState } from "react";
+import { Button, ChoiceDialog, ConfirmDialog, DialogFrame, TextField, type ChoiceDialogChoice } from "../../../../components";
+import { t } from "../../../../i18n";
+import { colors } from "../../../../theme/colors";
+import { Box, Text, Textarea, type InputRenderable, type TextareaRenderable } from "../../../../ui";
+import { type DialogApi, type PromptContext, useDialogKeyboard } from "../../../../ui/dialog";
 
 /**
- * Thin wrappers over the dialog host so the thesis flows read as a sequence
- * of questions. Every prompt resolves `undefined` when the person backs out.
+ * The questions a thesis flow asks, on the same dialog pattern as the rest
+ * of the app: a DialogFrame, kit buttons, and an `Enter save · Esc cancel`
+ * footer. Every prompt resolves `undefined` when the person backs out.
  */
 
-export async function promptText(dialog: DialogApi, step: Omit<WizardStep, "key" | "type"> & { key?: string }): Promise<string | undefined> {
-  const wizardStep: WizardStep = { key: step.key ?? "value", type: "text", ...step };
-  const value = await dialog.prompt<string>({
-    content: (context: PromptContext<string>) => <PaneTemplateInputStep {...context} step={wizardStep} />,
-  }).catch(() => undefined);
-  if (value === undefined) return undefined;
-  const trimmed = value.trim();
-  return trimmed || (step.required === false ? "" : undefined);
+interface TextDialogProps extends PromptContext<string> {
+  title: string;
+  body?: string[];
+  defaultValue?: string;
+  placeholder?: string;
+  /** Sentences rather than a name: a taller field where Shift+Enter breaks a line. */
+  multiline?: boolean;
+  /** Empty is a valid answer (clearing a field) rather than a cancel. */
+  allowEmpty?: boolean;
+  width?: number;
 }
 
-export async function promptTextarea(dialog: DialogApi, step: Omit<WizardStep, "key" | "type"> & { key?: string }): Promise<string | undefined> {
-  const wizardStep: WizardStep = { key: step.key ?? "value", type: "textarea", ...step };
-  const value = await dialog.prompt<string>({
-    content: (context: PromptContext<string>) => <PaneTemplateTextareaStep {...context} step={wizardStep} />,
-  }).catch(() => undefined);
-  // The textarea step resolves "" for escape; an empty body is a cancel here.
-  return value ? value.trim() : undefined;
+const CANCEL = "\u0000cancel";
+
+function TextDialog({ resolve, dialogId, title, body, defaultValue = "", placeholder, multiline = false, allowEmpty = false, width = 72 }: TextDialogProps) {
+  const inputRef = useRef<InputRenderable | null>(null);
+  const textareaRef = useRef<TextareaRenderable | null>(null);
+  const [value, setValue] = useState(defaultValue);
+
+  useEffect(() => {
+    (multiline ? textareaRef.current : inputRef.current)?.focus?.();
+  }, [multiline]);
+
+  const current = () => {
+    if (!multiline) return value;
+    try {
+      return textareaRef.current?.editBuffer.getText() ?? value;
+    } catch {
+      return value;
+    }
+  };
+  const save = () => {
+    const text = current().trim();
+    if (text || allowEmpty) resolve(text);
+  };
+  const cancel = () => resolve(CANCEL);
+
+  useDialogKeyboard((event) => {
+    if (event.name === "escape") {
+      event.stopPropagation();
+      cancel();
+    }
+  }, { scope: dialogId, allowEditable: true });
+
+  return (
+    <DialogFrame
+      title={title}
+      footer={multiline ? "Enter save · Shift+Enter newline · Esc cancel" : "Enter save · Esc cancel"}
+    >
+      <Box flexDirection="column" width={width}>
+        {body?.map((line, index) => (
+          <Text key={index} fg={colors.textDim} wrapText width={width}>{line ? t(line) : " "}</Text>
+        ))}
+        {body && body.length > 0 && <Box height={1} />}
+        {multiline ? (
+          <Box height={5} border borderColor={colors.border} backgroundColor={colors.panel}>
+            <Textarea
+              ref={textareaRef}
+              initialValue={defaultValue}
+              placeholder={placeholder ? t(placeholder) : ""}
+              focused
+              textColor={colors.text}
+              placeholderColor={colors.textDim}
+              backgroundColor={colors.panel}
+              flexGrow={1}
+              wrapText
+              keyBindings={[
+                { name: "return", action: "submit" },
+                { name: "linefeed", action: "submit" },
+                { name: "return", shift: true, action: "newline" },
+                { name: "linefeed", shift: true, action: "newline" },
+              ]}
+              onSubmit={save}
+              onInput={setValue}
+            />
+          </Box>
+        ) : (
+          <TextField
+            inputRef={inputRef}
+            value={value}
+            placeholder={placeholder ? t(placeholder) : ""}
+            focused
+            onChange={setValue}
+            onSubmit={save}
+          />
+        )}
+        <Box height={1} />
+        <Box flexDirection="row" gap={1}>
+          <Button label="Save" variant="primary" onPress={save} />
+          <Button label="Cancel" variant="secondary" onPress={cancel} />
+        </Box>
+      </Box>
+    </DialogFrame>
+  );
 }
 
-export async function promptSelect(
+async function ask(dialog: DialogApi, props: Omit<TextDialogProps, keyof PromptContext<string>>): Promise<string | undefined> {
+  const value = await dialog.prompt<string>({
+    content: (context: PromptContext<string>) => <TextDialog {...context} {...props} />,
+  }).catch(() => undefined);
+  return value === undefined || value === CANCEL ? undefined : value;
+}
+
+export function promptText(
   dialog: DialogApi,
-  step: { label: string; options: Array<{ label: string; value: string }>; defaultValue?: string; body?: string[] },
+  step: { label: string; defaultValue?: string; placeholder?: string; body?: string[]; required?: boolean },
 ): Promise<string | undefined> {
-  const wizardStep: WizardStep = { key: "choice", type: "select", ...step };
-  const value = await dialog.prompt<string>({
-    content: (context: PromptContext<string>) => <PaneTemplateSelectStep {...context} step={wizardStep} />,
-  }).catch(() => undefined);
-  return value || undefined;
+  return ask(dialog, {
+    title: step.label,
+    body: step.body,
+    defaultValue: step.defaultValue,
+    placeholder: step.placeholder,
+    allowEmpty: step.required === false,
+  });
+}
+
+export function promptTextarea(
+  dialog: DialogApi,
+  step: { label: string; defaultValue?: string; placeholder?: string; body?: string[] },
+): Promise<string | undefined> {
+  return ask(dialog, {
+    title: step.label,
+    body: step.body,
+    defaultValue: step.defaultValue,
+    placeholder: step.placeholder,
+    multiline: true,
+  });
 }
 
 export async function promptChoice(
@@ -55,6 +153,25 @@ export async function promptChoice(
     ),
   }).catch(() => undefined);
   return value || undefined;
+}
+
+/** A pick from labelled options; the same choice dialog as everywhere else. */
+export function promptSelect(
+  dialog: DialogApi,
+  step: { label: string; options: Array<{ label: string; value: string; description?: string }>; defaultValue?: string; body?: string[] },
+): Promise<string | undefined> {
+  // ChoiceDialog ids must be non-empty; an empty "none" value gets a stand-in.
+  const NONE = "\u0000none";
+  return promptChoice(
+    dialog,
+    step.label,
+    step.options.map((option) => ({
+      id: option.value || NONE,
+      label: option.label,
+      ...(option.description ? { description: option.description } : {}),
+    })),
+    step.defaultValue || (step.options.some((option) => option.value === "") ? NONE : undefined),
+  ).then((value) => (value === NONE ? "" : value));
 }
 
 export async function promptNumber(
