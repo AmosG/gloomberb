@@ -41,6 +41,13 @@ describe("browser plugin catalog", () => {
       "chart-composer",
       "options-calculator",
       "ticker-news",
+      // Shared wire panes and filings must open on the hosted terminal too.
+      "news-top",
+      "news-feed",
+      "news-breaking",
+      "news-industry",
+      "sec",
+      "insider",
       "world-indices",
       "econ-calendar",
       "treasury-auctions",
@@ -57,8 +64,6 @@ describe("browser plugin catalog", () => {
       "tv",
       "short-interest",
       "thirteenf",
-      "sec",
-      "insider",
     ]) {
       expect(paneIds).not.toContain(forbidden);
     }

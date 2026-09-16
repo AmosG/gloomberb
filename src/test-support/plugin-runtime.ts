@@ -35,6 +35,7 @@ export function createTestPluginRuntime(
     hidePane() {},
     focusPane() {},
     openPaneSettings() {},
+    sharePane() {},
     openPluginCommandWorkflow() {},
     notify() {},
     subscribeResumeState: () => () => {},

@@ -130,6 +130,7 @@ export class PluginRegistry implements PluginRuntimeAccess {
   openCommandBarFn: ((query?: string) => void) = () => {};
   openPluginCommandWorkflowFn: ((commandId: string) => void) = () => {};
   openPaneSettingsFn: ((paneId?: string) => void) = () => {};
+  sharePaneFn: ((paneId?: string) => void) = () => {};
   openWindowModeFn: ((paneId?: string, mode?: WindowEditMode) => void) = () => {};
   showPaneFn: ((paneId: string) => void) = () => {};
   createPaneFromTemplateFn: ((templateId: string, options?: PaneTemplateCreateOptions) => void) = () => {};
@@ -181,6 +182,9 @@ export class PluginRegistry implements PluginRuntimeAccess {
   };
   openPaneSettings = (paneId?: string) => {
     this.openPaneSettingsFn(paneId);
+  };
+  sharePane = (paneId?: string) => {
+    this.sharePaneFn(paneId);
   };
   openWindowMode = (paneId?: string, mode?: WindowEditMode) => {
     this.openWindowModeFn(paneId, mode);
@@ -553,6 +557,7 @@ export class PluginRegistry implements PluginRuntimeAccess {
       pinTicker: this.pinTicker,
       navigateTicker: this.navigateTicker,
       openPaneSettings: this.openPaneSettings,
+      sharePane: this.sharePane,
       on: (event, handler) => {
         const dispose = this.events.on(event, handler);
         items.eventDisposers.push(dispose);

@@ -70,7 +70,7 @@ import {
   resolveShellCursorOcclusionRects,
   useShellCursorOcclusionGuard,
 } from "./cursor-occlusion";
-import { createShare, openLiveShareUrl } from "../../../shares/api";
+import { copyLivePaneShare } from "../../../shares/live";
 import { buildPaneSharePayload } from "../../../shares/pane";
 import type { SharePayload } from "../../../shares/payload";
 
@@ -451,32 +451,46 @@ export function Shell({
       onMouseDown: (event) => handlePaneQuickSetting(paneId, setting.key, event),
     }))
   ), [config, handlePaneQuickSetting, pluginRegistry]);
-  const sharePane = useCallback(async (payload: Extract<SharePayload, { kind: "pane" }>) => {
-    try {
-      const { id } = await createShare(payload);
-      await rendererHost.copyText(openLiveShareUrl(id));
-      pluginRegistry.notify({ body: "Share link copied to clipboard", type: "success" });
-    } catch (error) {
-      pluginRegistry.notify({
-        body: error instanceof Error ? error.message : "Could not share this pane.",
-        type: "error",
-      });
-    }
-  }, [pluginRegistry, rendererHost]);
-  const shareFocusedPane = useCallback(() => {
-    if (!publicSharing || !focusedPaneId) return false;
-    const pane = paneMap.get(focusedPaneId);
+  const sharePane = useCallback((payload: Extract<SharePayload, { kind: "pane" }>) => (
+    copyLivePaneShare(payload, {
+      copyText: (text) => rendererHost.copyText(text),
+      notify: (notification) => { pluginRegistry.notify(notification); },
+    })
+  ), [pluginRegistry, rendererHost]);
+  const sharePaneById = useCallback((paneId: string) => {
+    if (!publicSharing) return false;
+    const pane = paneMap.get(paneId);
     if (!pane) return false;
+    const state = stateRef.current;
     const payload = buildPaneSharePayload(
       pluginRegistry,
       pane.instance,
-      paneState[focusedPaneId] ?? {},
-      resolveTickerForPane(titleState, focusedPaneId),
+      state.paneState[paneId] ?? {},
+      resolveTickerForPane(state, paneId),
+      state.tickers,
     );
-    if (!payload) return false;
+    if (!payload) {
+      pluginRegistry.notify({ body: "This pane cannot be shared.", type: "error" });
+      return false;
+    }
     void sharePane(payload);
     return true;
-  }, [focusedPaneId, paneMap, paneState, pluginRegistry, publicSharing, sharePane, titleState]);
+  }, [paneMap, pluginRegistry, publicSharing, sharePane, stateRef]);
+  const shareFocusedPane = useCallback(() => (
+    focusedPaneId ? sharePaneById(focusedPaneId) : false
+  ), [focusedPaneId, sharePaneById]);
+  // Pane-level share hints (chart, news) go through the same live hand-off as
+  // the shell shortcut and the pane menu.
+  useEffect(() => {
+    const share = (paneId?: string) => {
+      const target = paneId ?? stateRef.current.focusedPaneId;
+      if (target) sharePaneById(target);
+    };
+    pluginRegistry.sharePaneFn = share;
+    return () => {
+      if (pluginRegistry.sharePaneFn === share) pluginRegistry.sharePaneFn = () => {};
+    };
+  }, [pluginRegistry, sharePaneById, stateRef]);
 
   useShellPaneManagementShortcuts({
     cancelActiveDrag,
@@ -515,6 +529,7 @@ export function Shell({
           pane.instance,
           paneState[paneId] ?? {},
           resolveTickerForPane(titleState, paneId),
+          stateRef.current.tickers,
         )
       : null;
     const items = menuForPane(

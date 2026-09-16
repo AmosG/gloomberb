@@ -12,39 +12,84 @@ import { isPlainKey } from "../../../../../utils/keyboard";
 import { wrapTextLines } from "../../../../../utils/text-wrap";
 import { formatDetailDate } from "../../../../../utils/datetime-format";
 import { mergeNewsArticle } from "../../../../../news/news-model";
+import { usePluginPaneState } from "../../../../runtime";
 import { formatNewsCategory } from "../categories";
 
 function hasStoryItems(article: MarketNewsItem | null): boolean {
   return (article?.items?.length ?? 0) > 0;
 }
 
+/**
+ * The open story is pane state, not component state: it is part of what the
+ * pane shows, so it survives a relaunch and travels with a shared pane. A
+ * receiver's feed may no longer list the story, so an id the feed cannot
+ * explain is fetched by id before it is given up on.
+ */
 export function useNewsArticleDetail(
   articles: MarketNewsItem[],
   loadArticleDetail?: (articleId: string) => Promise<MarketNewsItem | null>,
+  stateKey = "openArticleId",
 ) {
-  const [detailArticleId, setDetailArticleId] = useState<string | null>(null);
+  const [detailArticleId, setDetailArticleId] = usePluginPaneState<string | null>(stateKey, null);
   const [request, setRequest] = useState<{
     base: MarketNewsItem;
     article?: MarketNewsItem;
     loading: boolean;
     error: string | null;
   } | null>(null);
+  const [standalone, setStandalone] = useState<{
+    id: string;
+    article: MarketNewsItem | null;
+    loading: boolean;
+    error: string | null;
+  } | null>(null);
   const requestedArticle = useRef<MarketNewsItem | null>(null);
-  const baseDetailArticle = useMemo(
+  const standaloneRequestId = useRef<string | null>(null);
+  const listedDetailArticle = useMemo(
     () => articles.find((article) => article.id === detailArticleId) ?? null,
     [articles, detailArticleId],
   );
+  const currentStandalone = standalone?.id === detailArticleId ? standalone : null;
+  const baseDetailArticle = listedDetailArticle ?? currentStandalone?.article ?? null;
   // The service owns cached stories. A local completion only belongs to the
   // exact feed revision that requested it; it must never cover a newer update.
   const currentRequest = request?.base === baseDetailArticle ? request : null;
   const detailArticle = currentRequest?.article ?? baseDetailArticle;
 
   useEffect(() => {
-    if (detailArticleId && !baseDetailArticle) setDetailArticleId(null);
-  }, [baseDetailArticle, detailArticleId]);
+    if (!detailArticleId || listedDetailArticle) {
+      standaloneRequestId.current = null;
+      return;
+    }
+    if (currentStandalone) {
+      if (!currentStandalone.loading && !currentStandalone.article) setDetailArticleId(null);
+      return;
+    }
+    if (!loadArticleDetail) {
+      setDetailArticleId(null);
+      return;
+    }
+    const id = detailArticleId;
+    // The pending marker re-runs this effect; the request it belongs to must
+    // not be cancelled by that re-run, only by a change of story.
+    if (standaloneRequestId.current === id) return;
+    standaloneRequestId.current = id;
+    setStandalone({ id, article: null, loading: true, error: null });
+    void loadArticleDetail(id)
+      .then((article) => {
+        if (standaloneRequestId.current !== id) return;
+        setStandalone({ id, article: article?.id === id ? article : null, loading: false, error: null });
+      })
+      .catch((error: unknown) => {
+        if (standaloneRequestId.current !== id) return;
+        setStandalone({ id, article: null, loading: false, error: error instanceof Error ? error.message : "Story detail unavailable." });
+      });
+  }, [currentStandalone, detailArticleId, listedDetailArticle, loadArticleDetail, setDetailArticleId]);
 
   useEffect(() => {
     if (!baseDetailArticle || hasStoryItems(baseDetailArticle) || !loadArticleDetail) return;
+    // A story fetched by id is already the detail; asking again adds nothing.
+    if (baseDetailArticle === currentStandalone?.article) return;
     if (requestedArticle.current === baseDetailArticle) return;
     requestedArticle.current = baseDetailArticle;
     let active = true;
@@ -60,22 +105,25 @@ export function useNewsArticleDetail(
         setRequest({ base: baseDetailArticle, loading: false, error: error instanceof Error ? error.message : "Story detail unavailable." });
       });
     return () => { active = false; };
-  }, [baseDetailArticle, loadArticleDetail]);
+  }, [baseDetailArticle, currentStandalone?.article, loadArticleDetail]);
 
   const openArticle = useCallback((article: MarketNewsItem) => {
     requestedArticle.current = null;
+    standaloneRequestId.current = null;
     setDetailArticleId(article.id);
-  }, []);
+  }, [setDetailArticleId]);
   const closeDetail = useCallback(() => {
     requestedArticle.current = null;
+    standaloneRequestId.current = null;
     setDetailArticleId(null);
     setRequest(null);
-  }, []);
+    setStandalone(null);
+  }, [setDetailArticleId]);
 
   return {
     detailArticle,
-    detailLoading: currentRequest?.loading ?? false,
-    detailError: currentRequest?.error ?? null,
+    detailLoading: (currentRequest?.loading ?? false) || (currentStandalone?.loading ?? false),
+    detailError: currentRequest?.error ?? currentStandalone?.error ?? null,
     openArticle,
     closeDetail,
   };

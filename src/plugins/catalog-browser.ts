@@ -32,6 +32,9 @@ import { helpModule } from "./builtin/help";
 import { positionSizerModule } from "./builtin/kelly-sizer";
 import { layoutManagerModule } from "./builtin/layout-manager";
 import { tickerNewsModule } from "./builtin/news";
+import { browserNewsWireModule } from "./builtin/news/wire";
+import { secModule } from "./builtin/sec";
+import { insiderModule } from "./builtin/insider";
 import { optionsModule } from "./builtin/options";
 import { optionsCalculatorModule } from "./builtin/options-calculator";
 import { composeBuiltinPlugin, type PluginModule } from "./builtin/plugin-module";
@@ -80,6 +83,9 @@ const browserTickerResearchPlugin = composeBuiltinPlugin({
     executivesModule,
     riskFactorsModule,
     filingEventsModule,
+    // Filings and Form 4s come through Gloom Cloud, behind a sign-in wall.
+    secModule,
+    insiderModule,
   ],
 });
 
@@ -87,9 +93,9 @@ const browserNewsPlugin = composeBuiltinPlugin({
   id: "news",
   name: "News",
   version: "1.0.0",
-  description: "View latest news for each ticker.",
+  description: "Market news wire and company news for each ticker.",
   toggleable: true,
-  modules: [tickerNewsModule],
+  modules: [tickerNewsModule, browserNewsWireModule],
 });
 
 const browserMarketOverviewPlugin = composeBuiltinPlugin({

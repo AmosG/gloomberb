@@ -22,7 +22,7 @@ import {
   recordDoubleEscapeClose,
   resetDoubleEscapeClose,
 } from "../../utils/double-escape-close";
-import { createShare, openLiveShareUrl } from "../../shares/api";
+import { copyLivePaneShare } from "../../shares/live";
 import { buildPaneSharePayload } from "../../shares/pane";
 import type { ContextMenuItem } from "../../types/context-menu";
 import {
@@ -74,14 +74,16 @@ export function DetachedPaneShell({ pluginRegistry, desktopWindowBridge }: Detac
     () => ({ config, paneState }) as Parameters<typeof resolveTickerForPane>[0],
     [config, paneState],
   );
+  const tickers = useAppSelector((state) => state.tickers);
   const sharePayload = useMemo(() => instance && publicSharing
     ? buildPaneSharePayload(
         pluginRegistry,
         instance,
         paneState[instance.instanceId] ?? {},
         resolveTickerForPane(titleState, instance.instanceId),
+        tickers,
       )
-    : null, [instance, paneState, pluginRegistry, publicSharing, titleState]);
+    : null, [instance, paneState, pluginRegistry, publicSharing, tickers, titleState]);
   const quickSettings = instance ? pluginRegistry.resolvePaneQuickSettings(instance.instanceId) : [];
   const title = instance && paneDef
     ? getPaneDisplayTitle(titleState, instance, paneDef, pluginRegistry.panes)
@@ -152,17 +154,18 @@ export function DetachedPaneShell({ pluginRegistry, desktopWindowBridge }: Detac
 
   const sharePane = useCallback(async () => {
     if (!sharePayload) return;
-    try {
-      const { id } = await createShare(sharePayload);
-      await rendererHost.copyText(openLiveShareUrl(id));
-      pluginRegistry.notify({ body: "Share link copied to clipboard", type: "success" });
-    } catch (error) {
-      pluginRegistry.notify({
-        body: error instanceof Error ? error.message : "Could not share this pane.",
-        type: "error",
-      });
-    }
+    await copyLivePaneShare(sharePayload, {
+      copyText: (text) => rendererHost.copyText(text),
+      notify: (notification) => { pluginRegistry.notify(notification); },
+    });
   }, [pluginRegistry, rendererHost, sharePayload]);
+  useEffect(() => {
+    const share = () => { void sharePane(); };
+    pluginRegistry.sharePaneFn = share;
+    return () => {
+      if (pluginRegistry.sharePaneFn === share) pluginRegistry.sharePaneFn = () => {};
+    };
+  }, [pluginRegistry, sharePane]);
 
   useShortcut((event) => {
     if (resolvePaneManagementShortcut(event) !== "share" || !sharePayload) return;
