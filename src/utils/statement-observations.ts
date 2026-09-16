@@ -15,6 +15,7 @@ const WITHDRAWALS: readonly Withdrawal[] = [
   { id: "bac-2025q4-pretax", symbol: "BAC", field: "pretaxIncome", rejected: [12_435_000_000] },
   { id: "bac-2025q4-tax", symbol: "BAC", field: "taxProvision", rejected: [4_907_000_000] },
   { id: "o-2025q4-revenue", symbol: "O", field: "totalRevenue", rejected: [1_708_836_000] },
+  { id: "o-2025q4-parent-income", symbol: "O", field: "netIncome", rejected: [301_636_000] },
 ];
 
 function withdrawals(row: FinancialStatement): Withdrawal[] {
