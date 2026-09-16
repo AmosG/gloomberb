@@ -7,6 +7,7 @@ import type {
   TickerFinancials,
 } from "../../types/financials";
 import {
+  type CloudFinancialsPayload,
   type CloudMarketBatchItem,
   type CloudMarketResponse,
   type CloudOptionsChainPayload,
@@ -41,11 +42,18 @@ export function mapQuote(
     quote.fullExchangeName ??
     listingExchangeName;
   const internalProviderId = cloudInternalProviderId(providerMeta);
+  const change = typeof quote.change === "number" && Number.isFinite(quote.change)
+    ? quote.change / divisor
+    : Number.NaN;
+  const changePercent = typeof quote.changePercent === "number" && Number.isFinite(quote.changePercent)
+    ? quote.changePercent
+    : Number.NaN;
   return reconcileQuoteDayRange({
     ...quote,
     currency: currency || quote.currency,
     price: normalizePriceValueByDivisor(quote.price, divisor) ?? quote.price,
-    change: normalizePriceValueByDivisor(quote.change, divisor) ?? quote.change,
+    change,
+    changePercent,
     previousClose: normalizePriceValueByDivisor(quote.previousClose, divisor),
     regularClose: normalizePriceValueByDivisor(quote.regularClose, divisor),
     high52w: normalizePriceValueByDivisor(quote.high52w, divisor),
@@ -193,10 +201,10 @@ export function mapPricePoint(
 }
 
 export function mapCloudFinancials(
-  financials: TickerFinancials,
+  financials: CloudFinancialsPayload,
   providerMeta?: CloudProviderMeta,
 ): TickerFinancials {
-  const rawQuote = financials.quote as CloudQuotePayload | undefined;
+  const rawQuote = financials.quote;
   const quote = rawQuote ? mapQuote(rawQuote, providerMeta) : undefined;
   const divisor = rawQuote ? resolveCurrencyUnit(rawQuote.currency).divisor : 1;
   const exchange = rawQuote?.listingExchangeName ?? rawQuote?.exchangeName ?? "";
