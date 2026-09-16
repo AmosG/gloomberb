@@ -41,6 +41,7 @@ export interface RelationshipRegressionStats {
 
 export interface RelationshipAnalysis {
   unavailableReason?: string;
+  correlationUnavailableReason?: string;
   integrity?: { left: PriceHistoryIntegrity[]; right: PriceHistoryIntegrity[] };
   aligned: RelationshipAlignedPoint[];
   returns: RelationshipReturnPoint[];
@@ -170,6 +171,10 @@ export function buildRelationshipAnalysis(
     highlight: index === returns.length - 1,
   }));
   const stats = computeRelationshipRegression(returns);
+  const latestCorrelation = correlationPoints.findLast((point) => point.date.getTime() === returns.at(-1)?.date.getTime())?.close ?? null;
+  const correlationUnavailableReason = returns.length < correlationWindow
+    ? `Rolling correlation needs ${correlationWindow} shared returns; ${returns.length} available.`
+    : latestCorrelation === null ? `Rolling correlation is unavailable: zero return variance in the latest ${correlationWindow} shared returns.` : undefined;
 
   return {
     aligned,
@@ -179,7 +184,8 @@ export function buildRelationshipAnalysis(
     scatterPoints,
     stats,
     latestRatio: aligned.at(-1)?.ratio ?? null,
-    latestCorrelation: correlationPoints.at(-1)?.close ?? null,
+    latestCorrelation,
+    ...(correlationUnavailableReason ? { correlationUnavailableReason } : {}),
   };
 }
 

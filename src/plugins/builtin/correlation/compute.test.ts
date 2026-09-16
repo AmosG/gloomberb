@@ -81,3 +81,17 @@ describe("pearsonCorrelation", () => {
     expect(pearsonCorrelation(x, [1, 2, Number.NaN, 4, 5])).toBeNull();
   });
 });
+
+test("matrix calculations clip buffered history and retain loading/error provenance without removing usable pairs", async () => {
+  const { getSeriesForEntry, buildStatusSummary } = await import("./matrix/model");
+  const { createIdleEntry } = await import("../../../market-data/result-types");
+  const prices = [100, 110, 105, 112, 104, 115, 120].map((close, i) => ({ date: new Date(Date.UTC(2026, 8, i + 1)), close }));
+  const buffered = [{ date: new Date("2025-01-01"), close: 2 }, ...prices];
+  const entry = { ...createIdleEntry<typeof buffered>(), data: buffered, lastGoodData: buffered, fetchedAt: 123, phase: "refreshing" as const };
+  const series = getSeriesForEntry("SPY", entry, "1M");
+  expect(series).toMatchObject({ status: "ready", loading: true, observationCount: 6, fetchedAt: 123 });
+  expect(buildStatusSummary(["SPY"], new Map([["SPY", series]]), 6, 6)).toContain("Loading: SPY");
+  const retained = getSeriesForEntry("SPY", { ...entry, phase: "error", error: { reasonCode: "TIMEOUT", message: "Provider timed out" } }, "1M");
+  expect(retained).toMatchObject({ status: "ready", loading: false, refreshError: "Provider timed out", fetchedAt: 123 });
+  expect(retained.prices).toEqual(series.prices);
+});

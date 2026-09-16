@@ -1,10 +1,17 @@
 import type { HeadlessPaneDefinition } from "../../../types/headless";
 import type { TimeRange } from "../../../time-series/range";
 import { formatNumber } from "../../../utils/format";
-import { loadHeadlessPriceHistory, loadHeadlessSymbols } from "../shared/headless-market-data";
+import { resolveHeadlessInstrument, loadHeadlessSymbols } from "../shared/headless-market-data";
 import { buildCorrelationMatrix, buildCorrelationSeries, pairKey } from "./matrix/model";
 import { buildRelationshipAnalysis, DEFAULT_RELATIONSHIP_SECOND_SYMBOL } from "./relationship/model";
 import { paneSchemas } from "./headless-schema";
+import { CORRELATION_RETURN_BASIS, loadCorrelationHistory } from "./history";
+import type { HeadlessPaneContext } from "../../../types/headless";
+
+async function loadHistory(ctx: HeadlessPaneContext, key: string, range: TimeRange) {
+  const { symbol, exchange } = await resolveHeadlessInstrument(ctx, key);
+  return loadCorrelationHistory(ctx.marketData, symbol, exchange ?? "", range);
+}
 
 export const correlationHeadless: HeadlessPaneDefinition<"rows"> = {
   ...paneSchemas["correlation-pane"],
@@ -17,7 +24,7 @@ export const correlationHeadless: HeadlessPaneDefinition<"rows"> = {
   ],
   async load({ symbols, options }, ctx) {
     const range = (options.rangePreset ?? "1Y") as TimeRange;
-    const loaded = await loadHeadlessSymbols(symbols, ctx, (symbol) => loadHeadlessPriceHistory(ctx, symbol, range));
+    const loaded = await loadHeadlessSymbols(symbols, ctx, (symbol) => loadHistory(ctx, symbol, range));
     const bySymbol = new Map(loaded.entries.map(({ symbol, data }) => [symbol, buildCorrelationSeries(symbol, data)]));
     const matrix = buildCorrelationMatrix(symbols, bySymbol);
     const rows = symbols.flatMap((left, index) => symbols.slice(index + 1).map((right) => {
@@ -41,7 +48,7 @@ export const correlationHeadless: HeadlessPaneDefinition<"rows"> = {
       metadata: {
         range,
         unavailablePairs,
-        returnAlignment: "Local-price close-to-close returns between shared UTC dates; no FX conversion, and exchange closing times may differ.",
+        returnAlignment: CORRELATION_RETURN_BASIS,
         availability: symbols.map((symbol) => ({
           symbol, status: bySymbol.get(symbol)?.status ?? "error", observationCount: bySymbol.get(symbol)?.observationCount ?? 0,
           ...(bySymbol.get(symbol)?.integrity ? { integrity: bySymbol.get(symbol)!.integrity } : {}),
@@ -61,7 +68,7 @@ export const relationshipHeadless: HeadlessPaneDefinition<"series"> = {
     const symbols = [args.symbols[0]!, args.symbols[1] ?? DEFAULT_RELATIONSHIP_SECOND_SYMBOL];
     const range = (args.options.range ?? "1Y") as TimeRange;
     const correlationWindow = Number(args.options.correlationWindow ?? 120);
-    const loaded = await loadHeadlessSymbols(symbols, ctx, (symbol) => loadHeadlessPriceHistory(ctx, symbol, range));
+    const loaded = await loadHeadlessSymbols(symbols, ctx, (symbol) => loadHistory(ctx, symbol, range));
     const histories = new Map(loaded.entries.map(({ symbol, data }) => [symbol, data]));
     const analysis = buildRelationshipAnalysis(histories.get(symbols[0]!) ?? [], histories.get(symbols[1]!) ?? [], correlationWindow);
     const unavailableSymbols = symbols.filter((symbol) => (histories.get(symbol) ?? []).filter((point) => (
@@ -70,11 +77,12 @@ export const relationshipHeadless: HeadlessPaneDefinition<"series"> = {
     if (analysis.integrity?.left.length) unavailableSymbols.push(symbols[0]!);
     if (analysis.integrity?.right.length) unavailableSymbols.push(symbols[1]!);
     if (!unavailableSymbols.length && !analysis.returns.length) unavailableSymbols.push(...symbols);
+    const correlations = new Map(analysis.correlationPoints.map(({ date, close }) => [date.getTime(), close]));
     return {
       symbols,
       series: [
         { id: "ratio", label: `${symbols[0]}/${symbols[1]}`, points: analysis.ratioPoints.map(({ date, close }) => ({ date: date.toISOString(), value: close })) },
-        { id: "correlation", label: `Rolling correlation (${correlationWindow})`, points: analysis.correlationPoints.map(({ date, close }) => ({ date: date.toISOString(), value: close })) },
+        { id: "correlation", label: `Rolling correlation (${correlationWindow})`, points: analysis.returns.slice(correlationWindow - 1).map(({ date }) => ({ date: date.toISOString(), value: correlations.get(date.getTime()) ?? null })) },
       ],
       stats: [
         { key: "latestRatio", label: "Latest ratio", value: analysis.latestRatio, formatted: formatNumber(analysis.latestRatio ?? undefined, 4) },
@@ -86,9 +94,13 @@ export const relationshipHeadless: HeadlessPaneDefinition<"series"> = {
         { key: "returnCount", label: "Shared returns", value: analysis.stats?.sampleSize ?? analysis.returns.length },
       ],
       unavailableSymbols: [...new Set(unavailableSymbols)],
-      errors: [...loaded.errors, ...(analysis.unavailableReason ? [analysis.unavailableReason] : [])],
+      errors: [...loaded.errors, ...(analysis.unavailableReason ? [analysis.unavailableReason] : []),
+        ...(analysis.correlationUnavailableReason ? [analysis.correlationUnavailableReason] : [])],
       metadata: {
         left: symbols[0], right: symbols[1], range, correlationWindow,
+        returnAlignment: CORRELATION_RETURN_BASIS,
+        firstDate: analysis.aligned.at(0)?.dateKey ?? null,
+        lastDate: analysis.aligned.at(-1)?.dateKey ?? null,
         ...(analysis.integrity ? { integrity: analysis.integrity } : {}),
         latestRatio: analysis.latestRatio, latestCorrelation: analysis.latestCorrelation,
         regression: analysis.stats, alignedPriceCount: analysis.aligned.length, returnCount: analysis.returns.length,
