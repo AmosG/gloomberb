@@ -75,3 +75,75 @@ describe("13F API", () => {
     await expect(lookupThirteenFTickers(["BAKER"])).resolves.toEqual([]);
   });
 });
+
+test("a failed forced refresh retains the original retrieval date only for consumers that disclose it, and reopening retries", async () => {
+  const store = new MemoryPluginPersistence();
+  attachThirteenFApiPersistence(store);
+  let unavailable = false;
+  let calls = 0;
+  setHttpFetchTransport(async () => {
+    calls++;
+    return unavailable ? new Response("Unavailable", { status: 503 })
+      : Response.json([{ cik: "1067983", name: "Berkshire Hathaway" }]);
+  });
+  const expected = await searchThirteenFFunds("Berkshire", 1);
+  const key = "/funds?name=Berkshire&offset=0&limit=1";
+  const original = store.getResource("forms13f-api", key, { sourceKey: "forms13f" })!;
+  expect(original).not.toBeNull();
+  unavailable = true;
+  const warnings: string[] = [];
+  expect(await searchThirteenFFunds("Berkshire", 1, undefined, {
+    forceRefresh: true, onWarning: warning => warnings.push(warning),
+  })).toEqual(expected);
+  expect(warnings).toHaveLength(1);
+  expect(warnings[0]).toContain(new Date(original.fetchedAt).toISOString());
+  expect(warnings[0]).toContain("503");
+  expect(store.getResource("forms13f-api", key, { sourceKey: "forms13f" })).toEqual(original);
+  await expect(searchThirteenFFunds("Berkshire", 1)).rejects.toThrow("503");
+  unavailable = false;
+  const callsBeforeRecovery = calls;
+  expect(await searchThirteenFFunds("Berkshire", 1)).toEqual(expected);
+  expect(calls).toBe(callsBeforeRecovery + 1);
+  await searchThirteenFFunds("Berkshire", 1);
+  expect(calls).toBe(callsBeforeRecovery + 1);
+});
+
+test("stale but unexpired research refreshes, and a late request cannot overwrite newer cache", async () => {
+  const store = new MemoryPluginPersistence();
+  attachThirteenFApiPersistence(store);
+  const key = "/funds?name=Berkshire&offset=0&limit=1";
+  store.seedResource("forms13f-api", key, [{ cik: "1067983", name: "Old name" }], {
+    sourceKey: "forms13f", schemaVersion: 1, stale: true,
+  });
+  let release!: (response: Response) => void;
+  let calls = 0;
+  setHttpFetchTransport(async () => {
+    if (++calls === 1) return new Promise<Response>(resolve => { release = resolve; });
+    return Response.json([{ cik: "1067983", name: "Current name" }]);
+  });
+  const older = searchThirteenFFunds("Berkshire", 1);
+  for (let i = 0; i < 5 && !release; i++) await Promise.resolve();
+  await searchThirteenFFunds("Berkshire", 1, undefined, { forceRefresh: true });
+  release(Response.json([{ cik: "1067983", name: "Superseded name" }]));
+  await older;
+  expect(await searchThirteenFFunds("Berkshire", 1)).toEqual([{ cik: "0001067983", name: "Current name" }]);
+  expect(calls).toBe(2);
+});
+
+for (const status of [403, 404]) test(`authoritative public ${status} cannot retain a removed 13F response`, async () => {
+  const store = new MemoryPluginPersistence();
+  attachThirteenFApiPersistence(store);
+  let denied = false;
+  setHttpFetchTransport(async () => denied ? new Response("Removed", { status })
+    : Response.json([{ cik: "1067983", name: "Berkshire Hathaway" }]));
+  await searchThirteenFFunds("Berkshire", 1);
+  denied = true;
+  const warnings: string[] = [];
+  await expect(searchThirteenFFunds("Berkshire", 1, undefined, {
+    forceRefresh: true, onWarning: warning => warnings.push(warning),
+  })).rejects.toThrow(String(status));
+  expect(warnings).toEqual([]);
+  expect(store.getResource("forms13f-api", "/funds?name=Berkshire&offset=0&limit=1", {
+    sourceKey: "forms13f", allowExpired: true,
+  })).toBeNull();
+});

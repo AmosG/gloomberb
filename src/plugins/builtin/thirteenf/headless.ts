@@ -242,6 +242,7 @@ export function createThirteenFHeadless(
           return {
             columns: FILING_COLUMNS,
             rows,
+            ...(detail.warnings?.length ? { errors: detail.warnings } : {}),
             metadata: {
               view,
               cik: detail.cik,

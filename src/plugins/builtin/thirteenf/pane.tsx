@@ -170,7 +170,7 @@ export function ThirteenFPane({ focused, width, height }: PaneProps) {
         setRows((currentRows) => appendUniqueRows(currentRows, result.rows));
         if (result.period) setPeriod(result.period);
         if (result.quarter) setQuarter(result.quarter);
-        setWarning(result.warning ?? null);
+        if (result.warning) setWarning(current => [...new Set([current, result.warning].filter(Boolean))].join(" "));
         setHasMore(result.hasMore === true);
         setNextOffset(result.nextOffset ?? nextOffset + result.rows.length);
       })
@@ -525,7 +525,7 @@ function FundDetailView({
     registrationId: "thirteenf-holdings-notices",
     notices: data?.warnings ?? [],
     focused,
-    enabled: activeTab === "holdings" && !openFiling,
+    enabled: !openFiling,
   });
 
   const detailStatusInfo = useMemo<PaneFooterSegment[]>(() => (
@@ -584,7 +584,7 @@ function FundDetailView({
           onBack={closeOpenFiling}
           detailTitle={openFiling ? `${openFiling.periodOfReport} filing` : "13F filing"}
           detailContent={openFiling ? (
-            <FilingDetailView focused={focused} filing={openFiling} width={width} />
+            <FilingDetailView focused={focused} filing={openFiling} width={width} sourceWarnings={data?.warnings ?? []} />
           ) : (
             <Box flexGrow={1} />
           )}
@@ -662,10 +662,12 @@ function FilingDetailView({
   focused,
   filing,
   width,
+  sourceWarnings,
 }: {
   focused: boolean;
   filing: FundTimelineRow;
   width: number;
+  sourceWarnings: string[];
 }) {
   const { pinTicker } = usePluginTickerActions();
   const [sortPreference, setSortPreference] = usePluginPaneState<FundSortPreference<FilingPositionColumnId>>(
@@ -676,6 +678,7 @@ function FilingDetailView({
   const [holdings, setHoldings] = useState<ThirteenFHoldingRecord[]>([]);
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [error, setError] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [nextOffset, setNextOffset] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -690,6 +693,7 @@ function FilingDetailView({
     abortRef.current = controller;
     setStatus("loading");
     setError(null);
+    setWarnings([]);
     setHoldings([]);
     setHasMore(false);
     setNextOffset(0);
@@ -697,6 +701,7 @@ function FilingDetailView({
       .then((result) => {
         if (abortRef.current !== controller) return;
         setHoldings(result.rows);
+        setWarnings(result.warnings);
         setHasMore(result.hasMore);
         setNextOffset(result.rows.length);
         setStatus("loaded");
@@ -719,6 +724,7 @@ function FilingDetailView({
       .then((result) => {
         if (moreAbortRef.current !== controller) return;
         setHoldings((current) => [...current, ...result.rows]);
+        setWarnings((current) => [...new Set([...current, ...result.warnings])]);
         setHasMore(result.hasMore);
         setNextOffset(nextOffset + result.rows.length);
       })
@@ -771,6 +777,8 @@ function FilingDetailView({
     refresh();
     return true;
   }, [refresh]);
+
+  usePaneNoticeFooter({ registrationId: "thirteenf-filing-notices", notices: [...new Set([...sourceWarnings, ...warnings])], focused });
 
   const summaryRows = [
     ["Filer", filing.companyName || "--"],
