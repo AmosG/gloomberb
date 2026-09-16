@@ -29,6 +29,15 @@ export { worldIndicesHeadless } from "./headless";
 /** Stable identity: a fresh literal here would remount the board every render. */
 const NO_SAVED_SYMBOLS: string[] = [];
 
+// Rows are memoized by the table; hoisted adapters keep their identity.
+const worldIndexRowKey = (row: WorldIndexTableRow) => (
+  row.type === "header" ? `header-${row.region}` : row.entry.symbol
+);
+const isIndexRow = (row: WorldIndexTableRow) => row.type === "row";
+function renderRegionHeader(row: WorldIndexTableRow) {
+  return row.type === "header" ? { text: REGION_LABELS[row.region] } : null;
+}
+
 function WorldIndicesPane({ focused, width, height }: PaneProps) {
   const { pinTicker } = usePluginTickerActions();
   const dataProvider = useAssetData();
@@ -103,7 +112,7 @@ function WorldIndicesPane({ focused, width, height }: PaneProps) {
           if (row.type === "row") selectFlatIndex(index);
         },
       }}
-      isNavigable={(row) => row.type === "row"}
+      isNavigable={isIndexRow}
       onActivate={(_row, index) => openSelected(index)}
       rootWidth={width}
       rootHeight={height}
@@ -112,10 +121,8 @@ function WorldIndicesPane({ focused, width, height }: PaneProps) {
       sortColumnId={sortPreference.columnId}
       sortDirection={sortPreference.direction}
       onHeaderClick={handleHeaderClick}
-      getItemKey={(row) => row.type === "header" ? `header-${row.region}` : row.entry.symbol}
-      renderSectionHeader={(row) => row.type === "header"
-        ? { text: REGION_LABELS[row.region] }
-        : null}
+      getItemKey={worldIndexRowKey}
+      renderSectionHeader={renderRegionHeader}
       renderCell={renderCell}
       emptyStateTitle="No market data provider connected."
     />

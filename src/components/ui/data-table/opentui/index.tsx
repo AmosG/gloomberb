@@ -24,6 +24,7 @@ import type {
   DataTableVisibleRange,
 } from "../types";
 import { resolveDataTableVisibleRange } from "../visible-range";
+import { useStableColumns } from "../stable-columns";
 import {
   resolveDataTableScrollTop,
   resolveDataTableVisibleWindow,
@@ -206,7 +207,7 @@ function OpenTuiDataTableRowInner<
 const OpenTuiDataTableRow = memo(OpenTuiDataTableRowInner) as typeof OpenTuiDataTableRowInner;
 
 export function OpenTuiDataTable<T, C extends DataTableColumn = DataTableColumn>({
-  columns,
+  columns: columnsProp,
   items,
   sortColumnId,
   sortDirection,
@@ -245,6 +246,7 @@ export function OpenTuiDataTable<T, C extends DataTableColumn = DataTableColumn>
   scrollToIndexAlign = "nearest",
   scrollToIndexVersion = 0,
 }: DataTableProps<T, C>) {
+  const columns = useStableColumns(columnsProp);
   const colors = useThemeColors();
   const dispatch = useAppDispatch();
   const paneInstanceId = usePaneInstance()?.instanceId ?? null;

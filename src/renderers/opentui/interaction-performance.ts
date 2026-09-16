@@ -21,6 +21,8 @@ interface PendingInteraction {
   id: number;
   key: string;
   startedAtMs: number;
+  committedAtMs?: number;
+  renderMs?: number;
 }
 
 export interface InteractionPerformanceSample {
@@ -29,6 +31,12 @@ export interface InteractionPerformanceSample {
   frameId: number;
   inputsInFrame: number;
   latencyMs: number;
+  /** Keypress to the React commit that consumed it. */
+  commitDelayMs: number;
+  /** React render work in that commit, from the Profiler. */
+  renderMs: number;
+  /** Commit to the frame that painted it. */
+  frameDelayMs: number;
   frameCallbackMs: number;
   /** Renderer-wide count shared by every input completed in this frame. */
   cellsUpdated: number;
@@ -45,7 +53,8 @@ export interface InteractionPerformanceSummary {
 export interface InteractionPerformanceRecorder {
   (): void;
   readonly enabled: boolean;
-  markCommit(): void;
+  /** React Profiler `onRender` signature; only `actualDuration` is read. */
+  markCommit(id?: string, phase?: string, actualDurationMs?: number): void;
 }
 
 function round(value: number): number {
@@ -113,6 +122,7 @@ export function installInteractionPerformanceRecorder(
   const pending: PendingInteraction[] = [];
   const samples: InteractionPerformanceSample[] = [];
   let committedCount = 0;
+  let commitCount = 0;
   let nextId = 1;
   let stopped = false;
 
@@ -131,12 +141,16 @@ export function installInteractionPerformanceRecorder(
     const completed = pending.splice(0, committedCount);
     committedCount = 0;
     for (const interaction of completed) {
+      const committedAtMs = interaction.committedAtMs ?? completedAtMs;
       samples.push({
         id: interaction.id,
         key: interaction.key,
         frameId: event.frameId,
         inputsInFrame: completed.length,
         latencyMs: round(completedAtMs - interaction.startedAtMs),
+        commitDelayMs: round(committedAtMs - interaction.startedAtMs),
+        renderMs: round(interaction.renderMs ?? 0),
+        frameDelayMs: round(completedAtMs - committedAtMs),
         frameCallbackMs: round(stats.frameCallbackTime),
         cellsUpdated: stats.cellsUpdated,
         rssBytes,
@@ -162,9 +176,14 @@ export function installInteractionPerformanceRecorder(
         ]),
     );
     const report = {
-      version: 2,
+      version: 3,
       startedAt,
       endedAt: new Date().toISOString(),
+      // The React Profiler is inert in production builds, so a run against
+      // one records no commits and therefore no samples. Saying so here beats
+      // an empty report that looks like a benchmark harness bug.
+      commitSignal: commitCount > 0 ? "profiler" : "none",
+      commitCount,
       summary: summarizeInteractionPerformance(samples),
       byKey,
       unframedInputCount: pending.length,
@@ -177,9 +196,16 @@ export function installInteractionPerformanceRecorder(
   Object.defineProperties(stop, {
     enabled: { value: true },
     markCommit: {
-      value: () => {
+      value: (_id?: string, _phase?: string, actualDurationMs?: number) => {
         // A React Profiler callback runs after host mutations commit. Only
         // inputs present by then may be completed by the following frame.
+        commitCount += 1;
+        const committedAtMs = performance.now();
+        for (let index = committedCount; index < pending.length; index += 1) {
+          const interaction = pending[index]!;
+          interaction.committedAtMs = committedAtMs;
+          interaction.renderMs = actualDurationMs;
+        }
         committedCount = pending.length;
       },
     },

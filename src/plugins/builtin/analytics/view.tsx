@@ -5,6 +5,7 @@ import {
 } from "../../../components";
 import type { ProjectedChartPoint } from "../../../components/chart/core/data";
 import type { StaticChartSurfaceProps } from "../../../components/chart/static";
+import type { DataTableCell } from "../../../components/ui/data-table/types";
 import { colors, priceColor } from "../../../theme/colors";
 import { Box, Text } from "../../../ui";
 import { formatCompact, formatPercentRaw } from "../../../utils/format";
@@ -132,6 +133,35 @@ export function PortfolioHistorySection({
   return null;
 }
 
+const sectorRowKey = (row: SectorTableRow) => row.id;
+
+// Module-level so the table's memoized rows keep their identity across renders.
+function renderSectorCell(row: SectorTableRow, column: SectorTableColumn): DataTableCell {
+  switch (column.id) {
+    case "sector":
+      return { text: row.sector };
+    case "weight":
+      return { text: formatWeight(row.weight) };
+    case "value":
+      return { text: row.value == null ? "—" : formatCompact(row.value) };
+    case "pnl":
+      return {
+        text: formatSignedCompact(row.pnl),
+        color: row.pnl == null ? colors.textMuted : priceColor(row.pnl),
+      };
+    case "return":
+      return {
+        text: row.returnPct == null ? "—" : formatPercentRaw(row.returnPct),
+        color: row.returnPct == null ? colors.textMuted : priceColor(row.returnPct),
+      };
+    case "bar":
+      return {
+        text: renderBar(row.weight, column.width),
+        color: colors.textMuted,
+      };
+  }
+}
+
 export function SectorAllocationTable({
   focused,
   resetScrollKey,
@@ -166,34 +196,10 @@ export function SectorAllocationTable({
       sortColumnId={sort.columnId}
       sortDirection={sort.direction}
       onHeaderClick={onHeaderClick}
-      getItemKey={(row) => row.id}
+      getItemKey={sectorRowKey}
       emptyStateTitle="No sector data available"
       emptyStateHint="Load profile data or add sectors to the portfolio positions."
-      renderCell={(row, column) => {
-        switch (column.id) {
-          case "sector":
-            return { text: row.sector };
-          case "weight":
-            return { text: formatWeight(row.weight) };
-          case "value":
-            return { text: row.value == null ? "—" : formatCompact(row.value) };
-          case "pnl":
-            return {
-              text: formatSignedCompact(row.pnl),
-              color: row.pnl == null ? colors.textMuted : priceColor(row.pnl),
-            };
-          case "return":
-            return {
-              text: row.returnPct == null ? "—" : formatPercentRaw(row.returnPct),
-              color: row.returnPct == null ? colors.textMuted : priceColor(row.returnPct),
-            };
-          case "bar":
-            return {
-              text: renderBar(row.weight, column.width),
-              color: colors.textMuted,
-            };
-        }
-      }}
+      renderCell={renderSectorCell}
     />
   );
 }

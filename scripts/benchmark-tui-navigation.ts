@@ -86,8 +86,15 @@ try {
   await waitForFile(options.output, 3_000);
 
   const report = JSON.parse(await readFile(options.output, "utf8")) as {
+    commitSignal?: "profiler" | "none";
     samples: InteractionPerformanceSample[];
   };
+  if (report.commitSignal === "none") {
+    throw new Error(
+      "The recorder saw no React commits. It relies on the React Profiler, which is inert in "
+      + "production builds, so run the benchmark from source without NODE_ENV=production.",
+    );
+  }
   const allNavigationSamples = report.samples
     .filter((sample) => sample.key === "up" || sample.key === "down");
   const expectedSampleCount = options.count * 2 + 4;

@@ -121,13 +121,31 @@ const EMOJI_PRESENTATION_RE = /\p{Emoji_Presentation}/u;
 const EXTENDED_PICTOGRAPHIC_RE = /\p{Extended_Pictographic}/u;
 const REGIONAL_INDICATOR_RE = /\p{Regional_Indicator}/u;
 
+/**
+ * Printable ASCII is always one cell per code unit. Table cells are mostly
+ * numbers, tickers, and dates, so this skips grapheme segmentation on the
+ * render hot path.
+ */
+const SINGLE_WIDTH_ASCII_RE = /^[\x20-\x7e]*$/;
+
+let graphemeSegmenter: { segment(value: string): Iterable<{ segment: string }> } | null | undefined;
+
+// Constructing Intl.Segmenter costs about 10us; segmenting with a shared one
+// costs a fraction of that, and the instance carries no per-call state.
+function getGraphemeSegmenter(): typeof graphemeSegmenter {
+  if (graphemeSegmenter === undefined) {
+    const Segmenter = (Intl as any).Segmenter;
+    graphemeSegmenter = typeof Segmenter === "function"
+      ? new Segmenter(undefined, { granularity: "grapheme" })
+      : null;
+  }
+  return graphemeSegmenter;
+}
+
 function segmentGraphemes(value: string): string[] {
-  const Segmenter = (Intl as any).Segmenter;
-  if (typeof Segmenter === "function") {
-    return Array.from(
-      new Segmenter(undefined, { granularity: "grapheme" }).segment(value),
-      (entry: any) => entry.segment as string,
-    );
+  const segmenter = getGraphemeSegmenter();
+  if (segmenter) {
+    return Array.from(segmenter.segment(value), (entry) => entry.segment);
   }
   return Array.from(value);
 }
@@ -177,11 +195,13 @@ function graphemeWidth(segment: string): number {
 }
 
 export function displayWidth(value: string): number {
+  if (SINGLE_WIDTH_ASCII_RE.test(value)) return value.length;
   return segmentGraphemes(value).reduce((total, segment) => total + graphemeWidth(segment), 0);
 }
 
 function truncateToWidth(value: string, width: number): string {
   if (width <= 0) return "";
+  if (SINGLE_WIDTH_ASCII_RE.test(value)) return value.slice(0, width);
   let output = "";
   let used = 0;
   for (const segment of segmentGraphemes(value)) {

@@ -281,19 +281,6 @@ export async function initializeAppState({
     return nextTickerMap;
   }, { tickerCount: tickers.length });
 
-  measurePerf("startup.dispatch-set-tickers", () => {
-    dispatch({ type: "SET_TICKERS", tickers: tickerMap });
-  }, { tickerCount: tickerMap.size });
-
-  measurePerf("startup.dispatch-broker-accounts", () => {
-    for (const [instanceId, accounts] of Object.entries(persistedBrokerAccounts)) {
-      dispatch({ type: "SET_BROKER_ACCOUNTS", instanceId, accounts });
-    }
-  }, {
-    instanceCount: Object.keys(persistedBrokerAccounts).length,
-    accountCount: Object.values(persistedBrokerAccounts).reduce((sum, accounts) => sum + accounts.length, 0),
-  });
-
   const effectivePaneState = paneState ?? {
     ...sessionSnapshot?.paneState,
     ...config.layouts[config.activeLayoutIndex]?.paneState,
@@ -303,12 +290,6 @@ export async function initializeAppState({
     () => buildPaneStateSeed(config, tickers, tickerMap, effectivePaneState),
     { paneCount: config.layout.instances.length },
   );
-  measurePerf("startup.dispatch-pane-state-seed", () => {
-    for (const [paneId, patch] of Object.entries(paneStateSeed) as Array<[string, PaneRuntimeState]>) {
-      dispatch({ type: "UPDATE_PANE_STATE", paneId, patch });
-    }
-  }, { paneStateSeedCount: Object.keys(paneStateSeed).length });
-
   const refreshPlan = measurePerf(
     "startup.build-refresh-plan",
     () => buildRefreshPlan(config, tickerMap, paneStateSeed, effectivePaneState, sessionSnapshot),
@@ -328,24 +309,48 @@ export async function initializeAppState({
     symbols: refreshPlan.map((entry) => `${entry.mode}:${entry.ticker.metadata.ticker}`),
   });
 
-  if (primeCachedFinancials) {
-    const cachedPrimeEntries = await measurePerfAsync(
+  // Everything the first frame needs is resolved before the store hears about
+  // any of it. An await between the ticker dispatch and SET_INITIALIZED let
+  // React commit the full layout once with empty panes and again with data,
+  // and the first of those commits cost more than the cache reads it hid.
+  const cachedPrimeEntries = primeCachedFinancials
+    ? await measurePerfAsync(
       "startup.resolve-cached-financial-prime",
       () => resolveCachedFinancialPrimeEntries(refreshPlan, sessionSnapshot, tickerMap, dataProvider),
       {
         financialRefreshCount: refreshPlan.filter((entry) => entry.mode === "financials").length,
         sessionHydrationTargetCount: sessionSnapshot?.hydrationTargets.length ?? 0,
       },
-    );
-    if (cachedPrimeEntries.length > 0) {
-      measurePerf("startup.prime-cached-financials", () => {
-        primeCachedFinancials(cachedPrimeEntries);
-      }, { count: cachedPrimeEntries.length });
-      startupLog.info("cached financials primed", {
-        count: cachedPrimeEntries.length,
-        symbols: cachedPrimeEntries.map((entry) => entry.ticker.metadata.ticker),
-      });
+    )
+    : [];
+
+  measurePerf("startup.dispatch-set-tickers", () => {
+    dispatch({ type: "SET_TICKERS", tickers: tickerMap });
+  }, { tickerCount: tickerMap.size });
+
+  measurePerf("startup.dispatch-broker-accounts", () => {
+    for (const [instanceId, accounts] of Object.entries(persistedBrokerAccounts)) {
+      dispatch({ type: "SET_BROKER_ACCOUNTS", instanceId, accounts });
     }
+  }, {
+    instanceCount: Object.keys(persistedBrokerAccounts).length,
+    accountCount: Object.values(persistedBrokerAccounts).reduce((sum, accounts) => sum + accounts.length, 0),
+  });
+
+  measurePerf("startup.dispatch-pane-state-seed", () => {
+    for (const [paneId, patch] of Object.entries(paneStateSeed) as Array<[string, PaneRuntimeState]>) {
+      dispatch({ type: "UPDATE_PANE_STATE", paneId, patch });
+    }
+  }, { paneStateSeedCount: Object.keys(paneStateSeed).length });
+
+  if (primeCachedFinancials && cachedPrimeEntries.length > 0) {
+    measurePerf("startup.prime-cached-financials", () => {
+      primeCachedFinancials(cachedPrimeEntries);
+    }, { count: cachedPrimeEntries.length });
+    startupLog.info("cached financials primed", {
+      count: cachedPrimeEntries.length,
+      symbols: cachedPrimeEntries.map((entry) => entry.ticker.metadata.ticker),
+    });
   }
 
   measurePerf("startup.dispatch-initialized", () => {

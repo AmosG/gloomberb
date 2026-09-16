@@ -70,6 +70,23 @@ function renderIssuerCell(
   }
 }
 
+// Table-shaped adapters live at module level so memoized rows keep their
+// identity between pane renders.
+const issuerKey = (row: CdsIssuerSummary) => row.key;
+const tradeKey = (trade: CdsTrade) => trade.id;
+const renderIssuerRow = (
+  row: CdsIssuerSummary,
+  column: IssuerColumn,
+  _index: number,
+  state: { selected: boolean },
+) => renderIssuerCell(row, column, state.selected);
+const renderTradeRow = (
+  trade: CdsTrade,
+  column: TradeColumn,
+  _index: number,
+  state: { selected: boolean },
+) => renderTradeCell(trade, column, state.selected);
+
 function renderTradeCell(row: CdsTrade, column: TradeColumn, selected: boolean): DataTableCell {
   const selectedColor = selected ? colors.selectedText : undefined;
   switch (column.id) {
@@ -138,8 +155,8 @@ function CdsTradeTable({
       sortColumnId={sort.columnId}
       sortDirection={sort.direction}
       onHeaderClick={(columnId) => onSort(columnId as TradeColumnId)}
-      getItemKey={(trade) => trade.id}
-      renderCell={(trade, column, _index, state) => renderTradeCell(trade, column, state.selected)}
+      getItemKey={tradeKey}
+      renderCell={renderTradeRow}
       emptyStateTitle="No reported trades."
     />
   );
@@ -324,8 +341,8 @@ export function CdsPane({
       onHeaderClick={(columnId) => setIssuerSort((current) => (
         nextSort(current, columnId as IssuerColumnId, DEFAULT_ISSUER_SORT)
       ))}
-      getItemKey={(row) => row.key}
-      renderCell={(row, column, _index, state) => renderIssuerCell(row, column, state.selected)}
+      getItemKey={issuerKey}
+      renderCell={renderIssuerRow}
       emptyStateTitle={error ? "CDS activity unavailable." : "No reported single-name CDS trades."}
     />
   );

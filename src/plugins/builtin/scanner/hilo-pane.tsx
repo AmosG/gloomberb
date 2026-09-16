@@ -43,6 +43,20 @@ function buildColumns(width: number): DataTableColumn[] {
   ];
 }
 
+type RenderRow = (
+  row: ScannerHiloExtreme,
+  column: DataTableColumn,
+  index: number,
+  rowState: { selected: boolean },
+) => DataTableCell;
+
+// One adapter per side, created once, so the memoized table rows keep their
+// identity while the feed ticks.
+const RENDER_ROW: Record<Side, RenderRow> = {
+  highs: (row, column, _index, rowState) => renderCell("highs", row, column, rowState),
+  lows: (row, column, _index, rowState) => renderCell("lows", row, column, rowState),
+};
+
 function renderCell(
   side: Side,
   row: ScannerHiloExtreme,
@@ -137,7 +151,7 @@ function HiloPane({ focused, width, height }: PaneProps) {
       onHeaderClick={() => {}}
       getItemKey={rowKey}
       onActivate={(row) => pinTicker(row.symbol, { floating: true, paneType: TICKER_RESEARCH_PANE_ID })}
-      renderCell={(row, column, _index, rowState) => renderCell(side, row, column, rowState)}
+      renderCell={RENDER_ROW[side]}
       emptyContent={feed.payload ? undefined : <PaneStatusBody loading loadingLabel="Waiting for the scanner..." />}
       emptyStateTitle="Nothing above the price filter yet."
     />

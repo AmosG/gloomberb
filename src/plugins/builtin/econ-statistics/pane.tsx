@@ -26,6 +26,7 @@ import { DEFAULT_STAT_ID } from "./stats";
 import { selectStatViews, type StatRangeId, type StatViewModel } from "./view";
 
 const loadBundle = (force: boolean) => loadStatsBundle({ force });
+const noop = () => {};
 
 const SPLIT_MIN_WIDTH = 108;
 const LIST_WIDTH = 46;
@@ -102,6 +103,19 @@ function cellsFor(view: StatViewModel): Record<ColumnId, DataTableCell> {
     },
     percentile: { text: formatNumber(view.percentile, 0), color: colors.textMuted },
   };
+}
+
+// Module-level so the table's memoized rows keep their identity across pane
+// renders; an inline arrow would re-render every visible row on each keypress.
+const rowKey = (row: Row) => row.id;
+const isStatRow = (row: Row) => row.kind === "stat";
+function renderRowCell(row: Row, column: Column): DataTableCell {
+  return row.kind === "stat" ? cellsFor(row.view)[column.id] : { text: "" };
+}
+function renderRowSectionHeader(row: Row) {
+  return row.kind === "header"
+    ? { text: categoryLabel(row.category), color: colors.textMuted }
+    : null;
 }
 
 /**
@@ -271,17 +285,12 @@ export function EconStatisticsPane({ focused, width, height }: PaneProps) {
                 getId: (row) => row.id,
                 onChange: (id, _item, _index, reason) => chooseStat(String(id), reason),
               }}
-              isNavigable={(row) => row.kind === "stat"}
-              onHeaderClick={() => {}}
+              isNavigable={isStatRow}
+              onHeaderClick={noop}
               onRootKeyDown={handlePaneKey}
-              getItemKey={(row) => row.id}
-              renderCell={(row, column) =>
-                row.kind === "stat"
-                  ? cellsFor(row.view)[column.id]
-                  : { text: "" }}
-              renderSectionHeader={(row) => (row.kind === "header"
-                ? { text: categoryLabel(row.category), color: colors.textMuted }
-                : null)}
+              getItemKey={rowKey}
+              renderCell={renderRowCell}
+              renderSectionHeader={renderRowSectionHeader}
               emptyStateTitle={normalizedQuery ? "No statistic matches." : error ?? "No statistics."}
             />
           </Box>
