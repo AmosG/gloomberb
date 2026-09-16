@@ -11,6 +11,7 @@ import type { InstrumentSearchResult } from "../types/instrument";
 import { parseOptionSymbol } from "../utils/options";
 import { SecEdgarClient } from "./sec-edgar";
 import { mergeFinancialStatementRows } from "../utils/financial-statements";
+import { withdrawKnownProviderStatements } from "../utils/statement-observations";
 import { YahooHttpClient } from "./yahoo-finance/http";
 import {
   normalizeSubUnitCurrency,
@@ -157,7 +158,10 @@ export class YahooFinanceClient implements DataProvider {
           fetchTimeseries: (targetSymbol, types, period1) => this.fetchTimeseries(targetSymbol, types, period1),
           providerId: this.id,
         });
-        return await this.supplementSecStatements(ticker, exchange, result, context?.statementHistory === "extended");
+        return withdrawKnownProviderStatements(
+          await this.supplementSecStatements(ticker, exchange, result, context?.statementHistory === "extended"),
+          { symbol: ticker, exchange }, "provider:yahoo",
+        );
       } catch (err) {
         lastError = err;
       }
