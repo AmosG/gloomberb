@@ -48,7 +48,6 @@ export const QUARTERLY_FLOW_FIELDS: readonly NumericStatementField[] = [
   "operatingIncome",
   "netIncome",
   "netIncomeIncludingNoncontrollingInterests",
-  "netIncomeCommonStockholders",
   "ebitda",
   "operatingCashFlow",
   "capitalExpenditure",
@@ -66,14 +65,15 @@ export const QUARTERLY_SNAPSHOT_FIELDS: readonly NumericStatementField[] = [
 ];
 
 const QUARTERLY_AVERAGE_FIELDS: readonly NumericStatementField[] = ["basicShares", "dilutedShares"];
-// Summing reported quarterly EPS is the existing TTM approximation. It does
-// not establish that annual EPS can be disaggregated into a missing quarter.
-const TTM_SUM_FIELDS: readonly NumericStatementField[] = [...QUARTERLY_FLOW_FIELDS, "eps"];
+// Reported common-income allocations and EPS may be summed for TTM, but
+// independently determined annual values cannot establish a missing quarter.
+const TTM_SUM_FIELDS: readonly NumericStatementField[] = [...QUARTERLY_FLOW_FIELDS, "netIncomeCommonStockholders", "eps"];
 
 const NUMERIC_STATEMENT_FIELDS: readonly NumericStatementField[] = [
   ...QUARTERLY_FLOW_FIELDS,
   ...QUARTERLY_SNAPSHOT_FIELDS,
   ...QUARTERLY_AVERAGE_FIELDS,
+  "netIncomeCommonStockholders",
   "eps",
 ];
 
