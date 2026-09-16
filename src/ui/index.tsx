@@ -85,14 +85,13 @@ export const Text = forwardRef<any, ComponentProps<UiHost["Text"]>>((props, ref)
   const { Text: HostText } = useUiHost();
   const rawProps = props as Record<string, unknown>;
   const onMouseDown = rawProps.onMouseDown as ((event?: unknown) => unknown) | undefined;
-  const label = remotePropLabel(rawProps)
-    ?? (typeof rawProps.children === "string" ? rawProps.children : undefined)
-    ?? (typeof rawProps.content === "string" ? rawProps.content : undefined);
   const remoteNodeId = useRemoteUiNode(
     onMouseDown
       ? {
         role: remotePropRole(rawProps, "text"),
-        label,
+        label: remotePropLabel(rawProps)
+          ?? (typeof rawProps.children === "string" ? rawProps.children : undefined)
+          ?? (typeof rawProps.content === "string" ? rawProps.content : undefined),
         actions: {
           press: (input) => onMouseDown(remoteEvent(input)),
         },
