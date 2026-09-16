@@ -1,6 +1,6 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { act, useState } from "react";
-import { apiClient, type CloudProxyStatementListPayload, type CloudProxyStatementPayload } from "../../../api-client";
+import { apiClient, setCloudApiFetchTransport, type CloudProxyStatementListPayload, type CloudProxyStatementPayload } from "../../../api-client";
 import { ApiRequestError } from "../../../api-client/errors";
 import { PaneFooterBar, PaneFooterProvider } from "../../../components/layout/pane/footer";
 import { emitKeypress, testRender } from "../../../renderers/opentui/test-utils";
@@ -11,6 +11,7 @@ import { MemoryPluginPersistence } from "../../../test-support/plugin-persistenc
 import { Box } from "../../../ui";
 import { attachExecutivesPersistence, loadProxyStatement, loadProxyStatements, resetExecutivesPersistence } from "./data";
 import { ExecutivesPane } from "./pane";
+import { parsePublicTickerKey } from "../../../utils/exchanges";
 
 function statement(ticker: string, year: number): CloudProxyStatementPayload {
   return {
@@ -36,6 +37,7 @@ afterEach(async () => {
   setup = undefined;
   for (const undo of restore.splice(0)) undo();
   resetExecutivesPersistence();
+  setCloudApiFetchTransport(null);
 });
 async function settle() {
   for (let i = 0; i < 4; i++) await act(async () => {
@@ -43,17 +45,18 @@ async function settle() {
     await setup!.renderOnce();
   });
 }
-async function mount() {
+async function mount(initialSymbol = "ALPHA") {
   const paneId = "executives:test";
   let selectTicker!: (ticker: string) => void;
   const runtime = createTestPluginRuntime();
   function Harness() {
-    const [symbol, setSymbol] = useState("ALPHA");
+    const [symbol, setSymbol] = useState(initialSymbol);
     selectTicker = setSymbol;
     const state = createInitialState(createTestPaneConfig("/tmp/executives-test", {
       paneId: "executives", instanceId: paneId, binding: { kind: "fixed", symbol },
     }));
-    state.tickers.set(symbol, createTestTicker(symbol));
+    const listing = parsePublicTickerKey(symbol);
+    state.tickers.set(symbol, createTestTicker(listing.symbol, listing.symbol, { exchange: listing.exchange ?? "NASDAQ" }));
     return <TestPaneProvider state={state} paneId={paneId} pluginId="ticker-research" runtime={runtime}>
       <PaneFooterProvider>{footer => <Box width={100} height={24} flexDirection="column">
         <Box height={23}><ExecutivesPane focused width={100} height={23} /></Box>
@@ -73,6 +76,22 @@ async function selectYear(year: number) {
   await act(async () => setup!.mockMouse.click(x + 2, y));
   await settle();
 }
+
+test("a qualified US pane binding reaches issuer proxy list and year endpoints", async () => {
+  const paths: string[] = [];
+  setCloudApiFetchTransport(async (url) => {
+    const path = new URL(url).pathname;
+    paths.push(path);
+    if (path === "/public/proxies/AAPL") return Response.json({
+      company: statement("AAPL", 2026).company, proxies: [statement("AAPL", 2026)],
+    });
+    if (path === "/public/proxies/AAPL/2026") return Response.json(statement("AAPL", 2026));
+    return Response.json({ message: "Unknown ticker" }, { status: 404 });
+  });
+  await mount("AAPL:XNAS");
+  expect(paths).toEqual(["/public/proxies/AAPL", "/public/proxies/AAPL/2026"]);
+  expect(setup!.captureCharFrame()).toContain("AAPL compensation 2026");
+});
 
 test("a different proxy year clears the prior figures and filing action, and a failed year remains recoverable", async () => {
   const earlier = deferred<CloudProxyStatementPayload>();

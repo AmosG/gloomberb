@@ -3,7 +3,7 @@ import type {
   CloudSearchSort,
   CloudTweetQueryType,
 } from "./types";
-import { normalizeSymbol, publicTickerKey } from "../utils/exchanges";
+import { normalizeSymbol, parsePublicTickerKey, publicTickerKey } from "../utils/exchanges";
 
 export type CloudHistoryParams = {
   interval?: string;
@@ -233,11 +233,20 @@ export function cloudCongressHousePath(
   return appendQuery("/cloud/congress/house", search);
 }
 
+const US_ISSUER_LISTINGS = new Set(["NASDAQ", "NYSE", "AMEX", "ARCA", "BATS"]);
+
+/** Issuer endpoints accept US ticker symbols, not the pane's listing key. */
+export function normalizeIssuerResearchTicker(ticker: string): string {
+  const parsed = parsePublicTickerKey(ticker);
+  return parsed.exchange && US_ISSUER_LISTINGS.has(parsed.exchange)
+    ? parsed.symbol : normalizeSymbol(ticker);
+}
+
 export function cloudEarningsCallsPath(
   params: CloudEarningsCallsParams = {},
 ): string {
   const search = new URLSearchParams();
-  if (params.ticker) search.set("ticker", params.ticker);
+  if (params.ticker) search.set("ticker", normalizeIssuerResearchTicker(params.ticker));
   if (params.limit != null) search.set("limit", String(params.limit));
   if (params.offset != null) search.set("offset", String(params.offset));
   if (params.includePending) search.set("includePending", "true");
@@ -250,32 +259,32 @@ export function cloudEarningsTranscriptPath(id: string): string {
 
 /** Executive compensation reads are open: no account, no plan. */
 export function publicProxyStatementsPath(ticker: string): string {
-  return `/public/proxies/${encodeURIComponent(ticker.toUpperCase())}`;
+  return `/public/proxies/${encodeURIComponent(normalizeIssuerResearchTicker(ticker))}`;
 }
 
 export function publicFilingEventsPath(ticker: string, limit?: number): string {
   const search = new URLSearchParams();
   if (limit != null) search.set("limit", String(limit));
   return appendQuery(
-    `/public/events/${encodeURIComponent(ticker.toUpperCase())}`,
+    `/public/events/${encodeURIComponent(normalizeIssuerResearchTicker(ticker))}`,
     search,
   );
 }
 
 export function publicRiskReportsPath(ticker: string): string {
-  return `/public/risks/${encodeURIComponent(ticker.toUpperCase())}`;
+  return `/public/risks/${encodeURIComponent(normalizeIssuerResearchTicker(ticker))}`;
 }
 
 export function publicRiskReportPath(ticker: string, year: number): string {
-  return `/public/risks/${encodeURIComponent(ticker.toUpperCase())}/${year}`;
+  return `/public/risks/${encodeURIComponent(normalizeIssuerResearchTicker(ticker))}/${year}`;
 }
 
 export function publicProxyStatementPath(ticker: string, year: number): string {
-  return `/public/proxies/${encodeURIComponent(ticker.toUpperCase())}/${year}`;
+  return `/public/proxies/${encodeURIComponent(normalizeIssuerResearchTicker(ticker))}/${year}`;
 }
 
 export function cloudSecFilingsPath(params: CloudSecFilingsParams): string {
-  const search = new URLSearchParams({ ticker: params.ticker });
+  const search = new URLSearchParams({ ticker: normalizeIssuerResearchTicker(params.ticker) });
   if (params.limit != null) search.set("limit", String(params.limit));
   if (params.offset != null) search.set("offset", String(params.offset));
   return appendQuery("/cloud/sec/filings", search);
