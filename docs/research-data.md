@@ -46,6 +46,8 @@ Chart controls: select ranges and intervals above the plot; click a legend entry
 
 Statements are the latest available source snapshots and may include restatements. Historical as-of values are not reconstructed. A period end identifies the reporting period, not necessarily when every metric became public.
 
+Extended SEC history includes filed basic and diluted weighted-average share counts, distinct from shares outstanding at a point in time. Quarterly counts use reported quarters, not year-to-date averages. Counts requiring an unresolved or converted split basis are withheld from the SEC projection, as are issuer-wide denominators for ambiguous share-class listings; they are not inferred from EPS or multiplied by a split ratio.
+
 Financial table headers retain reporting currencies and date-source markers: **P** means a provider period date, which may be approximate; **S** means a SEC-corroborated fiscal date. Filing evidence identifies the period without establishing a publication date for every metric. Mixed or missing reporting currencies are not silently converted.
 
 The table's TTM column identifies the ending quarter, including when quarterly coverage lags the latest annual report. Its JSON export retains the four source periods and their date evidence. Derived field availability requires every input used for that field; opening cash follows the first quarter and closing balances follow the last. Filing dates do not fill missing publication dates for unrelated fields.

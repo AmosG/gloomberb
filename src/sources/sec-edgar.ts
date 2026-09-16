@@ -119,6 +119,8 @@ const COMPANY_FACTS_STATEMENT_FIELDS: CompanyFactsStatementField[] = [
     periodType: "instant",
   },
   { field: "eps", tags: ["EarningsPerShareDiluted"], units: ["USD/shares"], periodType: "duration" },
+  { field: "basicShares", tags: ["WeightedAverageNumberOfSharesOutstandingBasic"], units: ["shares"], periodType: "duration" },
+  { field: "dilutedShares", tags: ["WeightedAverageNumberOfDilutedSharesOutstanding"], units: ["shares"], periodType: "duration" },
 ];
 
 function normalize(value?: string): string {
@@ -572,6 +574,19 @@ function fillCompanyFactsStatementRows(
 function finalizeCompanyFactsStatements(rows: Map<string, FinancialStatement>, selectedFacts: Map<string, CompanyFactsEntry>, resolveEps: ReturnType<typeof createSecEpsBasisResolver>): FinancialStatement[] {
   const statements = Array.from(rows.values()).sort((left, right) => left.date.localeCompare(right.date));
   for (const statement of statements) {
+    for (const field of ["basicShares", "dilutedShares"] as const) {
+      const fact = selectedFacts.get(`${statement.date}:${field}`);
+      if (!fact) continue;
+      // Use the accession's proved basis, never the EPS-specific numeric result:
+      // reported share counts cannot be divided or multiplied as EPS values.
+      const { basis, availableAt } = resolveEps(fact);
+      if (basis && (basis.status !== "split-adjusted" || basis.factor !== 1)) {
+        delete statement[field];
+        if (statement.fieldAvailability) delete statement.fieldAvailability[field];
+      } else if (basis && availableAt) {
+        statement.fieldAvailability = { ...statement.fieldAvailability, [field]: availableAt };
+      }
+    }
     const epsFact = selectedFacts.get(`${statement.date}:eps`);
     if (epsFact) {
       const normalized = resolveEps(epsFact);
@@ -775,8 +790,10 @@ export class SecEdgarClient {
     const statements = parseCompanyFactsFinancialStatements(payload);
     if (/[.-]/.test(normalizedTicker)) {
       for (const row of [...statements.annualStatements, ...statements.quarterlyStatements]) {
-        delete row.eps;
-        if (row.fieldAvailability) delete row.fieldAvailability.eps;
+        for (const field of ["eps", "basicShares", "dilutedShares"] as const) {
+          delete row[field];
+          if (row.fieldAvailability) delete row.fieldAvailability[field];
+        }
       }
     }
     return statements;
