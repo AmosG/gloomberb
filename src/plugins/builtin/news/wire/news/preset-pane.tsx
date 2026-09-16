@@ -54,7 +54,11 @@ export function NewsPresetPane({
     ? sortPreference
     : defaultSort;
   const loadNewsStory = useLoadNewsStory();
-  const { detailArticle, detailLoading, detailError, openArticle, closeDetail } = useNewsArticleDetail(articles, loadNewsStory);
+  const { detailArticle, detailLoading, detailError, openArticle, closeDetail } = useNewsArticleDetail(
+    articles,
+    loadNewsStory,
+    `${paneKey}:openArticleId`,
+  );
   const { readArticleIds, markArticleRead } = useNewsReadState();
 
   useNewsArticleFooter({

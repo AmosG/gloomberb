@@ -49,7 +49,11 @@ function TickerNewsView({ width, height, focused }: { width: number; height: num
   const { readArticleIds, markArticleRead } = useNewsReadState();
   const { scrollRef, onBodyScrollActivity } = useNewsTableLoadMore(newsQuery, newsState);
   const loadNewsStory = useLoadNewsStory();
-  const { detailArticle, detailLoading, detailError, openArticle, closeDetail } = useNewsArticleDetail(news, loadNewsStory);
+  const { detailArticle, detailLoading, detailError, openArticle, closeDetail } = useNewsArticleDetail(
+    news,
+    loadNewsStory,
+    `openArticleId:${symbol}`,
+  );
   const loading = newsState.phase === "loading"
     || (newsState.phase === "refreshing" && news.length === 0);
   const error = newsState.error;

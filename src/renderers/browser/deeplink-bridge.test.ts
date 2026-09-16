@@ -20,12 +20,14 @@ describe("browser social share handoff", () => {
     bridge.subscribe(({ url }) => seen.push(url));
     expect(seen).toEqual(["gloomberb://ticker/VOD%3AXLON?tab=earnings-calls"]);
   });
-  test("maps a valid pane share query to the common deep-link runtime", () => {
+  test("maps a valid pane share query to the common deep-link runtime and consumes it from the address", () => {
     const id = "0123456789abcdef0123456789abcdef";
+    const replaced: string[] = [];
     Object.defineProperty(globalThis, "window", {
       configurable: true,
       value: {
-        location: { search: `?share=${id}` },
+        location: { search: `?share=${id}&theme=dark`, pathname: "/", hash: "" },
+        history: { state: null, replaceState(_state: unknown, _title: string, url: string) { replaced.push(url); } },
         addEventListener() {},
         removeEventListener() {},
       },
@@ -33,6 +35,8 @@ describe("browser social share handoff", () => {
     const seen: string[] = [];
     createBrowserDeepLinkBridge().subscribe((deeplink) => seen.push(deeplink.url));
     expect(seen).toEqual([`gloomberb://share/${id}`]);
+    // A reload must not open a second copy of the shared pane.
+    expect(replaced).toEqual(["/?theme=dark"]);
   });
 
   test("prefers a shared layout query", () => {

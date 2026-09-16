@@ -3,6 +3,7 @@ import {
 } from "../layout-marketplace/payload";
 import type { PluginRegistry } from "../plugins/registry";
 import type { PaneInstanceConfig } from "../types/config";
+import type { TickerRecord } from "../types/ticker";
 import { parseSharePayload, type PaneShareData, type SharePayload } from "./payload";
 
 export function buildPaneSharePayload(
@@ -10,6 +11,7 @@ export function buildPaneSharePayload(
   pane: PaneInstanceConfig,
   paneState: Record<string, unknown> = {},
   resolvedTicker?: string | null,
+  tickers?: ReadonlyMap<string, TickerRecord>,
 ): Extract<SharePayload, { kind: "pane" }> | null {
   const def = pluginRegistry.panes.get(pane.paneId);
   if (!def) return null;
@@ -19,6 +21,7 @@ export function buildPaneSharePayload(
       paneState,
       pluginRegistry.panes,
       resolvedTicker,
+      { tickers },
     );
     const instance = layout.layout.instances[0]!;
     const description = [...pluginRegistry.paneTemplates.values()]

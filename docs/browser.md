@@ -10,7 +10,7 @@ Open [term.gloom.sh](https://term.gloom.sh) and sign in with a free Gloom Cloud 
 - Free accounts receive rate-limited, 15-minute-delayed Gloom Cloud market data. Pro accounts receive realtime data.
 - Chat is read-only until the account's email is verified.
 - Configuration, tickers, layouts, session state, and plugin state are stored in the browser.
-- Public share pages require no account. Creating a share or deleting one you own requires sign-in.
+- A share link opens the hosted terminal on the shared pane, in the state the sender was looking at: a chart keeps its drawings and zoom, a news pane its open story, a filings pane its open document. Opening one requires no account; panes served by Gloom Cloud (SEC filings, insider transactions) ask the receiver to sign in. Creating a share requires a verified Gloom Cloud account.
 
 ## Plugins
 
@@ -22,6 +22,6 @@ The browser app does not install plugins. Code you pick would run on the origin 
 
 The browser build omits brokers and native integrations, filesystem notes, local AI, plugin installation, updater/debug tools, application menus, native window controls, pop-out native windows, and native context menus.
 
-Modules whose feeds the build has no path to are also unavailable: RSS/Substack, market movers, dividend/ownership/SEC panes, earnings, and TV.
+Modules whose feeds the build has no path to are also unavailable: custom RSS feeds and Substack, market movers, ownership (13F, holders, short interest), earnings, and TV.
 
 For local development, validation, and deployment details, see [Contributing](../CONTRIBUTING.md#browser-development).

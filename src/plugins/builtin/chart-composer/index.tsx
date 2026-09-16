@@ -4,7 +4,8 @@ import type {
   PaneTemplateCreateOptions,
   PaneTemplateDef,
 } from "../../../types/plugin";
-import { CHART_COMPOSER_PANE_ID } from "../../../types/config";
+import { CHART_COMPOSER_PANE_ID, type PaneInstanceConfig } from "../../../types/config";
+import type { TickerRecord } from "../../../types/ticker";
 import { parseTickerListInput } from "../../../tickers/list";
 import { canonicalExchange, parsePublicTickerKey, publicTickerKey } from "../../../utils/exchanges";
 import { tickerInstrumentLabel } from "../../../tickers/instrument-label";
@@ -110,6 +111,43 @@ function chartTitle(spec: ChartSpec, prefix = "G"): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * A series authored as a bare symbol resolves its venue through the sender's
+ * ticker records at render time. Those records do not travel, so the venue is
+ * written into the spec before the pane leaves the device. Broker contract
+ * details stay local; only the public exchange is pinned.
+ */
+function pinChartSpecListings(spec: ChartSpec, tickers: ReadonlyMap<string, TickerRecord>): ChartSpec {
+  let changed = false;
+  const series = spec.series.map((entry) => {
+    if (entry.source.kind !== "security" || entry.source.instrument.exchange?.trim()) return entry;
+    const symbol = entry.source.instrument.symbol.trim().toUpperCase();
+    const exchange = tickers.get(symbol)?.metadata.exchange?.trim();
+    if (!exchange) return entry;
+    changed = true;
+    return {
+      ...entry,
+      source: {
+        ...entry.source,
+        instrument: { ...entry.source.instrument, exchange },
+      },
+    };
+  });
+  return changed ? { ...spec, series } : spec;
+}
+
+function prepareChartPaneForShare(
+  pane: PaneInstanceConfig,
+  { tickers }: { tickers: ReadonlyMap<string, TickerRecord> },
+): PaneInstanceConfig {
+  const spec = parseChartSpec(pane.settings?.[CHART_SPEC_SETTING_KEY]);
+  if (!spec) return pane;
+  const pinned = pinChartSpecListings(spec, tickers);
+  return pinned === spec
+    ? pane
+    : { ...pane, settings: { ...pane.settings, [CHART_SPEC_SETTING_KEY]: pinned } };
 }
 
 interface SharedChartState {
@@ -365,6 +403,7 @@ export const chartComposerModule: PluginModule = {
     defaultPosition: "right",
     defaultMode: "floating",
     defaultFloatingSize: { width: 100, height: 32 },
+    portableShare: { prepare: prepareChartPaneForShare },
     quickSettings: [LIVE_STREAMING_QUICK_SETTING],
     settings: (context) => withLiveStreamingSetting(
       buildChartComposerPaneSettingsDef(

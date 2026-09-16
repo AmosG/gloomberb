@@ -41,6 +41,7 @@ async function mount(
   fetchNews: () => Promise<NewsArticle[]>,
   fetchNewsStory: (id: string) => Promise<NewsArticle | null>,
   fallback?: (id: string) => Promise<NewsArticle | null>,
+  paneState: Record<string, unknown> = {},
 ) {
   service = new NewsService();
   service.register(newsProvider({
@@ -55,6 +56,7 @@ async function mount(
   const config = createTestPaneConfig("/tmp/news-controlled-unused", { instanceId: "news-feed", paneId: "news-feed" });
   const initial = createInitialState(config);
   initial.focusedPaneId = "news-feed";
+  if (Object.keys(paneState).length > 0) initial.paneState = { "news-feed": { pluginState: { news: paneState } } };
   const runtime = createStatefulTestPluginRuntime();
   function Harness() {
     const [state, dispatch] = useReducer(appReducer, initial);
@@ -109,6 +111,30 @@ test("reopening a temporarily unavailable story retries detail", async () => {
   const frame = capture();
   expect(calls).toBe(2);
   expect(frame).toContain("Timeline cash consideration 1");
+});
+
+test("a restored or shared pane opens on its story even when the feed no longer lists it", async () => {
+  const requested: string[] = [];
+  await mount(
+    async () => [story("other", "Unrelated issuer deal")],
+    async (id) => { requested.push(id); return id === "acme" ? story("acme", "Acme plans acquisition", 1, true) : null; },
+    undefined,
+    { "feed:openArticleId": "acme" },
+  );
+  const frame = capture();
+  expect(requested).toEqual(["acme"]);
+  expect(frame).toContain("Acme plans acquisition");
+  expect(frame).toContain("Timeline cash consideration 1");
+  await key("escape");
+  expect(capture()).toContain("Unrelated issuer deal");
+  expect(capture()).not.toContain("Acme plans acquisition");
+});
+
+test("a story id nobody can explain is dropped rather than left loading", async () => {
+  await mount(async () => [story()], async () => null, undefined, { "feed:openArticleId": "vanished" });
+  const frame = capture();
+  expect(frame).toContain("Acme plans acquisition");
+  expect(frame).not.toContain("loading");
 });
 
 test("detail source must return the selected story identity", async () => {
