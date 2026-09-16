@@ -54,6 +54,8 @@ import {
   resolveInitialAppConfig,
 } from "./app/app-bootstrap-state";
 import { scheduleConfigSave } from "./state/config-save-scheduler";
+import { LOW_PRIORITY_CONFIG_SAVE_DEBOUNCE_MS } from "./state/persist-scheduler";
+import { savedLayoutsDifferOnlyInMirror } from "./core/state/app/layout";
 import { measurePerf } from "./utils/perf-marks";
 import { useAppLanguage } from "./i18n/react";
 import { AppLanguageConfigObserver } from "./app/language-observer";
@@ -351,14 +353,20 @@ function AppInner({
   // Wire up app-level notifications.
   pluginRegistry.notifyFn = appNotifier.notify;
 
-  // Persist layout changes (switching, saving, deleting, renaming layouts)
+  // Persist layout changes (switching, saving, deleting, renaming layouts).
+  // The saved layouts also mirror live pane state and focus, so they change on
+  // every cursor move; those updates are written on the low-priority delay
+  // rather than paying a full config serialization per keystroke.
   const prevLayouts = useRef(state.config.layouts);
   useEffect(() => {
-    if (state.config.layouts !== prevLayouts.current) {
-      prevLayouts.current = state.config.layouts;
-      scheduleConfigSave(state.config);
-    }
-  }, [state.config.layouts, state.config]);
+    if (state.config.layouts === prevLayouts.current) return;
+    const mirrorOnly = savedLayoutsDifferOnlyInMirror(prevLayouts.current, state.config.layouts);
+    prevLayouts.current = state.config.layouts;
+    scheduleConfigSave(
+      () => stateRef.current.config,
+      mirrorOnly ? { delayMs: LOW_PRIORITY_CONFIG_SAVE_DEBOUNCE_MS } : {},
+    );
+  }, [state.config.layouts, state.config, stateRef]);
 
   // Emit ticker:selected events based on focused pane context.
   const prevSelectedRef = useRef(focusedTickerSymbol);

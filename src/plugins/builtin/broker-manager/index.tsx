@@ -9,6 +9,7 @@ import { useAppLanguage } from "../../../i18n/react";
 import {
   useAppDispatch,
   useAppSelector,
+  usePaneAppConfig,
 } from "../../../state/app/context";
 import { colors } from "../../../theme/colors";
 import type { BrokerAdapter } from "../../../types/broker";
@@ -34,7 +35,7 @@ import {
 export function BrokersPane({ focused, width, height }: PaneProps) {
   const language = useAppLanguage();
   const dispatch = useAppDispatch();
-  const config = useAppSelector((state) => state.config);
+  const config = usePaneAppConfig();
   const brokerAccounts = useAppSelector((state) => state.brokerAccounts);
   const { getBrokerAdapter } = usePluginBrokerActions();
   const [selectedIndex, setSelectedIndex] = useState(0);

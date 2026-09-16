@@ -14,7 +14,7 @@ import type { DataTableColumn } from "../../../components/ui/data-table/types";
 import { EmptyState, PaneStatusBody, usePaneFooter } from "../../../components";
 import { useAsyncResource } from "../../../react/async-resource";
 import { useShortcut } from "../../../react/input";
-import { useAppSelector, usePaneInstance } from "../../../state/app/context";
+import { usePaneInstance, usePaneAppConfig } from "../../../state/app/context";
 import { colors } from "../../../theme/colors";
 import type { PaneProps } from "../../../types/plugin";
 import { Box, Text } from "../../../ui";
@@ -60,7 +60,7 @@ function columnsFor(spec: ViewSpec, loaded: LoadedView | null): Column[] {
 
 export function CustomViewPane({ focused, width, height }: PaneProps) {
   const instance = usePaneInstance();
-  const config = useAppSelector((state) => state.config);
+  const config = usePaneAppConfig();
   const { selectTicker } = usePluginPaneActions();
   const { notify } = usePluginAppActions();
   const dialog = useDialog();

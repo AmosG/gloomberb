@@ -2,7 +2,7 @@ import { Box, Span, Text, useContextMenu, useRendererHost, useUiCapabilities } f
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { t } from "../../i18n";
 import { useShortcut, useViewport } from "../../react/input";
-import { resolveTickerForPane, useAppDispatch, useAppSelector } from "../../state/app/context";
+import { resolveTickerForPane, useAppDispatch, useAppSelector, usePaneAppConfig } from "../../state/app/context";
 import type { DesktopWindowBridge } from "../../types/desktop-window";
 import { findPaneInstance } from "../../types/config";
 import { isPaneLocked, PANE_LOCK_SETTING_KEY } from "../../pane-settings";
@@ -45,7 +45,7 @@ export function DetachedPaneShell({ pluginRegistry, desktopWindowBridge }: Detac
   const dispatch = useAppDispatch();
   const rendererHost = useRendererHost();
   const { showContextMenu } = useContextMenu();
-  const config = useAppSelector((state) => state.config);
+  const config = usePaneAppConfig();
   const paneState = useAppSelector((state) => state.paneState);
   const inputCaptured = useAppSelector((state) => state.inputCaptured);
   const doubleEscapeCloseRef = useRef(createDoubleEscapeCloseState());
