@@ -1601,7 +1601,7 @@ export type ThesisSignalVerdict = "supports" | "challenges" | "breaks" | "neutra
 export type ThesisSignalStatus = "open" | "accepted" | "dismissed" | "snoozed" | "noted";
 
 export interface ThesisSignalSource {
-  kind: "news" | "filing" | "metric" | "review" | "user";
+  kind: "news" | "filing" | "transcript" | "metric" | "review" | "user";
   id?: string;
   title?: string;
   url?: string;
