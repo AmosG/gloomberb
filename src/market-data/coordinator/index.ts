@@ -61,6 +61,12 @@ import {
   type QuoteSubscriptionRequest,
 } from "./quotes";
 
+// A store hands out a fresh idle entry for every key it has never seen, so
+// two idle reads of the same key must count as the same entry.
+function sameQueryEntry<T>(left: QueryEntry<T>, right: QueryEntry<T>): boolean {
+  return left === right || (left.phase === "idle" && right.phase === "idle" && left.data === null && right.data === null);
+}
+
 export class MarketDataCoordinator {
   private readonly events = new MarketDataCoordinatorEvents();
   private readonly inFlight = new Map<string, Promise<unknown>>();
@@ -143,12 +149,36 @@ export class MarketDataCoordinator {
     return this.fxStore.get(buildFxKey(currency));
   }
 
+  /**
+   * Building the merged view re-normalizes the whole price history, and every
+   * consumer asks for it on every render. The result is kept per instrument
+   * until one of the three store entries is replaced, so callers also get a
+   * stable identity to memoize on.
+   */
+  private readonly financialsSnapshotCache = new Map<string, {
+    snapshotEntry: QueryEntry<TickerFinancials>;
+    quoteEntry: QueryEntry<Quote>;
+    chartEntry: QueryEntry<PricePoint[]>;
+    financials: TickerFinancials | null;
+  }>();
+
   getTickerFinancialsSync(instrument: InstrumentRef): TickerFinancials | null {
-    return buildTickerFinancialsSnapshot(
-      this.getSnapshotEntry(instrument),
-      this.getQuoteEntry(instrument),
-      this.getChartEntry(createBaselineChartRequest(instrument)),
-    );
+    const key = buildSnapshotKey(instrument);
+    const snapshotEntry = this.getSnapshotEntry(instrument);
+    const quoteEntry = this.getQuoteEntry(instrument);
+    const chartEntry = this.getChartEntry(createBaselineChartRequest(instrument));
+    const cached = this.financialsSnapshotCache.get(key);
+    if (
+      cached
+      && sameQueryEntry(cached.snapshotEntry, snapshotEntry)
+      && sameQueryEntry(cached.quoteEntry, quoteEntry)
+      && sameQueryEntry(cached.chartEntry, chartEntry)
+    ) {
+      return cached.financials;
+    }
+    const financials = buildTickerFinancialsSnapshot(snapshotEntry, quoteEntry, chartEntry);
+    this.financialsSnapshotCache.set(key, { snapshotEntry, quoteEntry, chartEntry, financials });
+    return financials;
   }
 
   primeCachedFinancials(entries: Array<{ instrument: InstrumentRef; financials: TickerFinancials }>): void {
