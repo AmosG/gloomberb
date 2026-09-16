@@ -353,11 +353,21 @@ export function ThesisDetail({ thesis, width, height, focused, footerId, onDelet
     if (!row) return null;
     const fg = state.selected ? colors.selectedText : colors.text;
     const dim = state.selected ? colors.selectedText : colors.textDim;
+    // Every row is a full-width row box, so the DOM host lays headings and
+    // prose out flush left like the pillar rows instead of centering them.
     if (row.kind === "heading") {
-      return <Text fg={colors.textDim} attributes={TextAttributes.BOLD}>{truncateToDisplayWidth(row.label, contentWidth)}</Text>;
+      return (
+        <Box flexDirection="row" width={contentWidth}>
+          <Text fg={colors.textDim} attributes={TextAttributes.BOLD}>{truncateToDisplayWidth(row.label, contentWidth)}</Text>
+        </Box>
+      );
     }
     if (row.kind === "empty" || row.kind === "text") {
-      return <Text fg={colors.textDim}>{`   ${truncateToDisplayWidth(row.text, contentWidth - 3)}`}</Text>;
+      return (
+        <Box flexDirection="row" width={contentWidth}>
+          <Text fg={colors.textDim}>{`   ${truncateToDisplayWidth(row.text, contentWidth - 3)}`}</Text>
+        </Box>
+      );
     }
     if (row.kind === "pillar") {
       const pillar = row.item;
