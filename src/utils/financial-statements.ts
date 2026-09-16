@@ -1,14 +1,16 @@
 import type { FinancialStatement } from "../types/financials";
+import { copyIncomeField, incomeFieldOwner, INCOME_STATEMENT_FIELDS, isIncomeStatementField } from "./income-statement";
 
 export const FINANCIAL_VINTAGE_NOTICE = "Latest available statements may include restatements. Historical as-of values are not reconstructed.";
 export const SEC_EPS_BASIS_NOTICE = "SEC EPS uses corroborated split-adjusted share bases. Unverified bases are unavailable.";
 
-const STATEMENT_METADATA_KEYS = new Set(["date", "dateSource", "providerDate", "dateEvidence", "currency", "availableAt", "fieldAvailability", "epsBasis"]);
+const STATEMENT_METADATA_KEYS = new Set(["date", "dateSource", "providerDate", "dateEvidence", "currency", "availableAt", "fieldAvailability", "epsBasis", "fieldSources", "unavailableFields"]);
 const NEARBY_PERIOD_END_MS = 7 * 24 * 60 * 60 * 1_000;
 
 /** An explicit field map is authoritative: omitted fields have unknown availability. */
 export function statementFieldAvailability(row: FinancialStatement | undefined, field: string): string | undefined {
-  const value = row?.fieldAvailability !== undefined ? row.fieldAvailability?.[field] : row?.availableAt;
+  const filed = isIncomeStatementField(field) ? row?.fieldSources?.[field]?.filed : undefined;
+  const value = filed ?? (row?.fieldAvailability !== undefined ? row.fieldAvailability?.[field] : row?.availableAt);
   return value && Number.isFinite(Date.parse(value)) ? value : undefined;
 }
 
@@ -152,9 +154,31 @@ export function mergeFinancialStatementRows(
     if (dateOwner?.dateEvidence) merged.dateEvidence = dateOwner.dateEvidence;
     if (merged.dateSource === "sec" && row.date !== merged.date && !merged.providerDate) merged.providerDate = row.date;
     const fieldAvailability: Record<string, string> = {};
-    const keys = metricKeys(row, fallback);
+    const keys = [...new Set([...metricKeys(row, fallback), ...INCOME_STATEMENT_FIELDS])];
 
     for (const key of keys) {
+      // Nearby vendor dates alone do not corroborate the identity of an income
+      // observation. Retain the primary's own value and attribution together.
+      if (isIncomeStatementField(key) && fallback && row.date !== fallback.date
+        && (row.fieldSources?.[key] || fallback.fieldSources?.[key]
+          || row.unavailableFields?.includes(key) || fallback.unavailableFields?.includes(key))) {
+        const owner = row.date === merged.date ? row : fallback;
+        copyIncomeField(merged, owner, key);
+        if (typeof merged[key] === "number") {
+          const available = statementFieldAvailability(owner, key);
+          if (available) fieldAvailability[key] = available;
+        }
+        continue;
+      }
+      const incomeOwner = isIncomeStatementField(key) ? incomeFieldOwner(key, row, fallback) : undefined;
+      if (incomeOwner && isIncomeStatementField(key)) {
+        copyIncomeField(merged, incomeOwner, key);
+        if (typeof merged[key] === "number") {
+          const available = statementFieldAvailability(incomeOwner, key);
+          if (available) fieldAvailability[key] = available;
+        }
+        continue;
+      }
       // A refreshed SEC decision supersedes precisely the original EPS still
       // held by a primary cache; unrelated provider values keep their priority.
       if (key === "eps" && correctedFallbackEps) {

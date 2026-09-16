@@ -82,6 +82,14 @@ Relative valuation retains stale fundamentals for inspection and marks them thro
 
 The current overview and peer table do not provide P/B, P/tangible book, CET1, or FFO/AFFO multiples. Financial-statement common equity and ordinary shares are dated balance-sheet inputs; weighted-average EPS shares belong to an earnings period and cannot replace period-end shares in a book-value calculation. A provider's tangible-book amount may differ from the bank's reported tangible common equity because of its adjustment policy. Compare issuer definitions and periods before combining these values. REIT GAAP P/E and generic cash-flow yield do not establish FFO/AFFO valuation or distribution coverage.
 
+### SEC income attribution
+
+SEC `NetIncomeLoss` supplies parent-attributable net income. `ProfitLoss` is shown separately as **Income incl. NCI**, and `NetIncomeLossAvailableToCommonStockholdersBasic` supplies **Income Common**. These measures are not interchangeable. A period with SEC income coverage retains its concept, unit, accession, start/end dates and filing date per field in structured financial exports.
+
+Missing income concepts in those periods remain unavailable through provider/cache merges and derived fourth quarters. Consolidated income is not substituted for parent income. When common income is explicitly unavailable, parent income is not used to estimate earnings per common share or P/E; independently reported EPS remains usable. Income revisions use their own filing evidence, separately from other fields on the same row. Undated or generic vendor income does not establish an SEC attribution basis.
+
+This separation does not resolve cross-filing accounting revisions or justify annual-minus-quarter arithmetic for other fields. Latest source data can include restatements; historical publication-time vintages are not reconstructed.
+
 ## Insider filings
 
 INS retains Form 4 and Form 4/A disclosures separately, with their filing accession, source filing date, transaction dates, reporting owners and explanations. An amendment is labeled in the list; opening it retains its declared original filing date, footnotes and remarks. The existing filing action opens the SEC source. Reports preserve those fields and the transaction's footnote references.

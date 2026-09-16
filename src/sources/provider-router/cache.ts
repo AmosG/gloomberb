@@ -11,7 +11,7 @@ import { isPriceHistoryStaleForCurrentWindow } from "../../utils/price-history";
 import { brokerContractIdentityKey } from "../../utils/instrument-identity";
 
 const MARKET_NAMESPACE = "market";
-const FINANCIALS_SCHEMA_VERSION = 8;
+const FINANCIALS_SCHEMA_VERSION = 9;
 const QUOTE_SCHEMA_VERSION = 2;
 
 const DEFAULT_CACHE_POLICIES = {
@@ -188,6 +188,14 @@ export function listCachedResources<T>(
       // AMEX data and explicitly requested AMEX listings remain reusable.
       if (!requestedExchange && declaredExchange === "AMEX"
         && record.schemaVersion < (kind === "financials" ? 8 : 2)) return false;
+    }
+    // Earlier SEC projections used consolidated/common income as parent income.
+    // Refetch the filing evidence; unrelated vendor statements remain usable.
+    if (kind === "financials" && record.schemaVersion < 9) {
+      const value = record.value as TickerFinancials;
+      if ([...(value.annualStatements ?? []), ...(value.quarterlyStatements ?? [])]
+        .some((row) => row.dateSource === "sec"
+          && (row.netIncome !== undefined || row.netIncomeCommonStockholders !== undefined))) return false;
     }
     // Older SEC projections can mix pre/post-split EPS in one long history.
     // Refresh the source evidence instead of relabeling old numbers locally.

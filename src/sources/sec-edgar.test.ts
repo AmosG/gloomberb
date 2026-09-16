@@ -159,9 +159,14 @@ describe("parseCompanyFactsFinancialStatements", () => {
       ] } },
     } } });
     expect(statements.annualStatements.map(({ date, netIncome, fieldAvailability }) => ({ date, netIncome, availableAt: fieldAvailability?.netIncome }))).toEqual([
-      { date: "2017-09-03", netIncome: 2_714_000_000, availableAt: "2018-10-26" },
+      { date: "2017-09-03", netIncome: undefined, availableAt: undefined },
       { date: "2018-09-02", netIncome: 3_140_000_000, availableAt: "2020-10-07" },
     ]);
+    expect(statements.annualStatements[0]).toMatchObject({
+      netIncomeIncludingNoncontrollingInterests: 2_714_000_000,
+      fieldAvailability: { netIncomeIncludingNoncontrollingInterests: "2018-10-26" },
+      unavailableFields: ["netIncome", "netIncomeCommonStockholders"],
+    });
   });
 
   test("separates annual facts from quarter disclosures in the same 10-K and fiscal-year label", () => {
