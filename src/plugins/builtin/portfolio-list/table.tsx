@@ -56,6 +56,7 @@ export function PortfolioTickerTable({
   sortedTickers,
   cursorSymbol,
   setCursorSymbol,
+  onCursorChange,
   financialsMap,
   columnContext,
   flashSymbols,
@@ -74,6 +75,7 @@ export function PortfolioTickerTable({
   sortedTickers: TickerRecord[];
   cursorSymbol: string | null;
   setCursorSymbol: (symbol: string) => void;
+  onCursorChange?: (ticker: TickerRecord, index: number) => void;
   financialsMap: Map<string, TickerFinancials>;
   columnContext: ColumnContext;
   flashSymbols: Map<string, QuoteFlashDirection>;
@@ -113,6 +115,7 @@ export function PortfolioTickerTable({
       tickers={sortedTickers}
       cursorSymbol={cursorSymbol}
       setCursorSymbol={setCursorSymbol}
+      onCursorChange={onCursorChange}
       resolveCell={resolveCell}
       financialsMap={financialsMap}
       flashSymbols={flashSymbols}

@@ -20,12 +20,14 @@ import {
   usePaneSettingValue,
   usePaneStateValue,
   type CollectionSortPreference,
+  usePaneAppConfig,
 } from "../../../../state/app/context";
 import { selectEffectiveExchangeRates } from "../../../../utils/exchange-rate-map";
 import { summarizeFxRates, fxStatusLabel } from "../../../../utils/fx-status";
 import { getSharedMarketDataCoordinator } from "../../../../market-data/coordinator";
 import type { TickerRecord } from "../../../../types/ticker";
 import type { PaneProps } from "../../../../types/plugin";
+import type { InstrumentRef } from "../../../../market-data/request-types";
 import { calculatePortfolioSummaryTotals, resolveCollectionSortPreference, type ColumnContext } from "../metrics";
 import {
   PortfolioCashMarginDrawer,
@@ -45,6 +47,7 @@ import { useQuoteFlashMap } from "../../../../components/quote-flash";
 import { PortfolioTickerTable } from "../table";
 import { PortfolioGrid } from "../grid";
 import { useThrottledCursorSymbol } from "../use-throttled-cursor-symbol";
+import { useCursorNeighborPrefetch } from "../use-cursor-neighbor-prefetch";
 import { isManualPortfolio } from "../mutations";
 import { QuickAddTickerInput, type QuickAddCollectionKind } from "../quick-add";
 import {
@@ -63,7 +66,7 @@ export function PortfolioListPane({ focused, width, height }: PaneProps) {
   const activateTicker = useTickerSourceActivate();
   const paneInstance = usePaneInstance();
   const appActive = useAppActive();
-  const config = useAppSelector((state) => state.config);
+  const config = usePaneAppConfig();
   const tickersBySymbol = useAppSelector((state) => state.tickers);
   const cachedFinancials = useAppSelector((state) => state.financials);
   const cachedExchangeRates = useAppSelector((state) => state.exchangeRates);
@@ -201,6 +204,20 @@ export function PortfolioListPane({ focused, width, height }: PaneProps) {
 
   const selectedIdx = sortedTickers.findIndex((ticker) => ticker.metadata.ticker === cursorSymbol);
   const safeSelectedIdx = selectedIdx >= 0 ? selectedIdx : 0;
+
+  const prefetchInstrument = useCallback((instrument: InstrumentRef) => {
+    getSharedMarketDataCoordinator()?.prefetchTicker(instrument);
+  }, []);
+  const noteCursorForPrefetch = useCursorNeighborPrefetch({
+    tickers: sortedTickers,
+    cursorSymbol,
+    portfolioId: financialsInstrumentOptions.portfolioId,
+    enabled: appActive,
+    prefetch: prefetchInstrument,
+  });
+  const handleCursorChange = useCallback((ticker: TickerRecord) => {
+    noteCursorForPrefetch(ticker.metadata.ticker);
+  }, [noteCursorForPrefetch]);
 
   const showCashDrawer = !paneSettings.hideCash && !!(isPortfolioTab && currentPortfolio?.brokerInstanceId && accountState);
   const requestedDrawerHeight = showCashDrawer
@@ -455,6 +472,7 @@ export function PortfolioListPane({ focused, width, height }: PaneProps) {
           sortedTickers={sortedTickers}
           cursorSymbol={cursorSymbol}
           setCursorSymbol={setCursorSymbol}
+          onCursorChange={handleCursorChange}
           financialsMap={financialsMap}
           columnContext={columnContext}
           flashSymbols={flashSymbols}
