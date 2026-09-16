@@ -230,8 +230,8 @@ Open it with `PL` in the command bar. It lists what you have installed, what the
 | `e` | Enable or disable it |
 | `s` | Open its setup form |
 | `p` | Open a pane it provides |
-| `l` | Open the debug log filtered to it |
-| `c` | Cycle the category filter |
+| `d` | Open the debug log filtered to it |
+| `h` `l` or arrows | Move between category tabs |
 | `b` | Show or hide built-in modules |
 | `/` | Search |
 
