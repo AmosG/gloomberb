@@ -308,3 +308,42 @@ test.each(["invalid", "unknown-currency"] as const)("direct %s integrity failure
   expect(newSecurity).toContain("7.00%");
   expect(newSecurity).not.toContain(cashLabel);
 });
+
+test("short dividend panes keep history navigable while paging the complete summary", async () => {
+  const { buildDividendMetrics } = await import("./client");
+  const { toDividendPayment } = await import("./client");
+  const now = new Date();
+  const payments = Array.from({ length: 24 }, (_, index) => {
+    const date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - index, 1));
+    return toDividendPayment(date.toISOString().slice(0, 10), 0.25 + index / 100, "USD")!;
+  });
+  const data = {
+    payments, currency: "USD", price: 50, historyAvailable: true,
+    metrics: { ...buildDividendMetrics(payments, null, 50), nextPayDate: new Date("2030-01-15T00:00:00Z") },
+  };
+  const loader = async () => data;
+  const id = "short-dividend-summary";
+  const state = createInitialState(createTestPaneConfig("/tmp/short-dividend-summary", {
+    instanceId: id, paneId: "dividend-yield", binding: { kind: "fixed", symbol: "INCOME" },
+  }));
+  state.tickers.set("INCOME", createTestTicker("INCOME"));
+  const runtime = createTestPluginRuntime();
+  await act(async () => {
+    setup = await testRender(<TestPaneProvider state={state} paneId={id} pluginId="dividend-yield" runtime={runtime}>
+      <DividendYieldPane focused width={40} height={9} loadData={loader} />
+    </TestPaneProvider>, { width: 40, height: 9 });
+  });
+  const latest = payments[0]!.exDate.toISOString().slice(0, 10);
+  expect(await frame()).toContain(latest);
+  expect(await frame()).toContain("TTM Cash Yield");
+  for (let index = 0; index < 2; index++) await emitKeypress(setup!, { name: "pagedown" }, { trackPropagation: true });
+  expect(await frame()).toContain("Next Pay");
+  expect(await frame()).toContain("2030-01-15");
+  expect(await frame()).toContain(latest);
+  await emitKeypress(setup!, Array.from({ length: 8 }, () => ({ name: "down" })), { trackPropagation: true });
+  expect((await frame()).split("EX-DATE")[1]).not.toContain(latest);
+  expect(await frame()).toContain(payments[8]!.exDate.toISOString().slice(0, 10));
+  for (let index = 0; index < 2; index++) await emitKeypress(setup!, { name: "pageup" }, { trackPropagation: true });
+  expect(await frame()).toContain("TTM Cash Yield");
+  expect(await frame()).toContain(payments[8]!.exDate.toISOString().slice(0, 10));
+});
