@@ -4,6 +4,7 @@ import {
   type MutableRefObject,
 } from "react";
 import type { PluginRegistry } from "../../../../plugins/registry";
+import type { PinTickerOptions } from "../../../../types/plugin";
 import type {
   AppAction,
   AppState,
@@ -33,7 +34,7 @@ interface UseCommandBarDirectCommandRuntimeOptions {
     rawInput?: string,
     explicitTargetId?: string | null,
   ) => Promise<void>;
-  focusTicker: (symbol: string) => void;
+  focusTicker: (symbol: string, options?: PinTickerOptions) => void;
   notify: (body: string, options?: { type?: "info" | "success" | "error" }) => void;
   onCheckForUpdates?: () => void | Promise<void>;
   openBuiltInWorkflow: (actionId: string) => void;
@@ -98,7 +99,10 @@ export function useCommandBarDirectCommandRuntime({
       { preserveListingKey: true },
     );
     if (resolvedTicker) {
-      focusTicker(resolvedTicker.symbol);
+      focusTicker(resolvedTicker.symbol, {
+        instrument: resolvedTicker.instrument,
+        listing: resolvedTicker.listing,
+      });
       closeAll({ revertThemePreview: false });
       return;
     }
