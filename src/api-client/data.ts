@@ -69,6 +69,7 @@ import type {
   CloudFredSeriesPayload,
   CloudShillerPayload,
   CloudFundamentals,
+  CloudFinancialsPayload,
   CloudHoldersPayload,
   CloudMarketBatchPayload,
   CloudMarketBatchTarget,
@@ -198,7 +199,7 @@ export class CloudDataApi {
     symbol: string,
     exchange?: string,
     statementHistory?: "extended",
-  ): Promise<CloudMarketResponse<TickerFinancials>> {
+  ): Promise<CloudMarketResponse<CloudFinancialsPayload>> {
     const path = cloudMarketSymbolPath("/market/financials", symbol, exchange);
     return this.request(statementHistory === "extended" ? `${path}&statementHistory=extended` : path);
   }
@@ -206,7 +207,7 @@ export class CloudDataApi {
   async getCloudFinancialsBatch(
     targets: CloudMarketBatchTarget[],
     mode: "cache-first" | "refresh" = "cache-first",
-  ): Promise<CloudMarketResponse<CloudMarketBatchPayload<TickerFinancials>>> {
+  ): Promise<CloudMarketResponse<CloudMarketBatchPayload<CloudFinancialsPayload>>> {
     return this.postMarketBatch("/market/financials/batch", targets, mode);
   }
 

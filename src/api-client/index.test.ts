@@ -4,6 +4,9 @@ import { apiClient, setCloudApiFetchTransport } from "./index";
 import { publishableMarketplaceLayout } from "../layout-marketplace/payload";
 import { createDefaultConfig } from "../types/config";
 import type { PaneDef } from "../types/plugin";
+import { GloomberbCloudProvider } from "../sources/gloomberb-cloud";
+import type { Quote } from "../types/financials";
+import { getActiveQuoteDisplay } from "../market-data/market/status";
 
 const originalFetch = globalThis.fetch;
 const originalWebSocket = globalThis.WebSocket;
@@ -117,6 +120,56 @@ afterEach(() => {
   apiClient.setWebSocketToken(null);
   apiClient.setCookieSessionMode(false);
   jest.useRealTimers();
+});
+
+test("normalizes unavailable JSON changes through REST, embedded financials, batches and quote streams", async () => {
+  const sockets = installTestWebSocket();
+  apiClient.setSessionToken("quote-wire-session");
+  apiClient.restoreCachedUser(verifiedUser);
+  const provider = new GloomberbCloudProvider();
+  const target = { symbol: "AAPL", exchange: "NASDAQ" };
+  let quote = {
+    ...target, price: 100, currency: "USD", providerId: "gloomberb-cloud",
+    dataSource: "live", lastUpdated: Date.parse("2026-09-16T14:00:00Z"),
+    marketState: "REGULAR", change: Number.NaN, changePercent: Number.NaN,
+  };
+  setCloudApiFetchTransport(mockFetch((input) => {
+    const path = new URL(String(input)).pathname;
+    if (path.endsWith("/auth/session")) return createResponse({ user: verifiedUser });
+    const data = path.includes("/financials")
+      ? { quote, annualStatements: [], quarterlyStatements: [], priceHistory: [] }
+      : quote;
+    return createResponse({ status: "success", data: path.endsWith("/batch")
+      ? { items: [{ ...target, status: "success", data }] } : data });
+  }));
+  const seen: Quote[] = [];
+  const unsubscribe = provider.subscribeQuotes([target], (_target, value) => seen.push(value));
+  const socket = sockets[0]!;
+  socket.open();
+  try {
+    for (const [index, change] of [Number.NaN, 0, 2].entries()) {
+      quote = { ...quote, price: Number.isFinite(change) ? 100 + change : 100, change, changePercent: change };
+      // Both transports serialize NaN to null before the real client parses it.
+      socket.receive({ type: "market.quote", ...target, quote });
+      const values = [
+        await provider.getQuote(target.symbol, target.exchange),
+        (await provider.getTickerFinancials(target.symbol, target.exchange)).quote,
+        (await provider.getQuotesBatch([target]))[0]?.quote,
+        (await provider.getTickerFinancialsBatch([target]))[0]?.financials?.quote,
+        seen.at(-1),
+      ];
+      expect(seen).toHaveLength(index + 1);
+      for (const value of values) {
+        expect(value).toBeDefined();
+        expect(value?.change).toBe(change);
+        expect(value?.changePercent).toBe(change);
+        expect(getActiveQuoteDisplay(value)?.change).toBe(change);
+        expect(getActiveQuoteDisplay(value)?.changePercent).toBe(change);
+      }
+    }
+  } finally {
+    unsubscribe();
+  }
 });
 
 describe("apiClient layout marketplace", () => {
