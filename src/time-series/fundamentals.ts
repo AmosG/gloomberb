@@ -3,6 +3,7 @@ import type {
   TickerFinancials,
 } from "../types/financials";
 import { areNearbyFinancialPeriodEnds, completeAvailability, statementFieldAvailability } from "../utils/financial-statements";
+import { copyIncomeField, incomeFieldKnowledgeDate, incomeFieldOwner, isIncomeStatementField } from "../utils/income-statement";
 import { canonicalTimeSeriesFieldId, getTimeSeriesField } from "./field-catalog";
 import { reportingCurrencySeries } from "./reporting-currency";
 import { createValuationCurrencyContext, type ValuationCurrencyContext } from "./valuation-currency";
@@ -14,6 +15,7 @@ type NumericStatementField =
   | "grossProfit"
   | "operatingIncome"
   | "netIncome"
+  | "netIncomeIncludingNoncontrollingInterests"
   | "netIncomeCommonStockholders"
   | "ebitda"
   | "operatingCashFlow"
@@ -43,6 +45,7 @@ export const QUARTERLY_FLOW_FIELDS: readonly NumericStatementField[] = [
   "grossProfit",
   "operatingIncome",
   "netIncome",
+  "netIncomeIncludingNoncontrollingInterests",
   "netIncomeCommonStockholders",
   "ebitda",
   "operatingCashFlow",
@@ -212,7 +215,19 @@ function mergeStatementPeriodGroup(statements: readonly InternalStatement[]): In
   const record = merged as unknown as Record<string, unknown>;
 
   for (const field of NUMERIC_STATEMENT_FIELDS) {
+    if (isIncomeStatementField(field)) {
+      const qualified = compatibleStatements.filter(statement => statement.date === dateSource.date && incomeFieldOwner(field, statement));
+      if (qualified.length) {
+        const owner = [...qualified].sort((left, right) => incomeFieldKnowledgeDate(right, field).localeCompare(incomeFieldKnowledgeDate(left, field)))[0]!;
+        copyIncomeField(merged, owner, field);
+        const availability = statementFieldAvailability(owner, field);
+        if (typeof merged[field] === "number" && availability) fieldAvailability[field] = availability;
+        continue;
+      }
+    }
     const candidates = compatibleStatements.flatMap((statement): StatementFieldCandidate[] => {
+      if (isIncomeStatementField(field) && statement.date !== dateSource.date
+        && incomeFieldOwner(field, statement)) return [];
       const value = statementNumber(statement, field);
       if (value === null) return [];
       return [{
@@ -325,6 +340,7 @@ export function deriveQuarterlyStatements(
     let changed = false;
 
     for (const field of [...QUARTERLY_FLOW_FIELDS, ...QUARTERLY_AVERAGE_FIELDS]) {
+      if (isIncomeStatementField(field) && target.unavailableFields?.includes(field)) continue;
       if (field === "eps" && target.epsBasis?.status === "unresolved") continue;
       if (statementNumber(target, field) !== null) continue;
       const annualValue = statementNumber(annualStatement, field);
@@ -390,7 +406,8 @@ function buildTtmStatements(statements: readonly FinancialStatement[]): Internal
     const commonIncomeCount = window.filter((statement) => finiteNumber(statement.netIncomeCommonStockholders)).length;
     // Known common claims in some quarters cannot be ignored by substituting
     // aggregate income for the entire window or only its missing quarters.
-    if (commonIncomeCount > 0 && commonIncomeCount < window.length) ttm.__timeSeriesIncompleteCommonIncome = true;
+    if ((commonIncomeCount > 0 && commonIncomeCount < window.length)
+      || window.some(statement => statement.unavailableFields?.includes("netIncomeCommonStockholders"))) ttm.__timeSeriesIncompleteCommonIncome = true;
 
     for (const field of [...QUARTERLY_FLOW_FIELDS, ...QUARTERLY_AVERAGE_FIELDS]) {
       const values = window.map((statement) => statementNumber(statement, field));
@@ -501,7 +518,7 @@ function selectedEps(
   if (finiteNumber(statement.eps)) {
     return { value: statement.eps, dependencies: ["eps"] };
   }
-  if (statement.__timeSeriesIncompleteCommonIncome) return null;
+  if (statement.__timeSeriesIncompleteCommonIncome || statement.unavailableFields?.includes("netIncomeCommonStockholders")) return null;
   const shares = selectedShares(statement);
   const income = selectStatementField(statement, ["netIncomeCommonStockholders", "netIncome"]);
   if (!shares || !income) return null;

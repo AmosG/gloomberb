@@ -275,6 +275,19 @@ export interface CompanyProfile {
   industry?: string;
 }
 
+export type IncomeStatementField = "netIncome" | "netIncomeIncludingNoncontrollingInterests" | "netIncomeCommonStockholders";
+
+export interface IncomeStatementSource {
+  source: "sec";
+  concept: string;
+  accessionNumber?: string;
+  filed?: string;
+  startDate?: string;
+  endDate: string;
+  unit: string;
+  basis: "parent" | "consolidated" | "common";
+}
+
 export interface FinancialStatement {
   /** SEC EPS share basis; raw source values remain available in the evidence. */
   epsBasis?: import("../utils/sec-eps-basis").SecEpsBasis;
@@ -295,6 +308,10 @@ export interface FinancialStatement {
   availableAt?: string;
   /** Per-field publication dates used by point-in-time charts and calculations. */
   fieldAvailability?: Record<string, string>;
+  /** Income attribution belongs to each field, not to the row's date evidence. */
+  fieldSources?: Partial<Record<IncomeStatementField, IncomeStatementSource>>;
+  /** Explicit source coverage gaps must not be filled by another income basis. */
+  unavailableFields?: IncomeStatementField[];
   // Income Statement
   totalRevenue?: number;
   costOfRevenue?: number;
@@ -316,6 +333,7 @@ export interface FinancialStatement {
   interestExpense?: number;
   taxProvision?: number;
   netIncome?: number;
+  netIncomeIncludingNoncontrollingInterests?: number;
   ebitda?: number;
   basicEps?: number;
   eps?: number; // diluted

@@ -62,6 +62,7 @@ export const FINANCIAL_SUB_TABS: FinancialSubTab[] = [
           { label: "Pretax Income", key: "pretaxIncome", format: "compact" },
           { label: "Tax Provision", key: "taxProvision", format: "compact", growthDirection: LOWER_IS_BETTER },
           { label: "Income Common", key: "netIncomeCommonStockholders", format: "compact" },
+          { label: "Income incl. NCI", key: "netIncomeIncludingNoncontrollingInterests", format: "compact" },
           { label: "Continuing Ops", key: "netIncomeContinuousOperations", format: "compact" },
           { label: "Normalized Inc", key: "normalizedIncome", format: "compact" },
         ],

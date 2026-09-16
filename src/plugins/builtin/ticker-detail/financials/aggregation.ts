@@ -8,7 +8,7 @@ export interface FinancialTableStatement extends FinancialStatement {
     kind: "trailing-four-quarters";
     periodEnd: string;
     sourcePeriods: Array<Pick<FinancialStatement,
-      "date" | "currency" | "dateSource" | "providerDate" | "dateEvidence" | "availableAt" | "fieldAvailability"
+      "date" | "currency" | "dateSource" | "providerDate" | "dateEvidence" | "availableAt" | "fieldAvailability" | "fieldSources" | "unavailableFields"
     >>;
   };
 }
@@ -34,6 +34,7 @@ const FLOW_KEYS = new Set<string>([
   "interestExpense",
   "taxProvision",
   "netIncome",
+  "netIncomeIncludingNoncontrollingInterests",
   "ebitda",
   "basicEps",
   "eps",
@@ -172,11 +173,13 @@ function aggregateQuarterlyStatements(
     aggregation: {
       kind: "trailing-four-quarters",
       periodEnd: statements.at(-1)!.date,
-      sourcePeriods: statements.map(({ date, currency, dateSource, providerDate, dateEvidence, availableAt, fieldAvailability }) => ({
+      sourcePeriods: statements.map(({ date, currency, dateSource, providerDate, dateEvidence, availableAt, fieldAvailability, fieldSources, unavailableFields }) => ({
         date, currency, dateSource, providerDate,
         ...(dateEvidence ? { dateEvidence: { ...dateEvidence } } : {}),
         availableAt,
         ...(fieldAvailability ? { fieldAvailability: { ...fieldAvailability } } : {}),
+        ...(fieldSources ? { fieldSources: { ...fieldSources } } : {}),
+        ...(unavailableFields ? { unavailableFields: [...unavailableFields] } : {}),
       })),
     },
   };
