@@ -166,6 +166,8 @@ Each series keeps its own observation date. A shared date appears in the footer 
 
 Responses must identify the requested FRED series and daily percentage OAS metadata. An incompatible refresh leaves a usable prior observation in place with its original date and the current failure status; it does not replace the series with another index or erase valid cached history.
 
+Credit charts check declared FRED coverage against the returned observations. If usable observations fall outside those dates, the coverage notice withholds the contradictory dates while preserving the observations and any source-declared retention limit. The first and last returned rows do not establish replacement coverage bounds because the request may include a limited window or calculation buffer.
+
 ## Single-name CDS
 
 CDS displays reported trade activity, with coupon and spread in basis points. Spread notation code 3 is decimal and code 4 is already basis points; explicit percentage notation is converted once. Unlabelled values are assumed decimal for compatibility with the legacy feed. Monetary notation (code 1) and unknown explicit units leave the bp spread unavailable. Trade-level headless rows retain the source spread and notation. Coupon and upfront amounts never establish an unreported spread.

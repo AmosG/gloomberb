@@ -1241,7 +1241,8 @@ export async function resolveChartSpecData(
         };
         const fred = await loadEconomicSeries(request);
         const result = baseEconomicSeries(seriesSpec, fred, index);
-        const coverageNotice = fredCreditCoverageNotice(seriesSpec.source.seriesId, fred.data.info, requestVisibleBounds.start);
+        const coverageNotice = fredCreditCoverageNotice(seriesSpec.source.seriesId, fred.data.info,
+          requestVisibleBounds.start, fred.data.observations);
         if (result && coverageNotice) priorityWarnings.push(`${result.label}: ${coverageNotice}`);
         const freshnessWarning = staleFredWarning(fred);
         if (result && freshnessWarning) priorityWarnings.push(`${result.label}: ${freshnessWarning}`);

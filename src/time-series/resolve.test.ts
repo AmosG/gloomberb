@@ -75,6 +75,28 @@ describe("resolveChartSpecData", () => {
     expect(old.viewport.start?.toISOString().slice(0, 10)).toBe("2020-01-01");
   });
 
+  test("credit history keeps newer observations when source coverage metadata lags", async () => {
+    const spec = buildCustomChartPreset("FRED:BAMLC0A0CM");
+    spec.viewport.dateWindow = { start: "2021-09-16", end: "2026-09-16" };
+    const data: FredSeriesData = {
+      observations: [{ date: "2023-09-18", value: 1.22 }, { date: "2026-09-14", value: 0.8 }],
+      info: { id: "BAMLC0A0CM", title: "IG OAS", units: "Percent", frequency: "Daily, Close",
+        seasonalAdjustment: "Not Seasonally Adjusted", source: "FRED", notes: "",
+        observationStart: "2023-09-12", observationEnd: "2026-09-10" },
+    };
+    const sources = { loadFredSeries: async () => fredLoad(data) };
+    const before = await resolveChartSpecData(spec, sources);
+    expect(before.series[0]?.points.at(-1)?.value).toBe(0.8);
+    expect(before.series[0]?.points.at(-1)?.date.toISOString()).toBe("2026-09-14T00:00:00.000Z");
+    expect(before.warnings.some((warning) => warning.includes("exact coverage dates are unavailable"))).toBe(true);
+    expect(before.warnings.some((warning) => warning.includes("2026-09-10"))).toBe(false);
+    data.info = { ...data.info!, observationStart: "2023-09-18", observationEnd: "2026-09-14" };
+    const recovered = await resolveChartSpecData(spec, sources);
+    expect(recovered.series[0]?.points).toEqual(before.series[0]?.points);
+    expect(recovered.warnings.some((warning) => warning.includes("2023-09-18 to 2026-09-14"))).toBe(true);
+    expect(recovered.warnings.some((warning) => warning.includes("exact coverage dates are unavailable"))).toBe(false);
+  });
+
   test("qualified price charts retain quote metadata without injecting the fetched snapshot into history", async () => {
     let quoteCalls = 0;
     let financialCalls = 0;
