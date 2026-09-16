@@ -103,6 +103,20 @@ test("reported quarterly EPS and complete weighted-share TTM approximations reta
     .toBeCloseTo(100 * averageShares / fixture.JPM.annual.netIncome, 10);
 });
 
+test("TTM earnings ratios use a complete positive share average when the other basis contains an invalid quarter", () => {
+  for (const invalid of [0, -1, NaN, Infinity, undefined]) {
+    const quarters = ["2025-03-31", "2025-06-30", "2025-09-30", "2025-12-31"].map((date, index) => ({
+      date, currency: "USD", netIncomeCommonStockholders: 25, basicShares: 10,
+      dilutedShares: index === 3 ? invalid : 12,
+    }));
+    expect(extractFundamentalSeries(snapshot(quarters, []), source("valuation.trailingPE", "ttm")).at(-1)?.value).toBe(10);
+    // The inverse case retains a complete diluted basis, rather than averaging
+    // an invalid basic quarter into a denominator.
+    const inverse = quarters.map(row => ({ ...row, basicShares: row.dilutedShares, dilutedShares: 10 }));
+    expect(extractFundamentalSeries(snapshot(inverse, []), source("valuation.trailingPE", "ttm")).at(-1)?.value).toBe(10);
+  }
+});
+
 test("an annual EPS share-basis failure is not relabeled as evidence about a different quarter", () => {
   const annual: FinancialStatement = { ...fixture.JPM.annual,
     epsBasis: { status: "unresolved", source: "sec", originalValue: 20.02, basisDate: "2026-02-13", evidence: [] } };

@@ -429,6 +429,7 @@ function buildTtmStatements(statements: readonly FinancialStatement[]): Internal
     for (const field of [...TTM_SUM_FIELDS, ...QUARTERLY_AVERAGE_FIELDS]) {
       const values = window.map((statement) => statementNumber(statement, field));
       if (!values.every((value): value is number => value !== null)) continue;
+      if (QUARTERLY_AVERAGE_FIELDS.includes(field) && !values.every(value => value > 0)) continue;
       (ttm as unknown as Record<string, unknown>)[field] = values.reduce((sum, value) => sum + value, 0)
         / (QUARTERLY_AVERAGE_FIELDS.includes(field) ? 4 : 1);
       ttm.__timeSeriesDerivedFields!.push(field);
