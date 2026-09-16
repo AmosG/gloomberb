@@ -78,6 +78,10 @@ Relative Valuation excludes explicitly stale quote prices, changes, and quote ma
 
 Bank capital metrics and REIT FFO/AFFO depend on source coverage. Operating cash flow is not a substitute for FFO/AFFO. Missing measures are available through the financial view’s warning indicator.
 
+Relative valuation retains stale fundamentals for inspection and marks them through the existing warning indicator, independently of quote freshness. Its CSV export includes quote observation time and fundamentals source, retrieval time, and stale status. Structured reports preserve the same provenance and report incomplete freshness until the source recovers. Retrieval time does not establish a ratio's valuation date.
+
+The current overview and peer table do not provide P/B, P/tangible book, CET1, or FFO/AFFO multiples. Financial-statement common equity and ordinary shares are dated balance-sheet inputs; weighted-average EPS shares belong to an earnings period and cannot replace period-end shares in a book-value calculation. A provider's tangible-book amount may differ from the bank's reported tangible common equity because of its adjustment policy. Compare issuer definitions and periods before combining these values. REIT GAAP P/E and generic cash-flow yield do not establish FFO/AFFO valuation or distribution coverage.
+
 ## Insider filings
 
 INS retains Form 4 and Form 4/A disclosures separately, with their filing accession, source filing date, transaction dates, reporting owners and explanations. An amendment is labeled in the list; opening it retains its declared original filing date, footnotes and remarks. The existing filing action opens the SEC source. Reports preserve those fields and the transaction's footnote references.

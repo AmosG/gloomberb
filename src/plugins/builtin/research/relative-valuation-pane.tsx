@@ -16,11 +16,12 @@ import { getSharedMarketDataCoordinator } from "../../../market-data/coordinator
 import { colors, priceColor } from "../../../theme/colors";
 import { compareSortValues, type SortDirection } from "../../../utils/sort-values";
 import { formatCompact, formatCurrency, formatNumber, formatPercent, formatPercentRaw } from "../../../utils/format";
+import { parseDisplayDate } from "../../../utils/datetime-format";
 import { usePluginTickerActions } from "../../runtime";
 import { handleRefreshKey, loadingErrorFooterInfo, useClampSelectedIndex } from "../shared/table-pane";
 import { useBoundTicker as useSymbolBinding } from "../shared/ticker-request";
 import { useFxRatesMap } from "../../../market-data/hooks";
-import { comparableMarketCap, relativeValuationValues } from "./relative-valuation-model";
+import { comparableMarketCap, RELATIVE_VALUATION_STALE_FUNDAMENTALS_NOTICE, relativeValuationValues } from "./relative-valuation-model";
 
 type RelativeColumnId = "symbol" | "price" | "changePercent" | "marketCap" | "trailingPE" | "forwardPE" | "evSales" | "fcfYield" | "revenueGrowth" | "operatingMargin";
 type RelativeColumn = DataTableColumn & { id: RelativeColumnId };
@@ -163,7 +164,11 @@ export function RelativeValuationPane({ focused, width, height }: PaneProps) {
 
   usePaneNoticeFooter({
     registrationId: "relative-valuation-notices",
-    notices: selectedCapNotice ? [selectedCapNotice] : [],
+    notices: [
+      ...rows.filter((row) => row.fundamentalsProvenance?.stale)
+        .map((row) => `${row.symbol}: ${RELATIVE_VALUATION_STALE_FUNDAMENTALS_NOTICE}.`),
+      ...(selectedCapNotice ? [selectedCapNotice] : []),
+    ],
     focused,
   });
 
@@ -173,7 +178,7 @@ export function RelativeValuationPane({ focused, width, height }: PaneProps) {
     const selectedColor = rowState.selected ? colors.selectedText : undefined;
     switch (column.id) {
       case "symbol":
-        return { text: row.symbol, color: selectedColor ?? (row.error || row.quoteStale ? colors.warning : colors.textBright), attributes: TextAttributes.BOLD };
+        return { text: row.symbol, color: selectedColor ?? (row.error || row.quoteStale || row.fundamentalsProvenance?.stale ? colors.warning : colors.textBright), attributes: TextAttributes.BOLD };
       case "price":
         return { text: row.price != null ? formatCurrency(row.price, row.currency ?? "USD") : "-", color: selectedColor ?? colors.text };
       case "changePercent":
@@ -230,6 +235,13 @@ export function RelativeValuationPane({ focused, width, height }: PaneProps) {
       onHeaderClick={handleHeaderClick}
       getItemKey={(row) => row.symbol}
       renderCell={renderCell}
+      getExportMetadata={() => sortedRows.flatMap((row) => [
+        [row.symbol, "Quote as of", parseDisplayDate(row.quoteAsOf)?.toISOString() ?? "unavailable", "Stale", String(row.quoteStale ?? "unknown")],
+        [row.symbol, "Fundamentals source", row.fundamentalsProvenance?.source ?? "unavailable",
+          "Retrieved", row.fundamentalsProvenance?.retrievedAt ?? "unavailable",
+          "Stale", String(row.fundamentalsProvenance?.stale ?? "unknown")],
+        ...(row.fundamentalsProvenance?.stale ? [[row.symbol, RELATIVE_VALUATION_STALE_FUNDAMENTALS_NOTICE]] : []),
+      ])}
       emptyStateTitle={loading ? "Loading peers..." : error ?? "No peers"}
     />
   );
