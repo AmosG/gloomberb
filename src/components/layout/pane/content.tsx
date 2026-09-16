@@ -1,10 +1,28 @@
-import { memo, useCallback } from "react";
+import { memo, Profiler, useCallback, type ReactNode } from "react";
 import { useAppLanguage } from "../../../i18n/react";
+import { isPerfTraceEnabled, recordPerfSample } from "../../../utils/perf-marks";
 import { PaneInstanceProvider } from "../../../state/app/context";
 import { useThemeColors } from "../../../theme/theme-context";
 import { PaneKeyboardScrollController } from "../../../state/pane-scroll-registry";
 import type { PaneDef } from "../../../types/plugin";
 import { Box } from "../../../ui";
+
+// Under GLOOMBERB_PERF_TRACE every pane commit is reported by pane, which is
+// how a store update that fans out to the whole layout gets attributed. The
+// Profiler is inert in production builds and absent from the tree otherwise.
+function PaneRenderTrace({ paneId, paneType, children }: { paneId: string; paneType: string; children: ReactNode }) {
+  if (!isPerfTraceEnabled()) return children;
+  return (
+    <Profiler
+      id={paneId}
+      onRender={(_id, phase, actualDuration) => {
+        recordPerfSample("pane.render", actualDuration, { paneId, paneType, phase });
+      }}
+    >
+      {children}
+    </Profiler>
+  );
+}
 
 interface PaneContentProps {
   component: PaneDef["component"];
@@ -44,14 +62,16 @@ export const PaneContent = memo(function PaneContent({
         overflow="hidden"
         data-gloom-role="pane-content"
       >
-        <Component
-          paneId={paneId}
-          paneType={paneType}
-          focused={focused}
-          width={width}
-          height={height}
-          close={onClose ? close : undefined}
-        />
+        <PaneRenderTrace paneId={paneId} paneType={paneType}>
+          <Component
+            paneId={paneId}
+            paneType={paneType}
+            focused={focused}
+            width={width}
+            height={height}
+            close={onClose ? close : undefined}
+          />
+        </PaneRenderTrace>
       </Box>
     </PaneInstanceProvider>
   );

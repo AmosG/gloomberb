@@ -40,6 +40,19 @@ function logSlowPerfSample(
   }
 }
 
+export function isPerfTraceEnabled(): boolean {
+  return traceToStderr;
+}
+
+/** A sample measured elsewhere (a React Profiler callback, for instance). */
+export function recordPerfSample(
+  name: string,
+  durationMs: number,
+  metadata?: Record<string, unknown>,
+): void {
+  logSlowPerfSample(name, durationMs, metadata);
+}
+
 export function measurePerf<T>(
   name: string,
   fn: () => T,
