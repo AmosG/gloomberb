@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, setSystemTime, test } from "bun:test";
 import { apiClient } from "../../api-client";
 import { AppPersistence } from "../../data/app-persistence";
 import { buildComparisonChartPreset } from "../../plugins/builtin/chart-composer/presets";
@@ -14,7 +14,7 @@ import { fallbackProvider, makeFinancials, makeQuote } from "./test-support";
 
 const originalHistory = apiClient.getCloudHistory;
 const originalQuote = apiClient.getCloudQuote;
-afterEach(() => { apiClient.getCloudHistory = originalHistory; apiClient.getCloudQuote = originalQuote; });
+afterEach(() => { apiClient.getCloudHistory = originalHistory; apiClient.getCloudQuote = originalQuote; setSystemTime(); });
 // Captured 2026-09-16: June 4 is the issuer's $31 offering, not a traded session.
 const offer: PricePoint = { date: new Date("2025-06-04"), open: 31, high: 31, low: 31, close: 31, volume: 0 };
 const first: PricePoint = { date: new Date("2025-06-05"), open: 69, high: 103.75, low: 64, close: 83.23, volume: 47192000 };
@@ -113,6 +113,8 @@ test("cached and refreshed financial histories exclude affected offers while pre
 
 
 test("fresh financial batches sanitize both immediate deep results and retained fallbacks after a failed single fetch", async () => {
+  // This exercises batch history routing, independently of extended-hours quote requirements.
+  setSystemTime(new Date("2026-09-16T14:00:00Z"));
   for (const deep of [true, false]) {
     const store = new AppPersistence(":memory:");
     try {
