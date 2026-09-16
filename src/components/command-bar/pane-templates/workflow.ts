@@ -123,6 +123,7 @@ export function useCommandBarPaneTemplateActions({
         activeTickerSymbol,
         activeCollectionId,
         buildWorkflowDeps(),
+        { preserveListingKey: true },
       );
       if (!resolvedTicker) {
         openModeRoute("ticker-search", trimmedArg, {
@@ -135,6 +136,8 @@ export function useCommandBarPaneTemplateActions({
         arg: resolvedTicker.symbol,
         symbol: resolvedTicker.symbol,
         ticker: resolvedTicker.ticker,
+        ...(resolvedTicker.instrument !== undefined ? { instrument: resolvedTicker.instrument } : {}),
+        ...(resolvedTicker.listing ? { listing: resolvedTicker.listing } : {}),
       });
       return;
     }

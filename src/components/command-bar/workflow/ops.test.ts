@@ -3,8 +3,9 @@ import { cloneLayout, createDefaultConfig, findPaneInstance, type LayoutConfig }
 import { createInitialState } from "../../../state/app/context";
 import { PANE_LOCK_SETTING_KEY } from "../../../pane-settings";
 import { createTestDataProvider } from "../../../test-support/data-provider";
-import { applyPaneSettingFieldValue, createPaneTemplateOrThrow, resolveTickerInput, resolveTickerInputOrThrow } from "./ops";
+import { applyPaneSettingFieldValue, createPaneTemplateOrThrow, resolveTickerInput, resolveTickerInputOrThrow, resolveTickerListInput } from "./ops";
 import type { TickerRecord } from "../../../types/ticker";
+import { JsonTickerRepository } from "../../../data/json-ticker-repository";
 
 function makeDataProvider() {
   return createTestDataProvider({ id: "test" });
@@ -19,6 +20,46 @@ function makeTickerRepository() {
     getAllTickers: async () => [],
   };
 }
+
+test("qualified command inputs persist each selected venue without copying existing holdings", async () => {
+  for (const savedVenue of [null, "NASDAQ", "AMS"]) {
+    const values = new Map<string, string>();
+    const tickerRepository = new JsonTickerRepository({
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => { values.set(key, value); },
+      removeItem: (key) => { values.delete(key); },
+    });
+    const state = createInitialState(createDefaultConfig(":memory:"));
+    if (savedVenue) {
+      const saved = await tickerRepository.createTicker({
+        ticker: "ASML", name: "ASML Holding", exchange: savedVenue,
+        currency: savedVenue === "NASDAQ" ? "USD" : "EUR", portfolios: ["retirement"], watchlists: [],
+        positions: [{ portfolio: "retirement", shares: 10, avgCost: 500, broker: "manual", currency: savedVenue === "NASDAQ" ? "USD" : "EUR" }],
+        custom: {}, tags: [],
+      });
+      state.tickers.set("ASML", saved);
+    }
+    const before = await tickerRepository.loadTicker("ASML");
+    const deps = {
+      getState: () => state,
+      dispatch: (action: any) => { if (action.type === "UPDATE_TICKER") state.tickers.set(action.ticker.metadata.ticker, action.ticker); },
+      pluginRegistry: { events: { emit: () => {} } } as any,
+      tickerRepository,
+      dataProvider: createTestDataProvider({ search: async () => ["NASDAQ", "AMS"].map(exchange => ({
+        providerId: "cloud", symbol: "ASML", name: "ASML Holding", exchange,
+        currency: exchange === "NASDAQ" ? "USD" : "EUR", type: "EQUITY",
+      })) }),
+    };
+    expect(await resolveTickerListInput("ASML:XNAS ASML:XAMS ASML:NASDAQ", null, deps))
+      .toEqual(["ASML:XNAS", "ASML:XAMS"]);
+    const selected = await resolveTickerInput("ASML:XNAS", null, null, deps, { preserveListingKey: true });
+    expect(selected?.symbol).toBe("ASML:XNAS");
+    expect(selected?.ticker.metadata).toMatchObject({ ticker: "ASML:XNAS", currency: "USD", positions: [], portfolios: [] });
+    expect((await tickerRepository.loadTicker("ASML:XAMS"))?.metadata)
+      .toMatchObject({ ticker: "ASML:XAMS", currency: "EUR", positions: [], portfolios: [] });
+    expect(await tickerRepository.loadTicker("ASML")).toEqual(before);
+  }
+});
 
 test("command ticker resolution persists the verified future without switching to a saved equity", async () => {
   const state = createInitialState(createDefaultConfig(":memory:"));

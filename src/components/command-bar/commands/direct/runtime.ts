@@ -95,6 +95,7 @@ export function useCommandBarDirectCommandRuntime({
       activeTickerSymbol,
       activeCollectionId,
       buildSharedWorkflowDeps(),
+      { preserveListingKey: true },
     );
     if (resolvedTicker) {
       focusTicker(resolvedTicker.symbol);
