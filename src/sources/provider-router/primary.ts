@@ -68,6 +68,7 @@ export class ProviderRouterPrimaryRoutes {
     const entityKey = this.options.getEntityKey(ticker, context?.instrument);
     const variantKey = financialHistoryVariants(this.options.getTickerVariantCandidates(exchange), context)[0] ?? "";
     let primaryResult: SourceResult<TickerFinancials> | null = null;
+    let primaryIdentity: TickerFinancials | null = null;
 
     for (const provider of this.options.providersInPriorityOrder()) {
       try {
@@ -86,7 +87,10 @@ export class ProviderRouterPrimaryRoutes {
         value = sanitizeShellFinancialHistory(value, { symbol: ticker, exchange }, sourceKey);
         value = sanitizeListingFinancialHistory(value, { symbol: ticker, exchange }, sourceKey);
         value = withdrawKnownProviderStatements(value, { symbol: ticker, exchange }, sourceKey);
-        const fallbackProfile = primaryResult ? profileForSameListing(value, primaryResult.value) : undefined;
+        // Validate the raw identities before quote normalization can choose one
+        // of conflicting quote/metadata contributions, including contract routes.
+        const fallbackProfile = primaryIdentity && rawValue
+          ? profileForSameListing({ ...rawValue, profile: value.profile }, primaryIdentity, { symbol: ticker, exchange }) : undefined;
         const cacheValue = primaryResult
           ? {
             profile: fallbackProfile,
@@ -110,6 +114,7 @@ export class ProviderRouterPrimaryRoutes {
         );
         if (!primaryResult) {
           primaryResult = { sourceKey, value };
+          primaryIdentity = rawValue;
           if (!needsFinancialProfile(value) && (context?.statementHistory === "extended" ? value.statementHistory?.status === "available" : hasDetailedStatementRows(value) && hasDeepStatementHistory(value))) return primaryResult;
           continue;
         }
@@ -127,7 +132,7 @@ export class ProviderRouterPrimaryRoutes {
         if (hasStatementRows(value) || fallbackProfile) {
           primaryResult = {
             sourceKey: primaryResult.sourceKey,
-            value: mergeMissingStatementArrays(primaryResult.value, value),
+            value: mergeMissingStatementArrays(primaryResult.value, { ...value, profile: fallbackProfile }),
           };
           if (!needsFinancialProfile(primaryResult.value) && (context?.statementHistory === "extended" ? primaryResult.value.statementHistory?.status === "available" : hasDetailedStatementRows(primaryResult.value) && hasDeepStatementHistory(primaryResult.value))) return primaryResult;
         }
@@ -138,6 +143,11 @@ export class ProviderRouterPrimaryRoutes {
       }
     }
 
+    if (needsFinancialProfile(primaryResult?.value)) {
+      this.options.cacheResource("financial-profile-attempt", entityKey, variantKey, "router",
+        { sourceKeys: this.options.providersInPriorityOrder().map(provider => this.options.providerSourceKey(provider)) },
+        { staleMs: 60_000, expireMs: 60_000 });
+    }
     return primaryResult;
   }
 

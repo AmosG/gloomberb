@@ -13,10 +13,12 @@ import { normalizeTickerFinancialsPriceHistory } from "../../utils/price-history
 import { isQuoteStaleForCurrentSession } from "../../market-data/quotes/freshness";
 import { resolveTickerFinancialsQuoteState } from "../../market-data/quotes/resolution";
 import { selectCachedResource } from "./cache";
+import { financialHistoryVariants } from "./statement-history";
 import {
   dropUnusableProviderQuote,
   hasDeepStatementHistory,
   needsFinancialProfile,
+  hasRecentFinancialProfileAttempt,
   hasDetailedStatementRows,
   isProviderQuoteUsableForCurrentSession,
   providerFinancialsMatchTarget,
@@ -133,7 +135,11 @@ export class ProviderRouterBatchRoutes {
     targets.forEach((target, index) => {
       const context = this.deps.contextFromCachedTarget(target);
       const cached = this.deps.readCachedMergedFinancialsSelection(target.symbol, target.exchange, context, true);
-      if (cached.value?.quote && !forceRefresh && target.statementHistory !== "extended" && !needsFinancialProfile(cached.value)) {
+      const profileAttempted = !cached.stale && hasRecentFinancialProfileAttempt(
+        this.deps.resources, this.deps.getEntityKey(target.symbol, context.instrument),
+        financialHistoryVariants(this.deps.getTickerVariantCandidates(target.exchange), context)[0] ?? "", this.deps.getProviderSourceKeys(),
+      );
+      if (cached.value?.quote && !forceRefresh && target.statementHistory !== "extended" && (!needsFinancialProfile(cached.value) || profileAttempted)) {
         results[index] = { target, financials: cached.value };
         return;
       }

@@ -1,4 +1,4 @@
-import type { CachedResourceRecord } from "../../data/resource-store";
+import type { CachedResourceRecord, ResourceStore } from "../../data/resource-store";
 import type { AnalystResearchData, CorporateActionsData, FinancialStatement, Fundamentals, Quote, TickerFinancials } from "../../types/financials";
 import { hasLikelyQuoteUnitMismatch } from "../../utils/currency-units";
 import { coalesceFinancialPeriodAliases, mergeFinancialStatementRows } from "../../utils/financial-statements";
@@ -217,20 +217,28 @@ export function needsFinancialProfile(data: TickerFinancials | null | undefined)
   return hasStatementRows(data) && !hasMeaningfulProfile(data);
 }
 
+/** Retry a missing profile after a short pause, scoped to the listing and providers. */
+export function hasRecentFinancialProfileAttempt(resources: ResourceStore | undefined, entityKey: string, variantKey: string, sourceKeys: string[]): boolean {
+  const attempt = resources?.get<{ sourceKeys: string[] }>({ namespace: "market", kind: "financial-profile-attempt", entityKey, variantKey, sourceKey: "router" });
+  return !!attempt && !attempt.stale && Array.isArray(attempt.value.sourceKeys)
+    && attempt.value.sourceKeys.length === sourceKeys.length
+    && attempt.value.sourceKeys.every((key, index) => key === sourceKeys[index]);
+}
+
 /** Company classification may only cross sources for the same explicit listing. */
-export function profileForSameListing(source: TickerFinancials, target: TickerFinancials): TickerFinancials["profile"] {
+export function profileForSameListing(source: TickerFinancials, target: TickerFinancials, request?: { symbol: string; exchange?: string }): TickerFinancials["profile"] {
   if (!hasMeaningfulProfile(source)) return undefined;
-  const identity = (value: TickerFinancials) => mergeQuoteMetadata(
+  const identity = (value: TickerFinancials) => [
     value.quote ? quoteMetadataFromQuote(value.quote) : undefined, value.quoteMetadata,
-  );
-  const actual = identity(source);
-  const requested = identity(target);
-  if (!actual || !requested || typeof actual.symbol !== "string" || typeof requested.symbol !== "string") return undefined;
-  const listing = requested.listingExchangeName || parsePublicTickerKey(requested.symbol).exchange;
+  ].find(metadata => metadata && typeof metadata.symbol === "string" && (metadata.listingExchangeName || parsePublicTickerKey(metadata.symbol).exchange));
+  const actual = identity(source), requested = identity(target);
+  if (!actual || !requested) return undefined;
+  const symbol = request?.symbol ?? requested.symbol;
+  const listing = parsePublicTickerKey(symbol).exchange || request?.exchange || requested.listingExchangeName || parsePublicTickerKey(requested.symbol).exchange;
   const actualListing = actual.listingExchangeName || parsePublicTickerKey(actual.symbol).exchange;
   if (typeof listing !== "string" || typeof actualListing !== "string" || !listing.trim() || !actualListing.trim()
-    || !quoteMetadataMatchesTarget(requested, requested.symbol, listing)
-    || !quoteMetadataMatchesTarget(actual, requested.symbol, listing)) return undefined;
+    || !providerFinancialsMatchTarget(source, symbol, listing) || !providerFinancialsMatchTarget(target, symbol, listing)
+    || !quoteMetadataMatchesTarget(requested, symbol, listing) || !quoteMetadataMatchesTarget(actual, symbol, listing)) return undefined;
   return source.profile;
 }
 

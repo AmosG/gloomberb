@@ -117,3 +117,55 @@ test("a complete bank profile uses no additional fallback request", async () => 
   expect(value.profile).toEqual(profile);
   expect(calls).toEqual({ cloud: 1, yahoo: 0, batch: 0 });
 });
+
+for (const mismatch of ["both-symbol", "both-venue", "secondary-metadata", "primary-metadata", "secondary-contribution"] as const) {
+  test(`contract profile enrichment validates the requested listing before normalization: ${mismatch}`, async () => {
+    const persistence = new AppPersistence(createTempDbPath(`profile-contract-${mismatch}`));
+    const wrong = makeQuote({ symbol: mismatch === "both-venue" ? "JPM" : "BAC", listingExchangeName: mismatch === "both-venue" ? "LSE" : "NYSE" });
+    const both = mismatch.startsWith("both-");
+    const cloudValue = company({ ...(both ? { quote: wrong } : {}), ...(mismatch === "primary-metadata" ? { quoteMetadata: quoteMetadataFromQuote(wrong) } : {}) });
+    const yahooValue = secondary({
+      ...(both || mismatch === "secondary-metadata" ? { quoteMetadata: quoteMetadataFromQuote(wrong) } : {}),
+      ...(mismatch === "secondary-metadata" ? { quote: company().quote } : {}),
+      ...(mismatch === "secondary-contribution" ? { quoteContributions: { yahoo: wrong } } : {}),
+    });
+    const { cloud, yahoo } = providers(cloudValue, yahooValue);
+    try {
+      const context = { statementHistory: "extended" as const, instrument };
+      const result = await new AssetDataRouter(yahoo, [cloud], persistence.resources).getTickerFinancials("JPM", "NYSE", context);
+      expect(result.profile).toBeUndefined();
+      const reopened = new AssetDataRouter(yahoo, [cloud], persistence.resources).getCachedFinancialsForTargets([{ symbol: "JPM", exchange: "NYSE", ...context }]).get("JPM");
+      expect(reopened?.profile).toBeUndefined();
+    } finally { persistence.close(); }
+  });
+}
+
+for (const mode of ["extended", "default", "batch"] as const) {
+  test(`${mode} missing-profile attempts survive cache reopen, retry after a minute and allow explicit refresh`, async () => {
+    const path = createTempDbPath(`profile-attempt-${mode}`);
+    let persistence = new AppPersistence(path);
+    const { cloud, yahoo, calls } = providers();
+    let recovered = false;
+    yahoo.getTickerFinancials = async () => { calls.yahoo++; return secondary({ profile: recovered ? profile : undefined }); };
+    const load = async (refresh = false) => {
+      const router = new AssetDataRouter(yahoo, [cloud], persistence.resources);
+      return mode === "batch"
+        ? (await router.getTickerFinancialsBatch([{ symbol: "JPM", exchange: "NYSE" }], { forceRefresh: refresh }))[0]!.financials!
+        : router.getTickerFinancials("JPM", "NYSE", { ...(mode === "extended" ? { statementHistory: "extended" as const } : {}), cacheMode: refresh ? "refresh" : "default" });
+    };
+    try {
+      expect((await load()).profile).toBeUndefined();
+      persistence.close(); persistence = new AppPersistence(path);
+      expect((await load()).profile).toBeUndefined();
+      expect((await load()).profile).toBeUndefined();
+      expect(calls).toEqual({ cloud: 1, yahoo: 1, batch: mode === "batch" ? 1 : 0 });
+      const later = Date.now() + 61_000;
+      Date.now = () => later;
+      expect((await load()).profile).toBeUndefined();
+      expect(calls).toEqual({ cloud: 2, yahoo: 2, batch: mode === "batch" ? 2 : 0 });
+      recovered = true;
+      expect((await load(true)).profile).toEqual(profile);
+      expect(calls).toEqual({ cloud: 3, yahoo: 3, batch: mode === "batch" ? 3 : 0 });
+    } finally { persistence.close(); }
+  });
+}
