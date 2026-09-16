@@ -14,7 +14,7 @@ export const YAHOO_TIMESERIES_TYPES = {
     "annualDepreciationAmortizationDepletionIncomeStatement",
     "annualDepreciationAndAmortizationInIncomeStatement",
     "annualInterestExpense", "annualTaxProvision",
-    "annualNetIncome", "annualEBITDA",
+    "annualNetIncome", "annualNetIncomeIncludingNoncontrollingInterests", "annualEBITDA",
     "annualBasicEPS", "annualDilutedEPS",
     "annualBasicAverageShares", "annualDilutedAverageShares",
     "annualOperatingCashFlow", "annualCapitalExpenditure", "annualFreeCashFlow",
@@ -78,7 +78,7 @@ export const YAHOO_TIMESERIES_TYPES = {
     "quarterlyDepreciationAmortizationDepletionIncomeStatement",
     "quarterlyDepreciationAndAmortizationInIncomeStatement",
     "quarterlyInterestExpense", "quarterlyTaxProvision",
-    "quarterlyNetIncome", "quarterlyEBITDA",
+    "quarterlyNetIncome", "quarterlyNetIncomeIncludingNoncontrollingInterests", "quarterlyEBITDA",
     "quarterlyBasicEPS", "quarterlyDilutedEPS",
     "quarterlyBasicAverageShares", "quarterlyDilutedAverageShares",
     "quarterlyOperatingCashFlow", "quarterlyCapitalExpenditure", "quarterlyFreeCashFlow",
@@ -217,6 +217,7 @@ export function buildYahooStatements(
   assign(`${prefix}InterestExpense`, "interestExpense");
   assign(`${prefix}TaxProvision`, "taxProvision");
   assign(`${prefix}NetIncome`, "netIncome");
+  assign(`${prefix}NetIncomeIncludingNoncontrollingInterests`, "netIncomeIncludingNoncontrollingInterests");
   assign(`${prefix}EBITDA`, "ebitda");
   assign(`${prefix}BasicEPS`, "basicEps");
   assign(`${prefix}DilutedEPS`, "eps");

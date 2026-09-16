@@ -198,6 +198,9 @@ export function financialStatementLimitations(financials: TickerFinancials | nul
     return typeof value === "number" && Number.isFinite(value);
   }));
   const limitations: string[] = [];
+  if ([...(financials?.annualStatements ?? []), ...(financials?.quarterlyStatements ?? [])].some(row => row.withdrawnObservations?.length)) {
+    limitations.push("Some quarterly values conflict with issuer filings and are unavailable.");
+  }
   if ([...(financials?.annualStatements ?? []), ...(financials?.quarterlyStatements ?? [])].some(row => row.unavailableFields?.includes("netIncome"))) {
     limitations.push("Parent net income is unavailable for some reported periods.");
   }

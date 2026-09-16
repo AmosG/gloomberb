@@ -1,4 +1,4 @@
-import type { CachedResourceRecord } from "../../data/resource-store";
+import type { CachedResourceRecord, ResourceStore } from "../../data/resource-store";
 import type { AnalystResearchData, CorporateActionsData, FinancialStatement, Fundamentals, Quote, TickerFinancials } from "../../types/financials";
 import { hasLikelyQuoteUnitMismatch } from "../../utils/currency-units";
 import { coalesceFinancialPeriodAliases, mergeFinancialStatementRows } from "../../utils/financial-statements";
@@ -212,6 +212,36 @@ export function hasMeaningfulProfile(data: TickerFinancials | null | undefined):
   );
 }
 
+/** A statement response can be complete while its company profile is missing. */
+export function needsFinancialProfile(data: TickerFinancials | null | undefined): boolean {
+  return hasStatementRows(data) && !hasMeaningfulProfile(data);
+}
+
+/** Retry a missing profile after a short pause, scoped to the listing and providers. */
+export function hasRecentFinancialProfileAttempt(resources: ResourceStore | undefined, entityKey: string, variantKey: string, sourceKeys: string[]): boolean {
+  const attempt = resources?.get<{ sourceKeys: string[] }>({ namespace: "market", kind: "financial-profile-attempt", entityKey, variantKey, sourceKey: "router" });
+  return !!attempt && !attempt.stale && Array.isArray(attempt.value.sourceKeys)
+    && attempt.value.sourceKeys.length === sourceKeys.length
+    && attempt.value.sourceKeys.every((key, index) => key === sourceKeys[index]);
+}
+
+/** Company classification may only cross sources for the same explicit listing. */
+export function profileForSameListing(source: TickerFinancials, target: TickerFinancials, request?: { symbol: string; exchange?: string }): TickerFinancials["profile"] {
+  if (!hasMeaningfulProfile(source)) return undefined;
+  const identity = (value: TickerFinancials) => [
+    value.quote ? quoteMetadataFromQuote(value.quote) : undefined, value.quoteMetadata,
+  ].find(metadata => metadata && typeof metadata.symbol === "string" && (metadata.listingExchangeName || parsePublicTickerKey(metadata.symbol).exchange));
+  const actual = identity(source), requested = identity(target);
+  if (!actual || !requested) return undefined;
+  const symbol = request?.symbol ?? requested.symbol;
+  const listing = parsePublicTickerKey(symbol).exchange || request?.exchange || requested.listingExchangeName || parsePublicTickerKey(requested.symbol).exchange;
+  const actualListing = actual.listingExchangeName || parsePublicTickerKey(actual.symbol).exchange;
+  if (typeof listing !== "string" || typeof actualListing !== "string" || !listing.trim() || !actualListing.trim()
+    || !providerFinancialsMatchTarget(source, symbol, listing) || !providerFinancialsMatchTarget(target, symbol, listing)
+    || !quoteMetadataMatchesTarget(requested, symbol, listing) || !quoteMetadataMatchesTarget(actual, symbol, listing)) return undefined;
+  return source.profile;
+}
+
 export function hasStatementRows(data: TickerFinancials | null | undefined): boolean {
   return !!data && (
     data.annualStatements.length > 0 ||
@@ -251,6 +281,7 @@ export function hasShallowStatementHistory(data: TickerFinancials | null | undef
 export function mergeMissingStatementArrays(primary: TickerFinancials, fallback: TickerFinancials): TickerFinancials {
   return excludeNonCompanyFinancials({
     ...primary,
+    profile: mergeDefinedObject(primary.profile, profileForSameListing(fallback, primary)),
     statementHistory: fallback.statementHistory?.status === "available" ? fallback.statementHistory : primary.statementHistory ?? fallback.statementHistory,
     financialCurrency: primary.financialCurrency ?? (hasStatementRows(primary) ? undefined : fallback.financialCurrency),
     annualStatements: mergeFinancialStatementRows(primary.annualStatements, fallback.annualStatements),

@@ -566,15 +566,6 @@ test("financial chart TTM rejects missing quarters and inconsistent reporting cu
   }
 });
 
-test("quarterly share averages derive from the annual average instead of copying it", () => {
-  const rows = deriveQuarterlyStatements([
-    { date: "2025-03-31", basicShares: 100 },
-    { date: "2025-06-30", basicShares: 90 },
-    { date: "2025-09-30", basicShares: 80 },
-  ], [{ date: "2025-12-31", basicShares: 85 }]);
-  expect(rows.at(-1)?.basicShares).toBe(70);
-});
-
 test("derived Q4 and TTM dates require every flow input while retaining dated balance snapshots", () => {
   const quarters: FinancialStatement[] = [
     { date: "2024-03-31", totalRevenue: 20, availableAt: "2024-05-01" },

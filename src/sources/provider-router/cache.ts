@@ -4,6 +4,7 @@ import type { TimeRange } from "../../time-series/range";
 import type { BrokerContractRef } from "../../types/instrument";
 import type { PricePoint, Quote, TickerFinancials } from "../../types/financials";
 import { retractKnownCloudValuation } from "../gloomberb-cloud/valuation-observations";
+import { withdrawKnownProviderStatements } from "../../utils/statement-observations";
 import type { CachePolicy, CachePolicyMap } from "../../types/persistence";
 import { canonicalExchange, parsePublicTickerKey, resolveExchangeTimeZone } from "../../utils/exchanges";
 import { redactUnavailableFundamentals, RETRACTABLE_VALUATION_FIELDS } from "../../utils/fundamentals";
@@ -213,6 +214,15 @@ export function listCachedResources<T>(
     return ![...(value.annualStatements ?? []), ...(value.quarterlyStatements ?? [])]
       .some((row) => row.availableAt || Object.keys(row.fieldAvailability ?? {}).length > 0);
   }).map((record) => {
+    if (kind === "financials") {
+      const financials = record.value as TickerFinancials;
+      const ownSymbol = financials.quote?.symbol ?? financials.quoteMetadata?.symbol;
+      const withdrawn = withdrawKnownProviderStatements(financials, {
+        symbol: record.entityKey.startsWith("contract:") ? ownSymbol ?? "" : record.entityKey,
+        exchange: record.variantKey.match(/(?:^|;)exchange=([^;]+)/)?.[1],
+      }, record.sourceKey);
+      if (withdrawn !== record.value) record = { ...record, stale: true, value: withdrawn as T };
+    }
     if (kind !== "financials" || record.sourceKey !== "provider:gloomberb-cloud") return record;
     // Legacy cloud aggregates lost the nested quote's stale flag. Retain valid
     // issuer data, but obtain the quote through its independent freshness route.

@@ -289,6 +289,8 @@ export interface IncomeStatementSource {
 }
 
 export interface FinancialStatement {
+  /** Unresolved, source-attested observation withdrawals; identifiers are validated on read. */
+  withdrawnObservations?: string[];
   /** SEC EPS share basis; raw source values remain available in the evidence. */
   epsBasis?: import("../utils/sec-eps-basis").SecEpsBasis;
   date: string;

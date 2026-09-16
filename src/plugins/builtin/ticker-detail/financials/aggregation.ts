@@ -8,7 +8,7 @@ export interface FinancialTableStatement extends FinancialStatement {
     kind: "trailing-four-quarters";
     periodEnd: string;
     sourcePeriods: Array<Pick<FinancialStatement,
-      "date" | "currency" | "dateSource" | "providerDate" | "dateEvidence" | "availableAt" | "fieldAvailability" | "fieldSources" | "unavailableFields"
+      "date" | "currency" | "dateSource" | "providerDate" | "dateEvidence" | "availableAt" | "fieldAvailability" | "fieldSources" | "unavailableFields" | "withdrawnObservations"
     >>;
   };
 }
@@ -173,13 +173,14 @@ function aggregateQuarterlyStatements(
     aggregation: {
       kind: "trailing-four-quarters",
       periodEnd: statements.at(-1)!.date,
-      sourcePeriods: statements.map(({ date, currency, dateSource, providerDate, dateEvidence, availableAt, fieldAvailability, fieldSources, unavailableFields }) => ({
+      sourcePeriods: statements.map(({ date, currency, dateSource, providerDate, dateEvidence, availableAt, fieldAvailability, fieldSources, unavailableFields, withdrawnObservations }) => ({
         date, currency, dateSource, providerDate,
         ...(dateEvidence ? { dateEvidence: { ...dateEvidence } } : {}),
         availableAt,
         ...(fieldAvailability ? { fieldAvailability: { ...fieldAvailability } } : {}),
         ...(fieldSources ? { fieldSources: { ...fieldSources } } : {}),
         ...(unavailableFields ? { unavailableFields: [...unavailableFields] } : {}),
+        ...(withdrawnObservations ? { withdrawnObservations: [...withdrawnObservations] } : {}),
       })),
     },
   };

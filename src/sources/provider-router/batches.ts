@@ -1,4 +1,5 @@
 import { sanitizeListingFinancialHistory } from "../listing-history";
+import { withdrawKnownProviderStatements } from "../../utils/statement-observations";
 import type {
   CachedFinancialsTarget,
   MarketDataRequestContext,
@@ -12,9 +13,12 @@ import { normalizeTickerFinancialsPriceHistory } from "../../utils/price-history
 import { isQuoteStaleForCurrentSession } from "../../market-data/quotes/freshness";
 import { resolveTickerFinancialsQuoteState } from "../../market-data/quotes/resolution";
 import { selectCachedResource } from "./cache";
+import { financialHistoryVariants } from "./statement-history";
 import {
   dropUnusableProviderQuote,
   hasDeepStatementHistory,
+  needsFinancialProfile,
+  hasRecentFinancialProfileAttempt,
   hasDetailedStatementRows,
   isProviderQuoteUsableForCurrentSession,
   providerFinancialsMatchTarget,
@@ -41,7 +45,7 @@ export class ProviderRouterBatchRoutes {
   constructor(private readonly deps: ProviderRouterBatchDeps) {}
 
   private needsSingleFinancialsRoute(value: TickerFinancials): boolean {
-    return !value.quote || !(hasDetailedStatementRows(value) && hasDeepStatementHistory(value));
+    return !value.quote || needsFinancialProfile(value) || !(hasDetailedStatementRows(value) && hasDeepStatementHistory(value));
   }
 
   async getQuotesBatch(
@@ -131,7 +135,11 @@ export class ProviderRouterBatchRoutes {
     targets.forEach((target, index) => {
       const context = this.deps.contextFromCachedTarget(target);
       const cached = this.deps.readCachedMergedFinancialsSelection(target.symbol, target.exchange, context, true);
-      if (cached.value?.quote && !forceRefresh && target.statementHistory !== "extended") {
+      const profileAttempted = !cached.stale && hasRecentFinancialProfileAttempt(
+        this.deps.resources, this.deps.getEntityKey(target.symbol, context.instrument),
+        financialHistoryVariants(this.deps.getTickerVariantCandidates(target.exchange), context)[0] ?? "", this.deps.getProviderSourceKeys(),
+      );
+      if (cached.value?.quote && !forceRefresh && target.statementHistory !== "extended" && (!needsFinancialProfile(cached.value) || profileAttempted)) {
         results[index] = { target, financials: cached.value };
         return;
       }
@@ -160,6 +168,7 @@ export class ProviderRouterBatchRoutes {
         if (!value) continue;
         const sourceKey = this.deps.providerSourceKey(batchProvider);
         value = sanitizeListingFinancialHistory(value, item.target, sourceKey);
+        value = withdrawKnownProviderStatements(value, item.target, sourceKey);
         for (const entry of providerIndexes.get(key) ?? []) {
           const entityKey = this.deps.getEntityKey(entry.target.symbol, entry.target.instrument ?? undefined);
           const variantKey = this.deps.getTickerVariantCandidates(entry.target.exchange)[0] ?? "";
