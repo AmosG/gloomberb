@@ -185,7 +185,7 @@ function ExecutiveRows({
 function figuresOf(statement: CloudProxyStatementPayload) {
   const figures: Array<{ value: string; label: string; note?: string }> = [];
   const ceo = statement.ceo;
-  if (ceo?.total) {
+  if (ceo?.total != null && Number.isFinite(ceo.total)) {
     const change = formatChange(ceo.total, ceo.priorYearTotal);
     figures.push({
       value: formatPay(ceo.total),

@@ -93,6 +93,21 @@ test("a qualified US pane binding reaches issuer proxy list and year endpoints",
   expect(setup!.captureCharFrame()).toContain("AAPL compensation 2026");
 });
 
+test("the CEO summary preserves reported zero compensation and its full decline", async () => {
+  const report = statement("ALPHA", 2026);
+  report.ceo = {
+    name: "Zero Pay CEO", title: "Chief Executive Officer", total: 0, priorYearTotal: 100,
+    salary: 0, bonus: 0, stockAwards: 0, optionAwards: 0, nonEquityIncentive: 0,
+    pensionAndDeferred: 0, allOther: 0,
+  };
+  const list = spyOn(apiClient, "getProxyStatements").mockResolvedValue({ company: report.company, proxies: [report] });
+  const detail = spyOn(apiClient, "getProxyStatement").mockResolvedValue(report);
+  restore.push(() => list.mockRestore(), () => detail.mockRestore());
+  await mount();
+  const frame = setup!.captureCharFrame();
+  expect(frame).toMatch(/\$0\s+Zero Pay CEO total pay, -100% vs prior year/);
+});
+
 test("a different proxy year clears the prior figures and filing action, and a failed year remains recoverable", async () => {
   const earlier = deferred<CloudProxyStatementPayload>();
   const list = spyOn(apiClient, "getProxyStatements").mockResolvedValue({ company: statement("ALPHA", 2026).company, proxies: [statement("ALPHA", 2026), statement("ALPHA", 2025)] });
