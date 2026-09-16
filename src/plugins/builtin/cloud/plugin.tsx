@@ -28,6 +28,7 @@ import { CloudUpgradeStatusWidget } from "./upgrade-status-widget";
 import { createPublicPaneShare } from "../shared/public-pane";
 import { teamChannelId } from "./team/model";
 import { teamModule, teamStore } from "./team/module";
+import { thesisModule } from "./thesis/module";
 
 interface GloomberbCloudPluginComponents {
   ChatPane: (props: PaneProps) => ReactNode;
@@ -252,6 +253,7 @@ export function createGloomberbCloudPlugin({
       createCloudDataModule(),
       createChatModule(ChatPane, ChatStatusWidget),
       teamModule,
+      thesisModule,
       accountModule,
       askgModule,
       ...extraModules,
