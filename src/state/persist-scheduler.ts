@@ -3,10 +3,14 @@ export const SESSION_SAVE_DEBOUNCE_MS = 1000;
 export const PLUGIN_STATE_SAVE_DEBOUNCE_MS = 500;
 
 const pendingFlushes = new Set<() => Promise<void>>();
+const inFlightSaves = new Set<Promise<void>>();
 
-/** Drain delayed writes before the browser suspends or discards this page. */
+/** Drain scheduled and running writes before a renderer suspends or exits. */
 export async function flushPendingPersistence(): Promise<void> {
-  await Promise.allSettled([...pendingFlushes].map((flush) => flush()));
+  while (pendingFlushes.size > 0 || inFlightSaves.size > 0) {
+    const flushing = [...pendingFlushes].map((flush) => flush());
+    await Promise.allSettled([...flushing, ...inFlightSaves]);
+  }
 }
 
 export interface PersistSchedulerOptions<T> {
@@ -47,6 +51,13 @@ export function createPersistScheduler<T>({
         throw error;
       }
     });
+    // A timer or immediate save may already have left the pending drain set
+    // when the renderer exits. Track queued saves until their writes settle.
+    inFlightSaves.add(saveTask);
+    void saveTask.then(
+      () => { inFlightSaves.delete(saveTask); },
+      () => { inFlightSaves.delete(saveTask); },
+    );
     // Keep the serialization chain usable after a failed immediate save while
     // still returning that failure to its caller.
     inFlight = saveTask.catch(() => {});

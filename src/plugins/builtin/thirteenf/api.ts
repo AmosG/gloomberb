@@ -8,6 +8,7 @@ import type {
 } from "./types";
 import type { PluginPersistence } from "../../../types/plugin";
 import { apiClient } from "../../../api-client";
+import { ApiRequestError } from "../../../api-client/errors";
 import { httpFetch } from "../../../utils/http-transport";
 
 const FORMS_13F_BASE_URL = "https://forms13f.com/api/v1";
@@ -24,20 +25,29 @@ const FORMS_13F_CACHE_POLICY = {
   expireMs: 30 * 24 * 60 * 60_000,
 } as const;
 
-interface Forms13FRequestOptions {
-  cache?: boolean;
+export interface Forms13FReadOptions {
+  onWarning?: (warning: string) => void;
   forceRefresh?: boolean;
+}
+
+interface Forms13FRequestOptions extends Forms13FReadOptions {
+  cache?: boolean;
   signal?: AbortSignal;
 }
 
 let forms13FPersistence: PluginPersistence | null = null;
+const failedRefreshes = new Set<string>();
+const activeRequests = new Map<string, object>();
 
 export function attachThirteenFApiPersistence(persistence: PluginPersistence) {
+  if (forms13FPersistence !== persistence) resetThirteenFApiPersistence();
   forms13FPersistence = persistence;
 }
 
 export function resetThirteenFApiPersistence() {
   forms13FPersistence = null;
+  failedRefreshes.clear();
+  activeRequests.clear();
 }
 
 function padCik(value: string): string {
@@ -89,25 +99,6 @@ function cacheKey(path: string, params: URLSearchParams): string {
   return query ? `${path}?${query}` : path;
 }
 
-function readApiCache<T>(
-  key: string,
-  options: { allowExpired?: boolean } = {},
-): T | null {
-  return forms13FPersistence?.getResource<T>(CACHE_KIND, key, {
-    sourceKey: CACHE_SOURCE,
-    schemaVersion: CACHE_SCHEMA_VERSION,
-    allowExpired: options.allowExpired,
-  })?.value ?? null;
-}
-
-function writeApiCache<T>(key: string, value: T): void {
-  forms13FPersistence?.setResource(CACHE_KIND, key, value, {
-    sourceKey: CACHE_SOURCE,
-    schemaVersion: CACHE_SCHEMA_VERSION,
-    cachePolicy: FORMS_13F_CACHE_POLICY,
-  });
-}
-
 async function fetchForms13F<T>(
   path: string,
   params: Record<string, string | number | undefined>,
@@ -120,31 +111,57 @@ async function fetchForms13F<T>(
   }
 
   const key = cacheKey(path, searchParams);
-  if (options.cache !== false && !options.forceRefresh) {
-    const cached = readApiCache<T>(key);
-    if (cached) return cached;
-  }
+  const store = forms13FPersistence;
+  const cacheOptions = { sourceKey: CACHE_SOURCE, schemaVersion: CACHE_SCHEMA_VERSION };
+  const cached = options.cache !== false ? store?.getResource<T>(CACHE_KIND, key, cacheOptions) : null;
+  if (!options.forceRefresh && !failedRefreshes.has(key) && cached && !cached.stale) return cached.value;
 
-  let value: T;
+  const request = {};
+  activeRequests.set(key, request);
+  const current = () => forms13FPersistence === store && activeRequests.get(key) === request;
   try {
-    value = await apiClient.getCloudSec13F(path, params) as T;
-  } catch {
-    const url = `${FORMS_13F_BASE_URL}${path}?${searchParams.toString()}`;
-    const response = await httpFetch(url, {
-      headers: { Accept: "application/json" },
-      signal: options.signal,
-    });
-    if (!response.ok) {
-      const stale = options.cache !== false ? readApiCache<T>(key, { allowExpired: true }) : null;
-      if (stale) return stale;
-      throw new Error(`Forms13F ${response.status} for ${path}`);
+    options.signal?.throwIfAborted();
+    let value: T;
+    try {
+      value = await apiClient.getCloudSec13F(path, params) as T;
+    } catch {
+      options.signal?.throwIfAborted();
+      const url = `${FORMS_13F_BASE_URL}${path}?${searchParams.toString()}`;
+      const response = await httpFetch(url, {
+        headers: { Accept: "application/json" },
+        signal: options.signal,
+      });
+      if (!response.ok) throw new ApiRequestError(`Forms13F ${response.status} for ${path}`, response.status);
+      value = await response.json() as T;
     }
-    value = await response.json() as T;
+    options.signal?.throwIfAborted();
+    if (current()) {
+      failedRefreshes.delete(key);
+      if (value != null && options.cache !== false) {
+        store?.setResource(CACHE_KIND, key, value, { ...cacheOptions, cachePolicy: FORMS_13F_CACHE_POLICY });
+      }
+    }
+    return value;
+  } catch (error) {
+    options.signal?.throwIfAborted();
+    if (current()) failedRefreshes.add(key);
+    if (error instanceof ApiRequestError && error.status !== undefined && error.status >= 400 && error.status < 500
+      && error.status !== 408 && error.status !== 429) {
+      if (current()) store?.deleteResource(CACHE_KIND, key, { sourceKey: CACHE_SOURCE });
+      throw error;
+    }
+    const retained = options.cache !== false
+      ? store?.getResource<T>(CACHE_KIND, key, { ...cacheOptions, allowExpired: true }) : null;
+    // A caller may retain old research only when it can surface its provenance.
+    if (!retained || !options.onWarning) throw error;
+    const retrieved = new Date(retained.fetchedAt);
+    const age = Number.isFinite(retrieved.getTime()) ? `retrieved ${retrieved.toISOString()}` : "with unavailable retrieval time";
+    const reason = (error instanceof Error ? error.message : String(error)).trim() || "Request failed";
+    options.onWarning(`${key}: refresh failed: ${reason}. Retained data ${age}.`);
+    return retained.value;
+  } finally {
+    if (activeRequests.get(key) === request) activeRequests.delete(key);
   }
-  if (value != null && options.cache !== false) {
-    writeApiCache(key, value);
-  }
-  return value;
 }
 
 function mapFund(raw: any): ThirteenFFund | null {
@@ -226,13 +243,13 @@ export async function searchThirteenFFunds(
   query: string,
   limit = 50,
   signal?: AbortSignal,
-  options: { forceRefresh?: boolean; offset?: number } = {},
+  options: Forms13FReadOptions & { offset?: number } = {},
 ): Promise<ThirteenFFund[]> {
   const raw = await fetchForms13F<unknown>("/funds", {
     name: query,
     offset: options.offset ?? 0,
     limit,
-  }, { signal, forceRefresh: options.forceRefresh });
+  }, { ...options, signal });
   return arrayResponse(raw).map(mapFund).filter((fund): fund is ThirteenFFund => !!fund);
 }
 
@@ -240,13 +257,13 @@ export async function listTopThirteenFFunds(
   quarter: string,
   limit = 50,
   signal?: AbortSignal,
-  options: { forceRefresh?: boolean; offset?: number } = {},
+  options: Forms13FReadOptions & { offset?: number } = {},
 ): Promise<ThirteenFTopFund[]> {
   const raw = await fetchForms13F<unknown>("/topfunds", {
     quarter,
     limit,
     offset: options.offset ?? 0,
-  }, { signal, forceRefresh: options.forceRefresh });
+  }, { ...options, signal });
   return arrayResponse(raw).map(mapTopFund).filter((fund): fund is ThirteenFTopFund => !!fund);
 }
 
@@ -255,14 +272,14 @@ export async function listThirteenFFilings(
   to: string,
   limit = 100,
   signal?: AbortSignal,
-  options: { forceRefresh?: boolean; offset?: number } = {},
+  options: Forms13FReadOptions & { offset?: number } = {},
 ): Promise<ThirteenFFormSummary[]> {
   const raw = await fetchForms13F<unknown>("/filings", {
     from,
     to,
     limit,
     offset: options.offset ?? 0,
-  }, { signal, forceRefresh: options.forceRefresh });
+  }, { ...options, signal });
   return arrayResponse(raw).map(mapForm).filter((form): form is ThirteenFFormSummary => !!form);
 }
 
@@ -272,7 +289,7 @@ export async function listThirteenFForms(
   to: string,
   limit = 12,
   signal?: AbortSignal,
-  options: { forceRefresh?: boolean; offset?: number } = {},
+  options: Forms13FReadOptions & { offset?: number } = {},
 ): Promise<ThirteenFFormSummary[]> {
   const raw = await fetchForms13F<unknown>("/forms", {
     cik: normalizeCik(cik),
@@ -280,7 +297,7 @@ export async function listThirteenFForms(
     to,
     limit,
     offset: options.offset ?? 0,
-  }, { signal, forceRefresh: options.forceRefresh });
+  }, { ...options, signal });
   return arrayResponse(raw).map(mapForm).filter((form): form is ThirteenFFormSummary => !!form);
 }
 
@@ -288,7 +305,7 @@ export async function listThirteenFFormHoldingsPage(
   cik: string,
   accessionNumber: string,
   signal?: AbortSignal,
-  options: { forceRefresh?: boolean; offset?: number; limit?: number } = {},
+  options: Forms13FReadOptions & { offset?: number; limit?: number } = {},
 ): Promise<{ rows: ThirteenFHoldingRecord[]; hasMore: boolean }> {
   const offset = Math.max(0, options.offset ?? 0);
   const limit = Math.max(1, options.limit ?? FORM_PAGE_LIMIT);
@@ -297,7 +314,7 @@ export async function listThirteenFFormHoldingsPage(
     accession_number: accessionNumber,
     limit,
     offset,
-  }, { signal, forceRefresh: options.forceRefresh });
+  }, { ...options, signal });
   const rows = arrayResponse(raw).map(mapHolding).filter((holding): holding is ThirteenFHoldingRecord => !!holding);
   return { rows, hasMore: rows.length >= limit && offset + rows.length < MAX_FORM_ROWS };
 }
@@ -306,7 +323,7 @@ export async function listThirteenFFormHoldings(
   cik: string,
   accessionNumber: string,
   signal?: AbortSignal,
-  options: { forceRefresh?: boolean } = {},
+  options: Forms13FReadOptions = {},
 ): Promise<ThirteenFHoldingRecord[]> {
   const rows: ThirteenFHoldingRecord[] = [];
   for (let offset = 0; offset < MAX_FORM_ROWS; offset += FORM_PAGE_LIMIT) {
@@ -324,7 +341,7 @@ export async function listThirteenFFormHoldings(
 export async function lookupThirteenFTickers(
   tickers: string[],
   signal?: AbortSignal,
-  options: { forceRefresh?: boolean } = {},
+  options: Forms13FReadOptions = {},
 ): Promise<ThirteenFTickerInfo[]> {
   const cleanTickers = tickers
     .map((ticker) => ticker.trim().toUpperCase())
@@ -334,7 +351,7 @@ export async function lookupThirteenFTickers(
   const raw = await fetchForms13F<unknown>("/tickers", {
     cusips: "",
     tickers: cleanTickers,
-  }, { signal, forceRefresh: options.forceRefresh });
+  }, { ...options, signal });
   return arrayResponse(raw).map(mapTickerInfo).filter((ticker): ticker is ThirteenFTickerInfo => !!ticker);
 }
 
@@ -342,12 +359,12 @@ export async function lookupThirteenFHoldersByCusip(
   cusip: string,
   periodOfReport: string,
   signal?: AbortSignal,
-  options: { forceRefresh?: boolean } = {},
+  options: Forms13FReadOptions = {},
 ): Promise<ThirteenFTickerHolders> {
   const raw = objectResponse(await fetchForms13F<unknown>("/holders", {
     cusip,
     period_of_report: periodOfReport,
-  }, { signal, forceRefresh: options.forceRefresh }));
+  }, { ...options, signal }));
   return {
     cusip: stringOrEmpty(raw.cusip) || cusip,
     periodOfReport: stringOrEmpty(raw.period_of_report) || periodOfReport,

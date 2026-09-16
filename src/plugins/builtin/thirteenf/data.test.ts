@@ -5,7 +5,7 @@ import {
   attachThirteenFApiPersistence,
   resetThirteenFApiPersistence,
 } from "./api";
-import { loadBrowserRows, loadFundDetail } from "./data";
+import { loadBrowserRows, loadFilingPositions, loadFundDetail } from "./data";
 import { buildFundHoldingRows, hasComparable13FQuarter } from "./model";
 
 afterEach(() => {
@@ -235,3 +235,37 @@ function json(value: unknown): Response {
     headers: { "Content-Type": "application/json" },
   });
 }
+
+
+test("browser, reconciled report and individual filing expose failed-refresh cache provenance without changing filing dates", async () => {
+  attachThirteenFApiPersistence(new MemoryPluginPersistence());
+  let fail = false;
+  setHttpFetchTransport(async url => {
+    if (fail) throw new Error("Controlled network outage");
+    if (new URL(String(url)).pathname.endsWith("/forms")) return json([{
+      accession_number: "0001067983-26-000001", cik: "1067983", company_name: "Fund",
+      period_of_report: "2026-06-30", filed_as_of_date: "2026-08-14", submission_type: "13F-HR",
+      table_value_total: 100, table_entry_total: 1,
+    }]);
+    return json([{ accession_number: "0001067983-26-000001", cik: "1067983", cusip: "111111111", value: 100, ssh_prnamt: 10 }]);
+  });
+  const browser = await loadBrowserRows("funds", "1067983");
+  const detail = await loadFundDetail("1067983", "Fund");
+  const filing = await loadFilingPositions("1067983", "0001067983-26-000001");
+  fail = true;
+  const retainedBrowser = await loadBrowserRows("funds", "1067983", undefined, { forceRefresh: true });
+  const retainedDetail = await loadFundDetail("1067983", "Fund", undefined, { forceRefresh: true });
+  const retainedFiling = await loadFilingPositions("1067983", "0001067983-26-000001", undefined, { forceRefresh: true });
+  expect(retainedBrowser.rows).toEqual(browser.rows);
+  expect(retainedDetail.latestForm).toEqual(detail.latestForm);
+  expect(retainedDetail.latestHoldings).toEqual(detail.latestHoldings);
+  expect(retainedFiling.rows).toEqual(filing.rows);
+  for (const warning of [retainedBrowser.warning, ...retainedDetail.warnings!, ...retainedFiling.warnings]) {
+    expect(warning).toContain("Controlled network outage");
+    expect(warning).toMatch(/retrieved \d{4}-\d{2}-\d{2}T/);
+  }
+  fail = false;
+  expect((await loadBrowserRows("funds", "1067983")).warning).toBeUndefined();
+  expect((await loadFundDetail("1067983", "Fund")).warnings).toEqual([]);
+  expect((await loadFilingPositions("1067983", "0001067983-26-000001")).warnings).toEqual([]);
+});

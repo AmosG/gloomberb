@@ -45,7 +45,7 @@ async function settle() {
     await setup!.renderOnce();
   });
 }
-async function mount(initialSymbol = "ALPHA") {
+async function mount(initialSymbol = "ALPHA", width = 100, height = 24) {
   const paneId = "executives:test";
   let selectTicker!: (ticker: string) => void;
   const runtime = createTestPluginRuntime();
@@ -58,13 +58,13 @@ async function mount(initialSymbol = "ALPHA") {
     const listing = parsePublicTickerKey(symbol);
     state.tickers.set(symbol, createTestTicker(listing.symbol, listing.symbol, { exchange: listing.exchange ?? "NASDAQ" }));
     return <TestPaneProvider state={state} paneId={paneId} pluginId="ticker-research" runtime={runtime}>
-      <PaneFooterProvider>{footer => <Box width={100} height={24} flexDirection="column">
-        <Box height={23}><ExecutivesPane focused width={100} height={23} /></Box>
-        <PaneFooterBar footer={footer} focused width={100} />
+      <PaneFooterProvider>{footer => <Box width={width} height={height} flexDirection="column">
+        <Box height={height - 1}><ExecutivesPane focused width={width} height={height - 1} /></Box>
+        <PaneFooterBar footer={footer} focused width={width} />
       </Box>}</PaneFooterProvider>
     </TestPaneProvider>;
   }
-  setup = await testRender(<Harness />, { width: 100, height: 24 });
+  setup = await testRender(<Harness />, { width, height });
   await settle();
   return async (ticker: string) => { await act(async () => selectTicker(ticker)); await settle(); };
 }
@@ -311,4 +311,25 @@ test("failed rediscovery after an explicit 404 reports the failure instead of re
   expect(setup!.captureCharFrame()).toContain("Discovery unavailable");
   expect(setup!.captureCharFrame()).not.toContain("No proxy statement on file");
   expect(setup!.captureCharFrame()).not.toContain("⚠");
+});
+
+
+test("a narrow compensation pane keeps each executive total, full name, title and equity share accessible", async () => {
+  const report = statement("ALPHA", 2026);
+  report.highlights = "";
+  report.namedExecutives = [{
+    name: "Alexandra Longname", title: "Chief Financial Officer", total: 22_467_309,
+    salary: 891_519, bonus: null, stockAwards: 18_433_135, optionAwards: null,
+    nonEquityIncentive: 3_120_317, pensionAndDeferred: null, allOther: 22_338,
+  }];
+  const list = spyOn(apiClient, "getProxyStatements").mockResolvedValue({ company: report.company, proxies: [report] });
+  const detail = spyOn(apiClient, "getProxyStatement").mockResolvedValue(report);
+  restore.push(() => list.mockRestore(), () => detail.mockRestore());
+  await mount("ALPHA", 32, 24);
+  const frame = setup!.captureCharFrame();
+  expect(frame).toContain("$22.5M");
+  const words = frame.replace(/\s+/g, " ");
+  expect(words).toContain("Alexandra Longname");
+  expect(words).toContain("Chief Financial Officer");
+  expect(words).toContain("82% equity");
 });

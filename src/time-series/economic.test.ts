@@ -28,3 +28,17 @@ test("missing or mismatched coverage cannot claim a retention boundary", () => {
   }
   expect(fredCreditCoverageNotice("CPIAUCSL", { ...info, id: "CPIAUCSL" }, null)).toBeNull();
 });
+
+test("usable observations outside declared coverage invalidate dates without inventing new source bounds", () => {
+  for (const point of [{ date: "2026-09-14", value: 0 }, { date: "2023-09-11", value: -0.1 }]) {
+    const notice = fredCreditCoverageNotice(info.id, info, null, [point]);
+    expect(notice).toContain("does not match");
+    expect(notice).toContain("3 years");
+    expect(notice).not.toContain("2023-09-12 to 2026-09-10");
+    expect(notice).not.toContain("Earlier dates are unavailable");
+  }
+  expect(fredCreditCoverageNotice(info.id, info, null, [
+    { date: "2026-09-14", value: null }, { date: "2023-09-11", value: NaN },
+    { date: "2026-02-30", value: 1 }, { date: "2026-09-10", value: 0 },
+  ])).toContain("2023-09-12 to 2026-09-10");
+});

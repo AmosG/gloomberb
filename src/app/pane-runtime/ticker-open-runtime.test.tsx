@@ -82,17 +82,26 @@ test("a slow linked ticker applies its tab to the reused or new pane after hydra
 });
 
 
-test("ambiguous deep links open the listing picker without publishing an arbitrary ticker", async () => {
+test.each(["ambiguous", "missing"])("%s ticker feedback waits for current navigation ownership", async (mode) => {
   const actions: AppAction[] = [];
   const notifications: string[] = [];
   const stateRef = { current: createInitialState(createDefaultConfig(":memory:")) };
+  let releaseSearch!: () => void;
+  const pendingSearch = new Promise<void>((resolve) => { releaseSearch = resolve; });
+  let current = true;
   let runtime!: ReturnType<typeof useAppTickerOpenRuntime>;
   function Harness() {
     runtime = useAppTickerOpenRuntime({
       stateRef,
       dataProvider: createTestDataProvider({
-        search: async () => ["BYMA", "NYSE"].map((exchange) => ({ providerId: "cloud", symbol: "GLD", name: "SPDR", exchange, type: "ETF" })),
-        getQuote: async () => ({ symbol: "GLD", price: 400, currency: "USD", lastUpdated: 1, change: 0, changePercent: 0 }),
+        search: async () => {
+          await pendingSearch;
+          return mode === "missing" ? [] : ["BYMA", "NYSE"].map((exchange) => ({ providerId: "cloud", symbol: "GLD", name: "SPDR", exchange, type: "ETF" }));
+        },
+        getQuote: async () => {
+          if (mode === "missing") throw new Error("No quote available");
+          return { symbol: "GLD", price: 400, currency: "USD", lastUpdated: 1, change: 0, changePercent: 0 };
+        },
       }),
       tickerRepository: { createTicker: async () => { throw new Error("Must not create an ambiguous ticker"); } } as any,
       dispatch: (action) => { actions.push(action); },
@@ -103,9 +112,21 @@ test("ambiguous deep links open the listing picker without publishing an arbitra
   }
   const rendered = await testRender(<Harness />, { width: 20, height: 2 });
   try {
-    await act(async () => { await rendered.renderOnce(); await runtime.openPinnedTicker("GLD"); });
-    expect(actions).toEqual([{ type: "SET_COMMAND_BAR", open: true, query: "GLD", launch: { kind: "ticker-search", query: "GLD" } }]);
-    expect(notifications[0]).toContain("Multiple listings match GLD");
+    await act(async () => { await rendered.renderOnce(); });
+    const obsolete = runtime.resolveOpenTickerTarget("GLD", false, () => current);
+    current = false;
+    releaseSearch();
+    await act(async () => { expect(await obsolete).toBeNull(); });
+    expect(actions).toEqual([]);
+    expect(notifications).toEqual([]);
+
+    // Ordinary opening still presents the actionable failure or listing picker.
+    await act(async () => { await runtime.openPinnedTicker("GLD"); });
+    expect(actions).toEqual(mode === "ambiguous"
+      ? [{ type: "SET_COMMAND_BAR", open: true, query: "GLD", launch: { kind: "ticker-search", query: "GLD" } }]
+      : []);
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]).toContain(mode === "ambiguous" ? "Multiple listings match GLD" : "Could not open GLD");
   } finally {
     await act(async () => { rendered.renderer.destroy(); });
   }

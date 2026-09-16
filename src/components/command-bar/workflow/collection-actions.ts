@@ -21,6 +21,7 @@ import type { CommandBarFieldValue } from "./types";
 import type { WorkflowStringValues } from "./broker";
 import { coerceFieldString, slugifyName } from "../helpers";
 import { resolveTickerInputOrThrow } from "./ops";
+import { resolveCollectionTicker } from "./collection-ticker";
 
 export type CommandBarNotifyFn = (
   body: string,
@@ -211,18 +212,19 @@ export function createCommandBarCollectionWorkflowActions(options: {
       const resolvedTicker = await resolveTickerInputOrThrow(
         coerceFieldString(values.ticker),
         activeTickerSymbol,
-        activeCollectionId,
+        portfolio.id,
         buildWorkflowDeps(),
       );
+      const ticker = resolveCollectionTicker(resolvedTicker.ticker, getState().tickers, "portfolio", portfolio.id);
 
       const currency = resolveManualPositionCurrency(
         coerceFieldString(values.currency),
-        resolvedTicker.ticker,
+        ticker,
         portfolio,
         currentState.config.baseCurrency,
       );
 
-      const result = setManualPortfolioPosition(resolvedTicker.ticker, portfolio.id, {
+      const result = setManualPortfolioPosition(ticker, portfolio.id, {
         shares,
         avgCost,
         currency,
@@ -247,11 +249,12 @@ export function createCommandBarCollectionWorkflowActions(options: {
       const resolvedTicker = await resolveTickerInputOrThrow(
         coerceFieldString(values.ticker),
         activeTickerSymbol,
-        activeCollectionId,
+        portfolio.id,
         buildWorkflowDeps(),
       );
+      const ticker = resolveCollectionTicker(resolvedTicker.ticker, getState().tickers, "portfolio", portfolio.id);
 
-      const result = addTickerToPortfolio(resolvedTicker.ticker, portfolio.id);
+      const result = addTickerToPortfolio(ticker, portfolio.id);
       if (result.changed) {
         await tickerRepository.saveTicker(result.ticker);
         dispatch({ type: "UPDATE_TICKER", ticker: result.ticker });

@@ -56,8 +56,9 @@ const emitKeypress = (event: TestKeyEvent) => emitTuiKeypress(testSetup!, event,
 
 const emitKeypressBatch = (events: TestKeyEvent[]) => emitTuiKeypress(testSetup!, events, { trackPropagation: true });
 
-function installAlpha13FTransport() {
+function installAlpha13FTransport(urls: string[] = []) {
   setHttpFetchTransport(async (url) => {
+    urls.push(String(url));
     const parsed = new URL(String(url));
     const path = parsed.pathname;
     if (path.endsWith("/topfunds")) {
@@ -236,8 +237,9 @@ describe("ThirteenFPane", () => {
     expect(holdingsFrame).not.toContain("Accession");
   });
 
-  test("filing detail shows filing metadata and backspace returns to filings", async () => {
-    installAlpha13FTransport();
+  test("filing detail owns refresh requests and backspace returns to filings", async () => {
+    const urls: string[] = [];
+    installAlpha13FTransport(urls);
 
     await act(async () => {
       testSetup = await testRender(<Harness />, { width: 100, height: 24 });
@@ -260,6 +262,13 @@ describe("ThirteenFPane", () => {
     expect(detailFrame).toContain("CALL");
     expect(detailFrame).toContain("037833100");
     expect(detailFrame).toContain("SOLE");
+
+    urls.length = 0;
+    await emitKeypress({ name: "r", sequence: "r" });
+    await renderFrames(6);
+    expect(urls).toHaveLength(1);
+    expect(new URL(urls[0]!).pathname).toEndWith("/form");
+    expect(new URL(urls[0]!).searchParams.get("accession_number")).toBe("0000000001-26-000001");
 
     await emitKeypress({ name: "backspace", sequence: "\u007f" });
     await renderFrames(2);

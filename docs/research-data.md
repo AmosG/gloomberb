@@ -110,6 +110,8 @@ Use the existing Date footer action (`d`) to enter an as-of date, then Enter or 
 
 P&L for manual portfolios covers current holdings. Manual portfolios have no cash-flow performance history; reconcile corporate actions through **PF → Set position**. Distributions are not automatically credited.
 
+Enter the current quantity in **Shares** and the cost per share in **Avg Cost**, using the position's currency. Update quantity and cost yourself after splits or other corporate actions; these values are not automatically adjusted. **AP** can add a ticker to a portfolio without recording a position: leave Shares blank. **Set Portfolio Position** requires a quantity and cost.
+
 Broker contracts without a canonical contract ID use their supplied definition, including local symbol, security type, currency, venue, expiry, right, strike, multiplier and trading class. Changing that definition requires its own quotes and history; an older symbol-only cache cannot establish their identity. Broker resync preserves the supplied definition for each position. Older positions without that identity retain a broker route only when their stored declarations match uniquely; resync establishes missing ownership. Independent issuer fields can still use public-symbol enrichment.
 
 A missing position cost stays unavailable; it is not zero. Portfolio and ticker views use each lot’s known cost and usable current quote before falling back to that lot’s broker-reported snapshot. Mixed results retain both bases, and one unknown lot prevents a complete P&L total. A Broker P&L column uses snapshots; a Mixed P&L column includes both current calculations and snapshots. Broker snapshot profit does not acquire the live quote’s timestamp; position feeds without a profit timestamp leave it unknown. Missing cost or a zero total cost prevents a percentage return, even when absolute P&L is available. JSON/CSV exports retain the selected P&L basis and cost availability. Older stored zero costs cannot be distinguished from explicit zero: resync the broker position or correct a manual position to establish the intended cost.
@@ -165,6 +167,8 @@ CRD shows daily closing option-adjusted spreads for the ICE BofA US Corporate (U
 Each series keeps its own observation date. A shared date appears in the footer when all displayed observations agree; otherwise an AS OF column identifies each row's date. Refresh time does not change an observation date. Headless reports retain each FRED series identifier, title, units, frequency, and date.
 
 Responses must identify the requested FRED series and daily percentage OAS metadata. An incompatible refresh leaves a usable prior observation in place with its original date and the current failure status; it does not replace the series with another index or erase valid cached history.
+
+Credit charts check declared FRED coverage against the returned observations. If usable observations fall outside those dates, the coverage notice withholds the contradictory dates while preserving the observations and any source-declared retention limit. The first and last returned rows do not establish replacement coverage bounds because the request may include a limited window or calculation buffer.
 
 ## Single-name CDS
 
@@ -251,3 +255,5 @@ Financial tables abbreviate large growth percentages (for example, `+163k%`) so 
 `EXEC` reads compensation from covered annual DEF 14A proxy statements. The year selector identifies the proxy filing year; the statement separately identifies the fiscal year of compensation. Stock and option awards use the filing’s grant-date valuation, which is not the amount eventually realized. Open the source filing through the existing footer action (`o`). No covered proxy means this view has no compensation data for that company; it does not establish that the company pays no executives.
 
 Refresh (`r`) reloads the covered years and selected statement. A temporary failure retains available data; the footer warning gives the failed request and original retrieval time. Missing or denied statements are cleared. A successful refresh removes the warning without changing the filing’s reported dates.
+
+13F research rechecks stale source responses when opened. If both hosted and public reads fail, retained cached rows carry the original retrieval time in the existing warning disclosure; filing and reporting dates are unchanged. A failed refresh is retried on reopening, even inside the normal cache lifetime. Filing reports preserve these warnings in their structured output.

@@ -7,6 +7,9 @@ import type { DataProvider } from "../../../types/data-provider";
 import type { Portfolio, TickerRecord, Watchlist } from "../../../types/ticker";
 import { AmbiguousTickerError, resolveTickerSearch, upsertTickerFromSearchResult } from "../../../tickers/search";
 import { parseTickerListInput } from "../../../tickers/list";
+import { resolveTickerOpenTarget, type TickerOpenTarget } from "../../../tickers/open-target";
+import { tickerHasYahooSuffix } from "../../../sources/yahoo-finance/symbols";
+import { parsePublicTickerKey, publicTickerKey } from "../../../utils/exchanges";
 
 export interface SharedWorkflowDeps {
   dataProvider: DataProvider;
@@ -25,7 +28,7 @@ interface CollectionTargetOption {
   description?: string;
 }
 
-interface ResolvedTickerInput {
+export interface ResolvedTickerInput extends Pick<TickerOpenTarget, "instrument" | "listing"> {
   symbol: string;
   ticker: TickerRecord;
   created: boolean;
@@ -138,11 +141,30 @@ export async function resolveTickerInput(
   activeTicker: string | null,
   collectionId: string | null,
   deps: SharedWorkflowDeps,
-  options: { preserveAmbiguity?: boolean } = {},
+  options: { preserveAmbiguity?: boolean; preserveListingKey?: boolean } = {},
 ): Promise<ResolvedTickerInput | null> {
   const state = deps.getState();
   let resolvedTicker;
   try {
+    const query = rawInput?.trim() || activeTicker || "";
+    if (options.preserveListingKey && (parsePublicTickerKey(query).exchange || tickerHasYahooSuffix(query.toUpperCase()))) {
+      // Commands and incoming layouts must preserve the same validated listing
+      // key, including when the repository already stores a bare-symbol holding.
+      const target = await resolveTickerOpenTarget({
+        query: publicTickerKey(query),
+        tickers: state.tickers,
+        dataProvider: deps.dataProvider,
+        tickerRepository: deps.tickerRepository,
+        searchContext: getTickerSearchContext(state, collectionId),
+      });
+      if (!target) return null;
+      const source = state.tickers.has(target.symbol) ? "local" : "provider";
+      deps.dispatch({ type: "UPDATE_TICKER", ticker: target.ticker });
+      if (target.created) {
+        deps.pluginRegistry.events.emit("ticker:added", { symbol: target.symbol, ticker: target.ticker });
+      }
+      return { ...target, source };
+    }
     resolvedTicker = await resolveTickerSearch({
       query: rawInput,
       activeTicker,
@@ -164,8 +186,9 @@ export async function resolveTickerInputOrThrow(
   activeTicker: string | null,
   collectionId: string | null,
   deps: SharedWorkflowDeps,
+  options: { preserveListingKey?: boolean } = {},
 ): Promise<ResolvedTickerInput> {
-  const resolved = await resolveTickerInput(rawInput, activeTicker, collectionId, deps, { preserveAmbiguity: true });
+  const resolved = await resolveTickerInput(rawInput, activeTicker, collectionId, deps, { ...options, preserveAmbiguity: true });
   if (!resolved) {
     throw new Error(`No ticker match found for "${rawInput ?? activeTicker ?? ""}".`);
   }
@@ -211,7 +234,7 @@ export async function resolveTickerListInput(
   const seen = new Set<string>();
 
   for (const token of tokens) {
-    const resolvedTicker = await resolveTickerInputOrThrow(token, null, collectionId, deps);
+    const resolvedTicker = await resolveTickerInputOrThrow(token, null, collectionId, deps, { preserveListingKey: true });
     const symbol = resolvedTicker.symbol;
 
     if (seen.has(symbol)) continue;
