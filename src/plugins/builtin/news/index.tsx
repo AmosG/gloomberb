@@ -45,6 +45,7 @@ function TickerNewsView({ width, height, focused }: { width: number; height: num
   const news = usePersistedNewsArticles(
     `articles:${instrument?.symbol ?? "none"}:${instrument?.exchange ?? ""}`,
     newsState.articles,
+    { keyFamily: "articles:" },
   );
   const { readArticleIds, markArticleRead } = useNewsReadState();
   const { scrollRef, onBodyScrollActivity } = useNewsTableLoadMore(newsQuery, newsState);

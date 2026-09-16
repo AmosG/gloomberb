@@ -20,6 +20,7 @@ export {
   usePluginConfigState,
   usePluginPaneState,
   usePluginState,
+  usePrunePluginPaneState,
   useSetPluginConfigStates
 } from "./state";
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from "react";
 import type { MarketNewsItem, NewsStoryItem } from "../../../../types/news-source";
-import { usePluginPaneState } from "../../../runtime";
+import { usePluginPaneState, usePrunePluginPaneState } from "../../../runtime";
 
 const MAX_PERSISTED_ARTICLES = 200;
 const EMPTY_PERSISTED_ARTICLES: PersistedNewsArticle[] = [];
@@ -75,11 +75,32 @@ function storyItemsSignature(items: PersistedNewsStoryItem[] | undefined): strin
   return items?.map((item) => `${item.id}:${item.publishedAt}`).join("|") ?? "";
 }
 
-export function usePersistedNewsArticles(key: string, articles: MarketNewsItem[]): MarketNewsItem[] {
+/**
+ * The last fetched articles for `key`, kept in pane state so the pane has
+ * something to show on restart before the feed answers.
+ *
+ * A `keyFamily` names a prefix under which the pane keys one entry per symbol
+ * it visits. Only the current member is kept: the feed cache already covers a
+ * revisit within the session, and the copy on disk is only ever read for the
+ * symbol the pane restarts on. Left alone, a ticker pane accumulated tens of
+ * kilobytes per symbol that every pane-state update then copied into the
+ * saved layout.
+ */
+export function usePersistedNewsArticles(
+  key: string,
+  articles: MarketNewsItem[],
+  options: { keyFamily?: string } = {},
+): MarketNewsItem[] {
   const [persistedArticles, setPersistedArticles] = usePluginPaneState<PersistedNewsArticle[]>(
     key,
     EMPTY_PERSISTED_ARTICLES,
   );
+  const pruneSiblings = usePrunePluginPaneState();
+  const { keyFamily } = options;
+  useEffect(() => {
+    if (!keyFamily) return;
+    pruneSiblings((candidate) => candidate !== key && candidate.startsWith(keyFamily));
+  }, [key, keyFamily, pruneSiblings]);
   const restoredArticles = useMemo(
     () => persistedArticles.map(restoreArticle).filter((article): article is MarketNewsItem => !!article),
     [persistedArticles],
