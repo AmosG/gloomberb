@@ -206,7 +206,7 @@ export function PortfolioListPane({ focused, width, height }: PaneProps) {
   const safeSelectedIdx = selectedIdx >= 0 ? selectedIdx : 0;
 
   const prefetchInstrument = useCallback((instrument: InstrumentRef) => {
-    getSharedMarketDataCoordinator()?.prefetchTicker(instrument);
+    getSharedMarketDataCoordinator()?.warmTickerGaps(instrument);
   }, []);
   const noteCursorForPrefetch = useCursorNeighborPrefetch({
     tickers: sortedTickers,

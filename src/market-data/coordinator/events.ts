@@ -8,6 +8,16 @@ import { measurePerf } from "../../utils/perf-marks";
  */
 export const MARKET_DATA_NOTIFY_THROTTLE_MS = 100;
 
+let notifyThrottleMs = MARKET_DATA_NOTIFY_THROTTLE_MS;
+
+/**
+ * Pane tests drive the coordinator tick by tick and assert after a zero
+ * timer; the test harness turns pacing off so they keep that precision.
+ */
+export function setMarketDataNotifyThrottle(ms: number): void {
+  notifyThrottleMs = Math.max(0, ms);
+}
+
 export class MarketDataCoordinatorEvents {
   private version = 0;
   private pendingVersionBump = false;
@@ -88,9 +98,9 @@ export class MarketDataCoordinatorEvents {
     if (this.pendingNotify) return;
     this.pendingNotify = true;
     const sinceLastNotify = performance.now() - this.lastNotifyAt;
-    const delay = sinceLastNotify >= MARKET_DATA_NOTIFY_THROTTLE_MS
+    const delay = sinceLastNotify >= notifyThrottleMs
       ? 0
-      : Math.ceil(MARKET_DATA_NOTIFY_THROTTLE_MS - sinceLastNotify);
+      : Math.ceil(notifyThrottleMs - sinceLastNotify);
     setTimeout(() => this.flushNotify(), delay);
   }
 

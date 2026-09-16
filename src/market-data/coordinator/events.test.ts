@@ -1,5 +1,10 @@
-import { describe, expect, test } from "bun:test";
-import { MARKET_DATA_NOTIFY_THROTTLE_MS, MarketDataCoordinatorEvents } from "./events";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { MARKET_DATA_NOTIFY_THROTTLE_MS, MarketDataCoordinatorEvents, setMarketDataNotifyThrottle } from "./events";
+
+// Test files share one process; the render harness turns pacing off, and
+// this file is the one that verifies it.
+beforeAll(() => setMarketDataNotifyThrottle(MARKET_DATA_NOTIFY_THROTTLE_MS));
+afterAll(() => setMarketDataNotifyThrottle(0));
 
 const waitMicrotask = () => Promise.resolve();
 const waitTimer = () => new Promise((resolve) => setTimeout(resolve, 0));

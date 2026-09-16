@@ -193,6 +193,23 @@ export class MarketDataCoordinator {
     void this.loadChart(createBaselineChartRequest(instrument)).catch(() => {});
   }
 
+  /**
+   * Loads only what the caches lack for an instrument. Rows the user is about
+   * to land on should have something to show; whether that something is
+   * stale is for the pane that shows it to decide, so a warm-up never issues
+   * a refresh of data that is already there.
+   */
+  warmTickerGaps(instrument: InstrumentRef | null | undefined): void {
+    if (!instrument) return;
+    if (resolveEntryData(this.getSnapshotEntry(instrument)) == null) {
+      void this.loadSnapshot(instrument).catch(() => {});
+    }
+    const chartRequest = createBaselineChartRequest(instrument);
+    if (resolveEntryData(this.getChartEntry(chartRequest)) == null) {
+      void this.loadChart(chartRequest).catch(() => {});
+    }
+  }
+
   private runSingleFlight<T>(key: string, task: () => Promise<T>): Promise<T> {
     const existing = this.inFlight.get(key);
     if (existing) {
