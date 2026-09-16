@@ -18,6 +18,7 @@ import {
   type ExtendedHoursData,
 } from "./mappers";
 import type { ChartResult } from "./types";
+import { latestFinancialPeriod } from "../../utils/latest-financial-period";
 
 type YahooChartSnapshot = {
   meta: NonNullable<ChartResult["meta"]>;
@@ -167,11 +168,13 @@ export async function loadYahooTickerFinancials(
     ...extHours,
   };
 
-  const revenue = latest("annualTotalRevenue");
-  const netIncome = latest("annualNetIncome");
-
   const annualStatements = buildYahooStatements(metrics, "annual");
   const quarterlyStatements = buildYahooStatements(metrics, "quarterly");
+  // Annual summary metrics must describe one reporting period, even when a
+  // provider omits a newer observation from an individual metric's series.
+  const annual = latestFinancialPeriod(annualStatements, (statement) => statement.date);
+  const revenue = annual?.totalRevenue;
+  const netIncome = annual?.netIncome;
   const financialCurrency = annualStatements.at(-1)?.currency ?? quarterlyStatements.at(-1)?.currency;
   const fundamentals: Fundamentals = {
     financialCurrency,
@@ -184,14 +187,14 @@ export async function loadYahooTickerFinancials(
     dividendYield: latest("trailingDividendYield"),
     revenue,
     netIncome,
-    eps: latest("annualDilutedEPS"),
-    operatingMargin: revenue && latest("annualOperatingIncome") != null
-      ? latest("annualOperatingIncome")! / revenue
+    eps: annual?.eps,
+    operatingMargin: revenue && annual?.operatingIncome != null
+      ? annual.operatingIncome / revenue
       : undefined,
     profitMargin: revenue && netIncome != null ? netIncome / revenue : undefined,
     return1Y: computeYahooReturn(history, 1),
     return3Y: computeYahooReturn(history, 3),
-    sharesOutstanding: latest("annualDilutedAverageShares"),
+    sharesOutstanding: annual?.dilutedShares,
   };
 
   return {

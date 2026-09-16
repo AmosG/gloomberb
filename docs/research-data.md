@@ -1,5 +1,7 @@
 # Research data conventions
 
+Historical-price table CSVs retain the selected listing, requested range, UTC date convention, loading or refresh-failure status, and active integrity warnings. Their numeric values use the provider history units. This table's history contract does not supply general currency or price-basis metadata; the export does not borrow those units from a current quote or a saved holding. Use a chart report when independently sourced listing metadata is needed.
+
 [User guide](usage.md) · [Price comparisons](price-comparisons.md) · [Economic statistics](economics-reference.md) · [Market valuation](valuation-reference.md)
 
 This reference describes how the terminal calculates and labels research data. Pane bodies show data, units, source dates and blocking failures; recurring methodology belongs here. Active data limitations appear as an amber warning indicator in the existing pane footer. Click it or press `!` in the focused pane to read the details; Escape or Close returns to the research view. The indicator disappears when its warnings clear. Headless reports and shared chart metadata retain source details and limitations.
@@ -43,6 +45,8 @@ Chart controls: select ranges and intervals above the plot; click a legend entry
 ## Financial statements and valuation
 
 Statements are the latest available source snapshots and may include restatements. Historical as-of values are not reconstructed. A period end identifies the reporting period, not necessarily when every metric became public.
+
+Extended SEC history includes filed basic and diluted weighted-average share counts, distinct from shares outstanding at a point in time. Quarterly counts use reported quarters, not year-to-date averages. Counts requiring an unresolved or converted split basis are withheld from the SEC projection, as are issuer-wide denominators for ambiguous share-class listings; they are not inferred from EPS or multiplied by a split ratio.
 
 Financial table headers retain reporting currencies and date-source markers: **P** means a provider period date, which may be approximate; **S** means a SEC-corroborated fiscal date. Filing evidence identifies the period without establishing a publication date for every metric. Mixed or missing reporting currencies are not silently converted.
 
@@ -236,7 +240,7 @@ Analyst price targets retain their declared denomination. A missing denomination
 
 The analyst recommendation summary selects an explicitly current-month row when provided, otherwise preserving the source's first row and period label. A complete analyst count requires all five reported nonnegative integer buckets. Missing categories and unavailable totals remain unknown, while reported zero counts remain zero. The combined sell count requires both sell buckets. Relative periods remain relative; the app does not invent a dated consensus snapshot. Headless analyst research resolves the same remembered venue as ticker-bound research before loading a symbol.
 
-Yahoo keeps an explicitly dated but unavailable metric in its reporting period. A null, omitted, or nonfinite value does not promote an older observation to the latest period, and does not become zero. Malformed or impossible calendar dates are excluded from dated Yahoo statements and latest-metric selection. Values in different source metric series are selected independently; this does not establish common publication dates or a complete current filing.
+Yahoo keeps an explicitly dated but unavailable metric in its reporting period. A null, omitted, or nonfinite value does not promote an older observation to the latest period, and does not become zero. Malformed or impossible calendar dates are excluded from dated Yahoo statements and latest-metric selection. Annual summary values and margins use one latest annual reporting row, including when an individual metric wholly omits that period. Older values remain in their dated history. Trailing provider measures retain their own source observations; this does not establish common publication dates or a complete current filing.
 
 ## Financial growth display
 

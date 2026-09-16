@@ -15,6 +15,7 @@ import type { PaneProps } from "../../../../types/plugin";
 import type { PricePoint } from "../../../../types/financials";
 import { colors, priceColor } from "../../../../theme/colors";
 import { formatCompact, formatPercent } from "../../../../utils/format";
+import { publicTickerKey } from "../../../../utils/exchanges";
 import { formatPriceObservation } from "../../../../market-data/market/format";
 import { pricePointValues, priceHistoryIntegrityNotice } from "../../../../utils/price-history-integrity";
 import {
@@ -198,6 +199,16 @@ export function HistoricalPricesPane({ focused, width, height }: PaneProps) {
       onHeaderClick={() => {}}
       getItemKey={(row) => row.key}
       renderCell={renderCell}
+      getExportMetadata={() => [
+        ["Ticker", symbol ? publicTickerKey(symbol, exchange) : ""],
+        ["Requested range", range],
+        ["Time zone", "UTC"],
+        ["Price units", "Provider history units; general currency and price-basis metadata are unavailable"],
+        ["Status", error ? (rows.length ? "Retained after refresh failure" : "Unavailable")
+          : loading ? (rows.length ? "Refreshing" : "Loading") : rows.length ? "Available" : "Empty"],
+        ...(integrityNotice ? [["Warning", integrityNotice]] : []),
+        ...(error ? [["Error", error]] : []),
+      ]}
       emptyStateTitle={error
         ? unavailableText("Historical prices")
         : loading
