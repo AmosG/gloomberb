@@ -13,6 +13,7 @@ import { TABLE_COLUMN_GAP, tableColumnWidth } from "../../../../../components/ui
 import type { MarketNewsItem } from "../../../../../types/news-source";
 import { colors } from "../../../../../theme/colors";
 import { collectNewsDisplayTickers } from "../../../../../news/ticker-symbols";
+import { useLoadNewsStory } from "../../../../../news/hooks";
 import { formatRelativeTime } from "../../../../../utils/datetime-format";
 import { truncateWithEllipsis } from "../../../../../utils/text-wrap";
 import { formatNewsCategory } from "../categories";
@@ -248,6 +249,15 @@ export function NewsArticleStackView({
     onArticleRead?.(article.id);
     onOpenArticle(article);
   }, [onArticleRead, onOpenArticle]);
+  // The service merges a fetched story into the feed's article, and the
+  // detail skips its own fetch once the article carries story items, so a
+  // story warmed while the cursor rests on its row opens without a wait.
+  // Nothing else happens here: read state is only marked on open.
+  const loadNewsStory = useLoadNewsStory();
+  const prefetchStory = useCallback((article: MarketNewsItem) => {
+    if ((article.items?.length ?? 0) > 0) return;
+    void loadNewsStory(article.id).catch(() => {});
+  }, [loadNewsStory]);
 
   useEffect(() => {
     if (sortedArticles.length === 0) {
@@ -339,6 +349,7 @@ export function NewsArticleStackView({
         onChange: (id) => setSelectedArticleId(id),
       }}
       onActivate={openArticle}
+      prefetchDetail={prefetchStory}
       rootBefore={rootBefore}
       rootHeight={rootHeight}
       onRootKeyDown={onRootKeyDown}

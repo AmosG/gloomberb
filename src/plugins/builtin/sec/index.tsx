@@ -295,6 +295,18 @@ function SecView({ width, height, focused }: { width: number; height: number; fo
     .map((target) => contentErrors.get(target.accessionNumber)).find(Boolean);
   const detailError = openFiling ? documentsError ?? activeContentError ?? null : null;
 
+  // The document list is the first of the two round trips behind a filing.
+  // Warming it while the cursor rests on the row leaves only the content
+  // fetch for Enter; the content itself stays on demand, as the note above
+  // says, so a scroll through the list does not fire a request per filing.
+  const prefetchDocuments = useCallback((item: { id: string }) => {
+    const coordinator = getSharedMarketDataCoordinator();
+    const filing = visibleFilings.find((candidate) => candidate.accessionNumber === item.id);
+    if (!coordinator || !filing) return;
+    if (coordinator.getSecDocumentsEntry(filing.accessionNumber).phase !== "idle") return;
+    void coordinator.loadSecFilingDocuments(filing).catch(() => {});
+  }, [visibleFilings]);
+
   const refresh = useCallback(() => {
     const coordinator = getSharedMarketDataCoordinator();
     if (!coordinator || !instrument || !eligibleTicker) return;
@@ -358,6 +370,7 @@ function SecView({ width, height, focused }: { width: number; height: number; fo
       onSelect={setSelectedIdx}
       openItemId={openItemId}
       onOpenItemIdChange={setOpenItemId}
+      prefetchDetail={prefetchDocuments}
       rootBefore={<Box flexDirection="column" paddingX={1}>
         {secFilingIssuers(filings).map((issuer) => <Prose key={issuer.cik} text={secIssuerLabel(issuer)} width={Math.max(width - 2, 12)} />)}
       </Box>}
