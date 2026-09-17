@@ -31,7 +31,7 @@ export const FUNCTION_LABELS: Record<string, string> = {
   people: "People",
   research: "Research",
   clinical: "Clinical",
-  retail: "Retail & stores",
+  retail: "Retail & hospitality",
   corporate: "Corporate",
   other: "Other",
   unclassified: "Unclassified",

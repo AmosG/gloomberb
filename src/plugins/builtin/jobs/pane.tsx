@@ -171,7 +171,9 @@ function Chart({ summary, width, height }: { summary: CloudJobsSummaryPayload; w
         <Text fg={colors.textDim}>
           {chart.kind === "history"
             ? "The open-roles history starts today."
-            : "Posting dates are not published by this careers system; the history builds from today."}
+            : summary.datesReliable === false
+              ? "This careers system re-dates roles on refresh, so posting dates are not shown; the history builds from today."
+              : "Posting dates are not published by this careers system; the history builds from today."}
         </Text>
       </Box>
     );

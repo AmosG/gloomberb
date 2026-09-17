@@ -590,6 +590,8 @@ export interface CloudJobsSummaryPayload {
   closed30d: number;
   change30d: CloudJobsChange | null;
   change90d: CloudJobsChange | null;
+  /** False when the careers system re-dates every role on refresh, so dates are withheld. Absent on older servers. */
+  datesReliable?: boolean;
   /** Open postings the system dates within the last 30 days. Absent on older servers. */
   posted30d?: number | null;
   postingVelocity: { recent: number; prior: number; percent: number | null } | null;
