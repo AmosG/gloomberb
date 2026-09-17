@@ -77,7 +77,8 @@ describe("live chart quotes", () => {
       },
     ]);
 
-    expect(getLiveChartQuoteTargets(spec).map((target) => target.symbol)).toEqual(["AAPL", "TSLA", "SHOP"]);
+    // Forward P/E ends on the live quote over today's consensus; PEG is a provider snapshot.
+    expect(getLiveChartQuoteTargets(spec).map((target) => target.symbol)).toEqual(["AAPL", "TSLA", "SHOP", "NVDA"]);
   });
 
   test("subscribes to a hidden quote series when a visible study depends on it", () => {

@@ -20,8 +20,16 @@ function loadArgs(): HeadlessPaneLoadArgs {
 describe("market valuation headless model", () => {
   test("loads through the injected cloud client and produces bundle sections", async () => {
     let shillerCalls = 0;
+    const fredRequests: string[] = [];
     const apiClient = {
-      getCloudFredSeries: async () => { throw new Error("unexpected FRED request"); },
+      getCloudFredSeries: async (seriesId: string) => {
+        fredRequests.push(seriesId);
+        if (seriesId === "GDP") return { observations: [{ date: "2025-01-01", value: 30_000 }], fetchedAt: "2026-01-02T00:00:00Z", stale: false };
+        if (seriesId === "NCBEILQ027S" || seriesId === "FBCELLQ027S") {
+          return { observations: [{ date: "2025-01-01", value: 24_000_000 }], fetchedAt: "2026-01-02T00:00:00Z", stale: false };
+        }
+        throw new Error(`unexpected FRED request ${seriesId}`);
+      },
       getCloudHistory: async () => { throw new Error("unexpected history request"); },
       getCloudShiller: async () => {
         shillerCalls += 1;
@@ -56,10 +64,11 @@ describe("market valuation headless model", () => {
     expect(result.sections[1]).toMatchObject({ entries: expect.arrayContaining([
       { label: "Basis", value: expect.stringContaining("real earnings") },
     ]) });
-    for (const indicator of ["buffett", "market-cap-profits", "market-cap-m2"]) {
-      await expect(marketValuationHeadless.load({ ...loadArgs(), argument: indicator }, context))
-        .rejects.toThrow("dollar market capitalization");
-    }
+    const buffett = await marketValuationHeadless.load({ ...loadArgs(), argument: "buffett" }, context);
+    expect(buffett.sections[0]).toMatchObject({
+      rows: [{ id: "buffett", value: 160, formattedValue: "160%", unit: "%", asOf: "2025-01-01" }],
+    });
+    expect(fredRequests.filter((id) => id === "FBCELLQ027S")).toHaveLength(1);
     expect(shillerCalls).toBe(1);
     expect(result.metadata).toMatchObject({ range: "10Y", selected: "shiller-cape" });
   });
