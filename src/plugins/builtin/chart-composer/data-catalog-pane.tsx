@@ -24,6 +24,7 @@ import {
   CATALOG_FILTERS,
   CHART_COMPOSER_TEMPLATE_ID,
   DATA_CATALOG_PANE_ID,
+  DEFAULT_CATALOG_MARKET_SOURCE,
   catalogEmptyCopy,
   catalogExpressionForRow,
   catalogInstrumentMatchesQuery,
@@ -47,6 +48,22 @@ interface CatalogSortPreference {
 }
 
 const DEFAULT_SORT: CatalogSortPreference = { columnId: "source", direction: "asc" };
+
+/**
+ * Which provider a plain market request reaches first. Re-asked on every
+ * mount, so toggling the cloud plugin and reopening the catalog reflects it.
+ */
+function useCatalogMarketSource(): string {
+  const [source, setSource] = useState(DEFAULT_CATALOG_MARKET_SOURCE);
+  useEffect(() => {
+    let cancelled = false;
+    void resolveCatalogMarketSource(getSharedRegistry()?.marketData).then((name) => {
+      if (!cancelled) setSource(name);
+    });
+    return () => { cancelled = true; };
+  }, []);
+  return source;
+}
 
 function nextSortPreference(
   current: CatalogSortPreference,
@@ -103,9 +120,7 @@ export function DataCatalogPane({ focused, width, height }: PaneProps) {
   const loading = tickerQuery && universeLoading;
   const emptyCopy = catalogEmptyCopy(loading, searchQuery);
 
-  // Read on every render: toggling the cloud plugin changes which provider a
-  // request reaches, and the column has to say so.
-  const marketSource = resolveCatalogMarketSource(getSharedRegistry()?.marketData);
+  const marketSource = useCatalogMarketSource();
 
   const rows = useMemo(() => {
     const staticRows = listStaticCatalogInventory(instruments, marketSource);

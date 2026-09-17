@@ -45,16 +45,22 @@ export const DEFAULT_CATALOG_MARKET_SOURCE = "Market data";
  * The name the catalog's SOURCE column shows for securities, options, crypto
  * and futures: whichever provider the router reaches first. It is the cloud in
  * the app, the Yahoo fallback in a CLI without cloud, never a fixed string.
+ * The desktop renderer holds a remote transport rather than the router, so
+ * the answer can arrive asynchronously from the process that owns it.
  */
-export function resolveCatalogMarketSource(
+export async function resolveCatalogMarketSource(
   provider: DataProvider | null | undefined,
-): string {
+): Promise<string> {
   if (!provider) return DEFAULT_CATALOG_MARKET_SOURCE;
-  const router = provider as DataProvider & { primaryMarketSourceName?: () => string | null };
-  if (typeof router.primaryMarketSourceName === "function") {
-    return router.primaryMarketSourceName() ?? DEFAULT_CATALOG_MARKET_SOURCE;
+  if (typeof provider.primaryMarketSourceName === "function") {
+    try {
+      const name = await provider.primaryMarketSourceName();
+      return name?.trim() || DEFAULT_CATALOG_MARKET_SOURCE;
+    } catch {
+      return DEFAULT_CATALOG_MARKET_SOURCE;
+    }
   }
-  return provider.name || DEFAULT_CATALOG_MARKET_SOURCE;
+  return provider.name?.trim() || DEFAULT_CATALOG_MARKET_SOURCE;
 }
 
 export interface CatalogSeriesRow {
