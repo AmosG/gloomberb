@@ -33,6 +33,11 @@ export { SpeedometerGauge } from "./speedometer-gauge";
 export type { SpeedometerSegment } from "./speedometer-gauge";
 export { TickerListTableView } from "./ticker/list-table-view";
 export type { TickerListVisibleRange } from "./ticker/list-table-view";
+// What `TickerListTableView` puts in each configured column, and the value it
+// sorts on. A pane that shows the user's own column set has to read them the
+// same way or its rows disagree with the portfolio's.
+export { getColumnValue, getSortValue } from "../plugins/builtin/portfolio-list/column-values";
+export type { ColumnContext } from "../plugins/builtin/portfolio-list/column-values";
 export { TickerBadgeList } from "./ticker/badge/list";
 export { TickerBadgeText } from "./ticker/badge/text";
 export { InputSearchBar } from "./input-search-bar";
@@ -73,5 +78,8 @@ export type {
   PaneSidebarRowRenderState,
 } from "./layout/pane/sidebar";
 export { useExternalLinkFooter } from "./use-external-link-footer";
+// Markdown as the app renders it, for panes that show text written by someone
+// else: a model's answer, a release note, a fetched article.
+export { MarkdownText } from "./markdown-text";
 export * from "./ui";
 export { usePaneTicker } from "../state/app/context";

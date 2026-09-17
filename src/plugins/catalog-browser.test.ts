@@ -17,6 +17,7 @@ describe("browser plugin catalog", () => {
       "notes",
       "substack",
       "ai",
+      "byok-ai",
       "debug",
       "yahoo",
       "prediction-markets",

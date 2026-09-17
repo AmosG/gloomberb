@@ -26,6 +26,8 @@ const HOST_MODULE_IMPORTERS = {
   "gloomberb/time-series": () => import("../public/time-series"),
   "gloomberb/layout": () => import("../public/layout"),
   "gloomberb/quotes": () => import("../public/quotes"),
+  "gloomberb/tickers": () => import("../public/tickers"),
+  "gloomberb/i18n": () => import("../public/i18n"),
 } satisfies Record<SharedSpecifier, HostModuleImporter>;
 
 /** Import one host module without depending on bare Gloomberb package resolution. */

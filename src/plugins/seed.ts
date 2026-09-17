@@ -33,6 +33,9 @@ export const EXTRACTED_PLUGINS = [
   { id: "market-heatmap", repo: "gloom-sh/gloom-market-heatmap", directory: "gloom-market-heatmap", previousOwnerIds: ["market-overview"] },
   { id: "ipo-calendar", repo: "gloom-sh/gloom-ipo-calendar", directory: "gloom-ipo-calendar", previousOwnerIds: ["macro"] },
   { id: "prediction-markets", repo: "gloom-sh/gloom-prediction-markets", directory: "gloom-prediction-markets" },
+  // Bring-your-own-key AI left under a new id, so the choice to switch the old
+  // one off is recorded against `ai` rather than against this entry.
+  { id: "byok-ai", repo: "gloom-sh/gloom-byok-ai", directory: "gloom-byok-ai", previousOwnerIds: ["ai"] },
 ] as const;
 
 export interface SeedResult {

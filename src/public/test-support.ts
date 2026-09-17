@@ -33,6 +33,29 @@ export type { TestKeyEvent } from "../renderers/opentui/test-utils";
 export { AppContext, PaneInstanceProvider } from "../state/app/context";
 export { appReducer } from "../state/app/context";
 export { createInitialState } from "../core/state/app/state";
+export type { PaneRuntimeState } from "../core/state/app/state";
+
+// The providers the app wraps a pane in, and a ticker record shaped like a
+// saved one, so a pane test renders through the same context stack as the app
+// instead of a hand-built approximation of it.
+export { TestPaneProvider, createTestPaneConfig, createTestTicker } from "../test-support/pane";
+
+// A data provider that answers from fixtures, for a pane whose rows come from
+// quotes, financials, or instrument search.
+export { createTestDataProvider } from "../test-support/data-provider";
+
+// The registry and market data a pane reads through when it is not handed
+// them as props. A suite that sets them is responsible for clearing them.
+export {
+  getSharedMarketData,
+  setSharedMarketDataForTests,
+  setSharedRegistryForTests,
+} from "../plugins/registry/shared";
+export type { PluginRegistry } from "../plugins/registry";
+
+// Ticker persistence on a temporary directory, for a test that exercises the
+// real save path rather than a double of it.
+export { JsonTickerRepository } from "../data/json-ticker-repository";
 
 // The pane chrome the app draws around a plugin pane. A test that asserts on
 // footer status has to render it the same way, or it is asserting on a footer

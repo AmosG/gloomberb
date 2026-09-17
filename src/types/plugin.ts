@@ -745,6 +745,15 @@ export interface PluginConfigField {
 
 export interface GloomPlugin {
   id: string;
+  /**
+   * Where this plugin's saved state lives: its `pluginConfig` entry, its resume
+   * state, and the per-pane state its panes write. Defaults to `id`.
+   *
+   * Set it when a plugin is renamed, or moves out of this repository under a
+   * new id, so the threads, tabs, and defaults a user already has stay theirs.
+   * Everything else (the toggle, the marketplace, seeding) keys off `id`.
+   */
+  stateId?: string;
   name: string;
   version: string;
   description?: string;

@@ -8,6 +8,18 @@
 export * from "../market-data/request-types";
 export * from "../market-data/market/format";
 
+// The coordinator the app loads snapshots through, so a plugin pane that shows
+// its own list of tickers warms the same cache the rest of the app reads.
+export { getSharedMarketDataCoordinator } from "../market-data/coordinator";
+
+// Values derived from a quote and its fundamentals that a pane must not
+// recompute by hand: whether a quote's timestamp can be trusted, trailing
+// returns, and the market capitalization with its currency and provenance.
+export { hasValidQuoteObservationTime } from "../market-data/quotes/freshness";
+export { computeTickerPriceReturns } from "../market-data/ticker-price-returns";
+export { selectMarketCapitalization } from "../utils/market-capitalization";
+export type { MarketCapitalization } from "../utils/market-capitalization";
+
 // Yahoo Finance's JSON endpoints need a crumb and cookie pair, retries on the
 // 4xx/5xx it throws under load, and browser-like headers. A plugin scraping a
 // Yahoo screener or quote endpoint gets that dance here rather than
