@@ -530,6 +530,119 @@ export interface CloudEarningsCallPayload {
   webcastUrl?: string | null;
 }
 
+export interface CloudJobsSeriesPoint {
+  day: string;
+  open: number;
+  new: number;
+  closed: number;
+}
+
+export interface CloudJobsBucket {
+  id: string;
+  label: string;
+  count: number;
+  share: number;
+  /** Count 30 days ago from the daily roll-up, when the history reaches back. */
+  previous: number | null;
+}
+
+export interface CloudJobsPosting {
+  id: number;
+  title: string;
+  function: string | null;
+  seniority: string | null;
+  location: string | null;
+  country: string | null;
+  remote: boolean | null;
+  postedAt: string | null;
+  postedPrecision: "exact" | "approximate" | "floor" | null;
+  firstSeenAt: string;
+  url: string | null;
+  salaryMin: number | null;
+  salaryMax: number | null;
+  salaryCurrency: string | null;
+  salaryPeriod: string | null;
+  tags: string[];
+}
+
+export interface CloudJobsChange {
+  count: number;
+  percent: number | null;
+}
+
+export interface CloudJobsSummaryPayload {
+  status: "ok";
+  ticker: string;
+  companyName: string | null;
+  coverage: {
+    status: string;
+    vendor: string | null;
+    careersUrl: string | null;
+    lastCollectedAt: string | null;
+    firstObservedAt: string | null;
+    daysObserved: number;
+    employeeCount: number | null;
+  };
+  openCount: number;
+  openPerThousandEmployees: number | null;
+  new7d: number;
+  new30d: number;
+  closed30d: number;
+  change30d: CloudJobsChange | null;
+  change90d: CloudJobsChange | null;
+  /** Open postings the system dates within the last 30 days. Absent on older servers. */
+  posted30d?: number | null;
+  postingVelocity: { recent: number; prior: number; percent: number | null } | null;
+  remoteShare: number | null;
+  medianAgeDays: number | null;
+  series: CloudJobsSeriesPoint[];
+  postedByWeek: Array<{ weekStart: string; count: number }>;
+  functions: CloudJobsBucket[];
+  countries: CloudJobsBucket[];
+  seniority: CloudJobsBucket[];
+  tags: CloudJobsBucket[];
+  salary: {
+    count: number;
+    currency: string;
+    period: string;
+    medianMin: number;
+    medianMax: number;
+    byFunction: Array<{ id: string; label: string; count: number; medianMin: number; medianMax: number }>;
+  } | null;
+  recent: CloudJobsPosting[];
+}
+
+export interface CloudJobsPendingPayload {
+  status: "pending";
+  ticker: string;
+  queued: boolean;
+  message: string;
+}
+
+export type CloudJobsResponse = CloudJobsSummaryPayload | CloudJobsPendingPayload;
+
+export interface CloudJobsPostingsPayload {
+  postings: CloudJobsPosting[];
+  total: number;
+}
+
+export interface CloudJobsMoverPayload {
+  ticker: string;
+  companyName: string | null;
+  openCount: number;
+  employeeCount: number | null;
+  change30d: CloudJobsChange | null;
+  postingVelocity: { recent: number; prior: number; percent: number | null } | null;
+  new7d: number;
+  topFunction: string | null;
+}
+
+export interface CloudJobsMoversPayload {
+  asOf: string;
+  covered: number;
+  movers: CloudJobsMoverPayload[];
+}
+
 export interface CloudEarningsCallListPayload {
   calls: CloudEarningsCallPayload[];
   /** Set when asking about a company started a search that is still running. */

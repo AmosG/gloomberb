@@ -4,6 +4,7 @@ import { executivesModule } from "./executives";
 import { filingEventsModule } from "./filing-events";
 import { holdersModule } from "./holders";
 import { insiderModule } from "./insider";
+import { jobsModule } from "./jobs";
 import { optionsModule } from "./options";
 import { optionsCalculatorModule } from "./options-calculator";
 import { composeBuiltinPlugin } from "./plugin-module";
@@ -32,6 +33,7 @@ export const tickerResearchPlugin = composeBuiltinPlugin({
     thirteenFModule,
     secModule,
     insiderModule,
+    jobsModule,
     executivesModule,
     riskFactorsModule,
     filingEventsModule,
