@@ -31,10 +31,12 @@ import {
   filterCatalogRows,
   listStaticCatalogInventory,
   looksLikeCatalogTickerQuery,
+  resolveCatalogMarketSource,
   type CatalogFilterId,
   type CatalogSeriesRow,
 } from "./catalog-inventory";
 import { useCatalogUniverse } from "./use-series-catalog";
+import { getSharedRegistry } from "../../registry";
 
 type CatalogColumnId = "series" | "source" | "kind" | "expression";
 type CatalogColumn = DataTableColumn & { id: CatalogColumnId };
@@ -101,11 +103,16 @@ export function DataCatalogPane({ focused, width, height }: PaneProps) {
   const loading = tickerQuery && universeLoading;
   const emptyCopy = catalogEmptyCopy(loading, searchQuery);
 
+  // Read on every render: toggling the cloud plugin changes which provider a
+  // request reaches, and the column has to say so.
+  const marketSource = resolveCatalogMarketSource(getSharedRegistry()?.marketData);
+
   const rows = useMemo(() => {
-    const staticRows = listStaticCatalogInventory(instruments);
+    const staticRows = listStaticCatalogInventory(instruments, marketSource);
     const resolvedRows = tickerQuery
       ? catalogRowsForResolvedInstruments(
         instruments.filter((instrument) => catalogInstrumentMatchesQuery(instrument, searchQuery)),
+        marketSource,
       )
       : [];
     const merged = new Map<string, CatalogSeriesRow>();
@@ -119,7 +126,7 @@ export function DataCatalogPane({ focused, width, height }: PaneProps) {
       compareSortValues(sortValue(columnId, left), sortValue(columnId, right), direction)
       || left.label.localeCompare(right.label)
     ));
-  }, [filter, instruments, searchQuery, sortPreference, tickerQuery]);
+  }, [filter, instruments, marketSource, searchQuery, sortPreference, tickerQuery]);
 
   useEffect(() => {
     if (selectedId && rows.some((row) => row.id === selectedId)) return;

@@ -18,6 +18,11 @@ export type ShillerField =
  */
 export type SeriesSource =
   | { kind: "fred"; seriesId: string; limit: number }
+  /**
+   * Same-dated FRED series added together. A date is kept only when every leg
+   * reports it, so a partially released quarter never shows as a drop.
+   */
+  | { kind: "fred-sum"; seriesIds: readonly string[]; limit: number }
   | { kind: "market-history"; symbol: string; exchange: string; startDate: string }
   | { kind: "shiller"; field: ShillerField };
 

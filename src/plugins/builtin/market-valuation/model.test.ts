@@ -144,10 +144,10 @@ describe("fitTrend", () => {
 });
 
 describe("classifyZone", () => {
-  test("Buffett boundaries are half-open at 75, 90, 115, 135", () => {
-    expect(classifyZone(BUFFETT_INDICATOR, 74.999).id).toBe("significantly-undervalued");
-    expect(classifyZone(BUFFETT_INDICATOR, 90).id).toBe("fair");
-    expect(classifyZone(BUFFETT_INDICATOR, 135).id).toBe("significantly-overvalued");
+  test("Buffett boundaries are half-open at 60, 75, 110, 140", () => {
+    expect(classifyZone(BUFFETT_INDICATOR, 59.999).id).toBe("significantly-undervalued");
+    expect(classifyZone(BUFFETT_INDICATOR, 75).id).toBe("fair");
+    expect(classifyZone(BUFFETT_INDICATOR, 140).id).toBe("significantly-overvalued");
   });
 
   test("a yield-shaped indicator reads the other way round", () => {
@@ -265,15 +265,17 @@ describe("projectView", () => {
   });
 
   test("staleness uses the indicator's own cadence", () => {
-    // Three months past the last print: overdue daily, normal for quarterly Z.1.
+    // Three months past the last print: overdue monthly, normal for quarterly Z.1.
     const nowMs = Date.parse("2026-04-01");
-    expect(projectView(build, "ALL", { nowMs }).observationStale).toBe(true);
-    const quarterly: IndicatorBuild = { ...build, indicator: TOBINS_Q };
-    expect(projectView(quarterly, "ALL", { nowMs }).observationStale).toBe(false);
-    expect(projectView(quarterly, "ALL", { nowMs: Date.parse("2026-09-02") }).observationStale)
-      .toBe(false);
-    expect(projectView(quarterly, "ALL", { nowMs: Date.parse("2027-02-01") }).observationStale)
-      .toBe(true);
+    const monthly: IndicatorBuild = { ...build, indicator: SHILLER_CAPE };
+    expect(projectView(monthly, "ALL", { nowMs }).observationStale).toBe(true);
+    for (const quarterly of [build, { ...build, indicator: TOBINS_Q }]) {
+      expect(projectView(quarterly, "ALL", { nowMs }).observationStale).toBe(false);
+      expect(projectView(quarterly, "ALL", { nowMs: Date.parse("2026-09-02") }).observationStale)
+        .toBe(false);
+      expect(projectView(quarterly, "ALL", { nowMs: Date.parse("2027-02-01") }).observationStale)
+        .toBe(true);
+    }
   });
 
   test("a direct indicator has no vintage label to show", () => {
