@@ -42,7 +42,9 @@ import {
   valuationCurrencyWarning,
   valuationPriceIssues,
   valuationSeriesUsesLiveQuote,
+  valuationSeriesUsesPriceHistory,
 } from "./fundamentals";
+import { FORWARD_PE_BASIS_NOTICE, REALIZED_NTM_PE_BASIS_NOTICE } from "./forward-valuation";
 import { valuationPriceWarning } from "./valuation-price";
 import { extractSecuritySeries, collectPriceHistoryIntegrity, chartPriceHistoryIntegrityNotices } from "./market";
 import {
@@ -1018,9 +1020,10 @@ export async function resolveChartSpecData(
   const loadFinancials = (source: Extract<ChartSeriesSpec["source"], { kind: "security" }>) => {
     const fieldId = getTimeSeriesField(source.fieldId)?.id ?? source.fieldId;
     // Calendar-window research needs the same full source bundle as a period
-    // count. Current forward multiples have no historical statement series.
+    // count. The extended bundle also carries the estimate history behind the
+    // forward multiples; PEG alone has no historical series.
     const statementHistory = /^(fundamental|valuation)\./.test(fieldId)
-      && fieldId !== "valuation.forwardPE" && fieldId !== "valuation.pegRatio"
+      && fieldId !== "valuation.pegRatio"
       ? "extended" as const : undefined;
     const key = `${instrumentKey(source)}|history:${statementHistory ?? "default"}`;
     let pending = cache.financialsByInstrument.get(key);
@@ -1252,12 +1255,13 @@ export async function resolveChartSpecData(
       const source = seriesSpec.source;
       const marketField = isMarketFieldId(source.fieldId);
       const quoteDerivedValuation = valuationSeriesUsesLiveQuote(source.fieldId);
-      const needsHistory = marketField || quoteDerivedValuation;
+      const historyPricedValuation = valuationSeriesUsesPriceHistory(source.fieldId);
+      // Forward P/E only prices a history when the bundle carries estimates;
+      // otherwise the provider's single figure stands and history is not required.
+      const forwardPE = getTimeSeriesField(source.fieldId)?.id === "valuation.forwardPE";
+      const needsHistory = marketField || (historyPricedValuation && !forwardPE);
       const needsFinancials = !isPriceOnlyMarketFieldId(source.fieldId)
         || !source.instrument.exchange?.trim();
-      const quoteOverride = marketField || quoteDerivedValuation
-        ? sources.quoteOverrides?.get(chartQuoteOverrideKeyForSource(source))
-        : undefined;
       const financialsPromise = needsFinancials ? loadFinancials(source) : Promise.resolve(null);
       let resolvedSource = source;
       let financials: TickerFinancials | null;
@@ -1265,14 +1269,27 @@ export async function resolveChartSpecData(
       if (needsHistory && !source.instrument.exchange?.trim()) {
         financials = await financialsPromise;
         resolvedSource = sourceWithResolvedExchange(source, financials);
-        history = await loadHistory(resolvedSource, quoteDerivedValuation);
+        history = await loadHistory(resolvedSource, historyPricedValuation);
       } else {
         [financials, history] = await Promise.all([
           financialsPromise,
-          needsHistory ? loadHistory(source, quoteDerivedValuation) : Promise.resolve(null),
+          needsHistory ? loadHistory(source, historyPricedValuation) : Promise.resolve(null),
         ]);
         resolvedSource = sourceWithResolvedExchange(source, financials);
       }
+      if (forwardPE && financials?.epsEstimates && !history) {
+        history = await loadHistory(resolvedSource, true).catch((error: unknown) => {
+          warnings.push(`${seriesSpec.label ?? seriesSpec.id}: ${error instanceof Error ? error.message : String(error)}`);
+          return null;
+        });
+      }
+      // A provider's forward P/E snapshot keeps its own timestamp; only a series
+      // that prices today's consensus itself follows the live quote.
+      const followsLiveQuote = marketField
+        || (quoteDerivedValuation && (!forwardPE || !!financials?.epsEstimates));
+      const quoteOverride = followsLiveQuote
+        ? sources.quoteOverrides?.get(chartQuoteOverrideKeyForSource(source))
+        : undefined;
       // Display style does not change the sampling interval: line and candle
       // charts must merge a live quote into the same active price bar.
       const liveBarResolution = initialResolution;
@@ -1316,9 +1333,14 @@ export async function resolveChartSpecData(
       );
       if (!result) throw new Error(`Unknown field ${source.fieldId}.`);
       const reportedForwardPE = merged.fundamentals?.forwardPE;
-      if (source.fieldId === "valuation.forwardPE" && reportedForwardPE != null
+      if (source.fieldId === "valuation.forwardPE" && merged.epsEstimates) {
+        warnings.push(FORWARD_PE_BASIS_NOTICE);
+      } else if (source.fieldId === "valuation.forwardPE" && reportedForwardPE != null
         && Number.isFinite(reportedForwardPE) && reportedForwardPE <= 0) {
         result.warning = [result.warning, "Reported forward P/E is non-positive and is not meaningful for valuation."].filter(Boolean).join(" ");
+      }
+      if (source.fieldId === "valuation.realizedNtmPE" && merged.epsEstimates) {
+        warnings.push(REALIZED_NTM_PE_BASIS_NOTICE);
       }
       if (isFundamentalFieldId(source.fieldId) && fundamentalSeriesUsesAvailabilityFallback(merged, source)) {
         result.warning = [result.warning, "Publication dates are unavailable for some observations; period-end dates are used as a fallback."].filter(Boolean).join(" ");

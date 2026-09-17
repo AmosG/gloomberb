@@ -226,6 +226,7 @@ export function mapCloudFinancials(
         ? point
         : mapPricePoint(point as unknown as CloudPricePointPayload, divisor, exchange),
     ),
+    ...(financials.epsEstimates ? { epsEstimates: financials.epsEstimates } : {}),
   }, target), target ?? { symbol: quote?.symbol ?? financials.quoteMetadata?.symbol ?? "", exchange }, "provider:gloomberb-cloud");
 }
 

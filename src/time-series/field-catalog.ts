@@ -228,6 +228,7 @@ const FIELDS = [
   ...([
     ["trailingPE", "Trailing P/E", "P/E"],
     ["forwardPE", "Forward P/E", "Forward P/E"],
+    ["realizedNtmPE", "Realized NTM P/E", "Realized P/E"],
     ["pegRatio", "PEG Ratio", "PEG"],
     ["priceSales", "Price / Sales", "P/S"],
     ["evSales", "EV / Sales", "EV/S"],

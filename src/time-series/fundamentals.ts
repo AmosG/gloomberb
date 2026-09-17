@@ -6,6 +6,7 @@ import { areNearbyFinancialPeriodEnds, completeAvailability, statementFieldAvail
 import { copyIncomeField, incomeFieldKnowledgeDate, incomeFieldOwner, isIncomeStatementField } from "../utils/income-statement";
 import { hasStatementWithdrawals, isWithdrawnStatementValue, mergeStatementWithdrawals, redactWithdrawnStatement } from "../utils/statement-observations";
 import { canonicalTimeSeriesFieldId, getTimeSeriesField } from "./field-catalog";
+import { forwardPeHistory, realizedNtmPeHistory } from "./forward-valuation";
 import { reportingCurrencySeries } from "./reporting-currency";
 import { createValuationCurrencyContext, type ValuationCurrencyContext } from "./valuation-currency";
 import { valuationPriceAtOrBefore, valuationQuoteIssue, type ValuationPriceIssue } from "./valuation-price";
@@ -97,6 +98,7 @@ const FUNDAMENTAL_IDS = new Set([
 const VALUATION_IDS = new Set([
   "trailingPE",
   "forwardPE",
+  "realizedNtmPE",
   "pegRatio",
   "priceSales",
   "evSales",
@@ -104,12 +106,20 @@ const VALUATION_IDS = new Set([
   "priceFcf",
 ]);
 
+/** Statement-based multiples whose latest point is the live quote over the latest period. */
 const QUOTE_DERIVED_VALUATION_IDS = new Set([
   "trailingPE",
   "priceSales",
   "evSales",
   "evEbitda",
   "priceFcf",
+]);
+
+/** Multiples priced from history at each observation date; forward P/E also ends on the live quote. */
+const PRICE_HISTORY_VALUATION_IDS = new Set([
+  ...QUOTE_DERIVED_VALUATION_IDS,
+  "forwardPE",
+  "realizedNtmPE",
 ]);
 
 function finiteNumber(value: unknown): value is number {
@@ -789,7 +799,13 @@ function currentDerivedValuationPoint(
 /** Whether a valuation field derives a current point from the latest quote. */
 export function valuationSeriesUsesLiveQuote(fieldId: string): boolean {
   const [namespace, metric = ""] = canonicalTimeSeriesFieldId(fieldId).split(".");
-  return namespace === "valuation" && QUOTE_DERIVED_VALUATION_IDS.has(metric);
+  return namespace === "valuation" && (QUOTE_DERIVED_VALUATION_IDS.has(metric) || metric === "forwardPE");
+}
+
+/** Whether a valuation field needs the full price history to date its observations. */
+export function valuationSeriesUsesPriceHistory(fieldId: string): boolean {
+  const [namespace, metric = ""] = canonicalTimeSeriesFieldId(fieldId).split(".");
+  return namespace === "valuation" && PRICE_HISTORY_VALUATION_IDS.has(metric);
 }
 
 function preferredPeriodPoint(
@@ -879,7 +895,17 @@ export function extractFundamentalSeries(
   }
 
   if (namespace !== "valuation" || !VALUATION_IDS.has(metric)) return [];
-  if (metric === "forwardPE" || metric === "pegRatio") {
+  if (metric === "forwardPE") {
+    const points = forwardPeHistory(financials, createValuationCurrencyContext(financials));
+    if (points.length > 0) return points;
+    // Without an estimate history the provider's own figure is all there is.
+    const current = providerCurrentValuationPoint(financials, metric);
+    return current ? [current] : [];
+  }
+  if (metric === "realizedNtmPE") {
+    return realizedNtmPeHistory(financials, createValuationCurrencyContext(financials));
+  }
+  if (metric === "pegRatio") {
     const current = providerCurrentValuationPoint(financials, metric);
     return current ? [current] : [];
   }
