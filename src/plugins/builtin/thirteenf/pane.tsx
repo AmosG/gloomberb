@@ -256,6 +256,11 @@ export function ThirteenFPane({ focused, width, height }: PaneProps) {
     setSearchFocused(false);
     setDetailSeed({ cik: row.cik, name: row.name });
   }, []);
+  // Every request behind a fund detail is cached per path, so warming it
+  // while the cursor rests on the row makes Enter read from cache.
+  const prefetchDetail = useCallback((row: FundBrowserRow) => {
+    void loadFundDetail(row.cik, row.name).catch(() => {});
+  }, []);
 
   const browserStatusInfo = useMemo<PaneFooterSegment[]>(() => [
         ...(loadingMore ? [{ id: "loading-more", parts: [{ text: "loading more", tone: "muted" as const }] }] : []),
@@ -343,6 +348,7 @@ export function ThirteenFPane({ focused, width, height }: PaneProps) {
           onChange: (id) => setSelectedId(id),
         }}
         onActivate={openDetail}
+        prefetchDetail={prefetchDetail}
         onRootKeyDown={handleRootKeyDown}
         rootWidth={width}
         rootBefore={rootBefore}

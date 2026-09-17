@@ -68,6 +68,8 @@ interface FeedDataTableStackViewProps {
   onOpenItemIdChange?: (itemId: string | null) => void;
   scrollRef?: RefObject<ScrollBoxRenderable | null>;
   onBodyScrollActivity?: () => void;
+  /** Warms the detail of an item once the cursor rests on its row; see DataTableStackView. */
+  prefetchDetail?: (item: FeedDataTableItem, index: number) => void;
 }
 
 function timestampValue(item: FeedDataTableItem): number {
@@ -155,6 +157,7 @@ export function FeedDataTableStackView({
   onOpenItemIdChange,
   scrollRef,
   onBodyScrollActivity,
+  prefetchDetail,
 }: FeedDataTableStackViewProps) {
   const language = useAppLanguage();
   const [sortPreference, setSortPreference] = useState<SortPreference>({
@@ -358,6 +361,7 @@ export function FeedDataTableStackView({
         onChange: (_index, row) => onSelect(row.itemIndex),
       }}
       onActivate={(row) => openRow(row)}
+      prefetchDetail={prefetchDetail ? (row) => prefetchDetail(row.item, row.itemIndex) : undefined}
       rootBefore={rootBefore}
       rootAfter={rootAfter}
       rootWidth={width}

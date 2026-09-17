@@ -445,6 +445,15 @@ export function EarningsCallsPane({ focused, width, height }: EarningsCallsViewP
     setLookup((current) => (current ? { ...current, calls: update(current.calls) } : current));
   }, []);
 
+  // Warms a published transcript while the cursor rests on its row, so
+  // opening it does not wait. Only calls that already have one: the same
+  // request on a call without a transcript asks the server to produce it,
+  // which is a deliberate act reserved for Enter.
+  const prefetchTranscript = useCallback((call: CloudEarningsCallPayload) => {
+    if (!call.hasTranscript || !access.emailVerified || !access.hasProAccess) return;
+    void loadTranscript(call.id).catch(() => {});
+  }, [access.emailVerified, access.hasProAccess]);
+
   // A published transcript is immutable, so it loads once per call. Opening
   // a call that has none asks the server to produce it, then checks back
   // until it arrives.
@@ -848,6 +857,7 @@ export function EarningsCallsPane({ focused, width, height }: EarningsCallsViewP
         setTranscriptError(null);
         setDetailOpen(true);
       }}
+      prefetchDetail={prefetchTranscript}
       rootWidth={width}
       // The search bar sits inside the frame, so the frame takes the full height.
       rootHeight={Math.max(2, height)}

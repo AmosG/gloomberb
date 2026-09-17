@@ -9,7 +9,7 @@ import {
 import { createDefaultConfig } from "../../types/config";
 import { Box, Text } from "../../ui";
 import type { DataTableCell, DataTableColumn } from "../ui";
-import { DataTableStackView } from "./stack-view";
+import { DataTableStackView, DETAIL_PREFETCH_REST_MS } from "./stack-view";
 
 interface Row {
   id: string;
@@ -33,12 +33,15 @@ const groupedRows: Row[] = [
 let testSetup: Awaited<ReturnType<typeof testRender>> | undefined;
 
 afterEach(async () => {
+  prefetched = [];
   if (!testSetup) return;
   await act(async () => {
     testSetup!.renderer.destroy();
   });
   testSetup = undefined;
 });
+
+let prefetched: string[] = [];
 
 function Harness() {
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -73,6 +76,7 @@ function Harness() {
             onChange: (index) => setSelectedIndex(index),
           }}
           onActivate={(row) => setOpenRow(row)}
+          prefetchDetail={(row) => { prefetched.push(row.id); }}
           columns={columns}
           items={rows}
           sortColumnId={null}
@@ -171,6 +175,22 @@ describe("DataTableStackView", () => {
     const rootFrame = testSetup.captureCharFrame();
     expect(rootFrame).toContain("Second row");
     expect(rootFrame).not.toContain("Second detail");
+  });
+
+  test("warms the detail of the row the cursor rests on, not the rows it passes", async () => {
+    testSetup = await testRender(<Harness />, { width: 60, height: 12 });
+    await renderSettled();
+    // Mounting selects the first row without a cursor move; nothing is warmed.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, DETAIL_PREFETCH_REST_MS + 30)); });
+    expect(prefetched).toEqual([]);
+
+    await emitKeypress({ name: "j", sequence: "j" });
+    await emitKeypress({ name: "k", sequence: "k" });
+    await renderSettled();
+    expect(prefetched).toEqual([]);
+
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, DETAIL_PREFETCH_REST_MS + 30)); });
+    expect(prefetched).toEqual(["first"]);
   });
 
   test("closes detail from backspace", async () => {
