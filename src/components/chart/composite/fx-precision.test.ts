@@ -16,7 +16,10 @@ const cases = [
   ["JPY=X", "JPY", "CURRENCY", 153.5540008544922, "¥153.554001"],
   ["JPYUSD=X", "USD", "CURRENCY", 0.00651236716657877, "$0.006512"],
   ["AAPL", "USD", "EQUITY", 259.7499, "$259.75"],
-  ["BTC-USD", "USD", "CRYPTOCURRENCY", 79_432.18, "$79,432.18"],
+  // A real provider quote, not a hand-rounded one: crypto display precision has
+  // to survive the float tail rather than spend eight decimals on it.
+  ["BTC-USD", "USD", "CRYPTOCURRENCY", 109_556.1640625, "$109,556.16"],
+  ["ETH-USD", "USD", "CRYPTOCURRENCY", 3_421.8843212, "$3,421.88"],
   ["SHIB-USD", "USD", "CRYPTOCURRENCY", 0.00000526, "$0.00000526"],
 ] as const;
 
