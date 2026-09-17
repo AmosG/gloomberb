@@ -9,6 +9,7 @@ export function useCongressTradesKeyboard({
   detailMode,
   focused,
   load,
+  loadPreviousYear,
   openSelectedTicker,
   openSelectedTradeMember,
   openSelectedTradeSource,
@@ -18,6 +19,8 @@ export function useCongressTradesKeyboard({
   detailMode: DetailMode;
   focused: boolean;
   load: (refresh?: boolean) => void;
+  /** Null once there is no earlier year left to ask for. */
+  loadPreviousYear: (() => void) | null;
   openSelectedTicker: () => void;
   openSelectedTradeMember: () => void;
   openSelectedTradeSource: () => void;
@@ -55,6 +58,12 @@ export function useCongressTradesKeyboard({
       load(true);
       return true;
     }
+    if (loadPreviousYear && isPlainKey(event, "p")) {
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      loadPreviousYear();
+      return true;
+    }
     if (activeTab === "trades" && isPlainKey(event, "t")) {
       event.preventDefault?.();
       event.stopPropagation?.();
@@ -74,7 +83,7 @@ export function useCongressTradesKeyboard({
       return true;
     }
     return false;
-  }, [activeTab, load, openSelectedTicker, openSelectedTradeMember, openSelectedTradeSource]);
+  }, [activeTab, load, loadPreviousYear, openSelectedTicker, openSelectedTradeMember, openSelectedTradeSource]);
 
   useShortcut((event) => {
     if (!focused || detailMode || event.targetEditable) return;

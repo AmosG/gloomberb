@@ -25,7 +25,9 @@ import {
   nextCongressPage,
   buildMemberColumns,
   buildTradeColumns,
+  congressScanNotice,
   nextSort,
+  previousCongressYearPage,
   selectedIndexById,
   sortedMembers,
   sortedTrades,
@@ -97,14 +99,12 @@ export function CongressTradesPane({ focused, width, height }: PaneProps) {
       });
   }, []);
 
-  const loadMore = useCallback(() => {
-    if (!payload || loadingMore || status !== "loaded") return;
-    const nextRequest = nextCongressPage(payload);
-    if (!nextRequest) return;
+  const loadPage = useCallback((request: ReturnType<typeof nextCongressPage>) => {
+    if (!request || !payload) return;
     const gen = fetchGenRef.current;
     setLoadingMore(true);
     loadCongressHouse({
-      ...nextRequest,
+      ...request,
       limit: CONGRESS_TRADE_LIMIT,
       filingLimit: CONGRESS_FILING_LIMIT,
     })
@@ -126,7 +126,21 @@ export function CongressTradesPane({ focused, width, height }: PaneProps) {
         if (fetchGenRef.current !== gen) return;
         setLoadingMore(false);
       });
-  }, [loadingMore, payload, status]);
+  }, [payload]);
+
+  const loadMore = useCallback(() => {
+    if (!payload || loadingMore || status !== "loaded") return;
+    loadPage(nextCongressPage(payload));
+  }, [loadPage, loadingMore, payload, status]);
+
+  // Each earlier year is a fresh set of documents to read, so it waits to be asked for.
+  const previousYearRequest = payload && !canLoadMoreCongress(payload)
+    ? previousCongressYearPage(payload)
+    : null;
+  const loadPreviousYear = useCallback(() => {
+    if (loadingMore || status !== "loaded" || !previousYearRequest) return;
+    loadPage(previousYearRequest);
+  }, [loadPage, loadingMore, previousYearRequest, status]);
 
   const onTradeScroll = useTableLoadMore(
     tradeScrollRef,
@@ -226,6 +240,7 @@ export function CongressTradesPane({ focused, width, height }: PaneProps) {
     detailMode,
     focused,
     load,
+    loadPreviousYear: previousYearRequest ? loadPreviousYear : null,
     openSelectedTicker,
     openSelectedTradeMember,
     openSelectedTradeSource,
@@ -237,10 +252,13 @@ export function CongressTradesPane({ focused, width, height }: PaneProps) {
     detailMode,
     detailTrade,
     error,
+    loadPreviousYear: previousYearRequest ? loadPreviousYear : null,
+    notice: payload ? congressScanNotice(payload) : null,
     openSelectedTicker,
     openSelectedTradeMember,
     openSelectedTradeSource,
     payload,
+    previousYear: previousYearRequest?.year ?? null,
     selectedTrade,
     status,
   });
