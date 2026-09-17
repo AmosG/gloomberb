@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { CompositeChartScene } from "./types";
 import {
+  compositeAxisTicks,
   formatChartLegendValue,
   formatCompositeAxisValue,
   formatCompositeCursorDate,
@@ -210,6 +211,38 @@ test("international price legends and cursors retain currency and price precisio
   }
   expect(formatChartLegendValue(173.45, "CAD/JPY", "derived-unit:cad/jpy")).toBe("173 CAD/JPY");
   expect(formatChartLegendValue(173.45, "CPI", "index")).toBe("173 CPI");
+});
+
+// Regression: compact ticks held a zoomed BTC axis inside one rounding step,
+// so the gutter repeated $110K three times instead of locating the price.
+test("zoomed price axes spend the digits their ticks need and stay compact when they do not", () => {
+  const domain = (min: number, max: number, extra: Record<string, unknown> = {}) => ({
+    side: "left" as const,
+    seriesIds: ["price"],
+    min,
+    max,
+    scale: "linear" as const,
+    unit: "USD",
+    unitGroup: "price:USD",
+    ...extra,
+  });
+  const labels = (...args: Parameters<typeof domain>) => compositeAxisTicks(domain(...args), 3).map((tick) => tick.label);
+  const crypto = { priceAssetCategories: ["CRYPTOCURRENCY"] };
+
+  expect(labels(109_500, 109_620, crypto)).toEqual(["$109,620", "$109,560", "$109,500"]);
+  expect(labels(109_500, 109_620, { ...crypto, scale: "log" })).toEqual(["$109,620", "$109,560", "$109,500"]);
+  expect(labels(1.1598, 1.1607, { priceAssetCategories: ["CURRENCY"] })).toEqual(["$1.1607", "$1.1603", "$1.1598"]);
+  expect(labels(0.000005, 0.000006, crypto)).toEqual(["$0.00000600", "$0.00000550", "$0.00000500"]);
+
+  // A wide view is already legible, so it keeps the narrower compact gutter.
+  expect(labels(52_000, 133_000, crypto)).toEqual(["$133K", "$93K", "$52K"]);
+  expect(labels(52_000, 133_000, { ...crypto, scale: "log" })).toEqual(["$133K", "$83K", "$52K"]);
+  expect(labels(250, 262, { priceAssetCategories: ["EQUITY"] })).toEqual(["$262", "$256", "$250"]);
+
+  for (const [min, max] of [[109_500, 109_620], [1.1598, 1.1607], [0.000005, 0.000006], [52_000, 133_000]] as const) {
+    const ticks = compositeAxisTicks(domain(min, max, crypto), 4).map((tick) => tick.label);
+    expect(new Set(ticks).size).toBe(ticks.length);
+  }
 });
 
 // Regression: truncating before PriceAxisLabels bypassed its full-value guard.
