@@ -20,8 +20,11 @@ import {
   CONGRESS_MEMBER_TRADE_LIMIT,
   CONGRESS_TRADES_PANE_ID,
   canLoadMoreCongress,
+  congressPageAfterEmpty,
+  congressScanNotice,
   mergeCongressPages,
   nextCongressPage,
+  previousCongressYearPage,
   buildMemberTradeColumns,
   formatAmountRange,
   formatLag,
@@ -156,10 +159,8 @@ export function MemberTradesDetail({
       });
   }, [filingLimit, member.memberName, member.stateDistrict]);
 
-  const loadMore = useCallback(() => {
-    if (!detailPayload || loadingMore || status !== "loaded") return;
-    const nextRequest = nextCongressPage(detailPayload);
-    if (!nextRequest) return;
+  const loadPage = useCallback((nextRequest: ReturnType<typeof nextCongressPage>) => {
+    if (!detailPayload || !nextRequest) return;
     const gen = fetchGenRef.current;
     setLoadingMore(true);
     loadCongressHouse({
@@ -175,14 +176,34 @@ export function MemberTradesDetail({
           trade.memberName === member.memberName
           && trade.stateDistrict === member.stateDistrict
         ));
-        setDetailPayload(merged);
+        // A member filter often yields nothing new; without this the table would
+        // keep asking for the next window until it ran out of years.
+        setDetailPayload(
+          merged.trades.length > (detailPayload?.trades.length ?? 0)
+            ? merged
+            : congressPageAfterEmpty(merged),
+        );
         setTrades(exactMemberTrades.length > 0 ? exactMemberTrades : merged.trades);
       })
       .finally(() => {
         if (fetchGenRef.current !== gen) return;
         setLoadingMore(false);
       });
-  }, [detailPayload, filingLimit, loadingMore, member.memberName, member.stateDistrict, status]);
+  }, [detailPayload, filingLimit, member.memberName, member.stateDistrict]);
+
+  const loadMore = useCallback(() => {
+    if (!detailPayload || loadingMore || status !== "loaded") return;
+    loadPage(nextCongressPage(detailPayload));
+  }, [detailPayload, loadPage, loadingMore, status]);
+
+  // Reading an earlier year means reading its documents, so it stays a deliberate step.
+  const previousYearRequest = detailPayload && !canLoadMoreCongress(detailPayload)
+    ? previousCongressYearPage(detailPayload)
+    : null;
+  const loadPreviousYear = useCallback(() => {
+    if (loadingMore || status !== "loaded" || !previousYearRequest) return;
+    loadPage(previousYearRequest);
+  }, [loadPage, loadingMore, previousYearRequest, status]);
 
   const onTradeScroll = useTableLoadMore(
     tradeScrollRef,
@@ -217,6 +238,7 @@ export function MemberTradesDetail({
     ?? member
   ), [detailPayload?.members, member]);
   const maybeTruncated = status === "loaded" && trades.length >= CONGRESS_MEMBER_TRADE_LIMIT;
+  const scanNotice = detailPayload ? congressScanNotice(detailPayload) : null;
 
   useEffect(() => {
     if (selectedTradeId && sortedRows.some((trade) => trade.id === selectedTradeId)) return;
@@ -254,24 +276,37 @@ export function MemberTradesDetail({
       openSelectedSource();
       return true;
     }
+    if (isPlainKey(event, "p") && previousYearRequest) {
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      loadPreviousYear();
+      return true;
+    }
     return false;
-  }, [openSelectedSource, openSelectedTicker, refresh, selectedTrade?.sourceUrl, selectedTrade?.ticker]);
+  }, [loadPreviousYear, openSelectedSource, openSelectedTicker, previousYearRequest, refresh, selectedTrade?.sourceUrl, selectedTrade?.ticker]);
 
   usePaneFooter(`${CONGRESS_TRADES_PANE_ID}:member-detail`, () => ({
     info: [
       ...(status === "loading" ? [{ id: "member-loading", parts: [{ text: "loading member trades", tone: "muted" as const }] }] : []),
       ...(error ? [{ id: "member-error", parts: [{ text: error, tone: "warning" as const }] }] : []),
+      ...(scanNotice ? [{ id: "member-scan", parts: [{ text: scanNotice, tone: "muted" as const }] }] : []),
       ...(maybeTruncated ? [{ id: "member-truncated", parts: [{ text: `limited to ${CONGRESS_MEMBER_TRADE_LIMIT} trades`, tone: "warning" as const }] }] : []),
     ],
     hints: [
       { id: "member-ticker", key: "t", label: "icker", onPress: openSelectedTicker, disabled: !selectedTrade?.ticker },
       { id: "member-open", key: "o", label: "pen", onPress: openSelectedSource, disabled: !selectedTrade?.sourceUrl },
+      ...(previousYearRequest
+        ? [{ id: "member-prev-year", key: "p", label: `rev year ${previousYearRequest.year}`, onPress: loadPreviousYear }]
+        : []),
     ],
   }), [
     error,
+    loadPreviousYear,
     maybeTruncated,
     openSelectedSource,
     openSelectedTicker,
+    previousYearRequest,
+    scanNotice,
     selectedTrade?.sourceUrl,
     selectedTrade?.ticker,
     status,

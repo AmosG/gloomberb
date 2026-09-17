@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import type { CloudCongressHousePayload } from "../../../api-client";
-import { canLoadMoreCongress, congressPageAfterEmpty, mergeCongressPages, nextCongressPage } from "./model";
+import {
+  canLoadMoreCongress,
+  congressPageAfterEmpty,
+  congressScanNotice,
+  mergeCongressPages,
+  nextCongressPage,
+  previousCongressYearPage,
+} from "./model";
 
 function payload(overrides: Partial<CloudCongressHousePayload> = {}): CloudCongressHousePayload {
   return {
@@ -23,7 +30,7 @@ function payload(overrides: Partial<CloudCongressHousePayload> = {}): CloudCongr
 }
 
 describe("congress paging", () => {
-  test("walks remaining trades, then more filings, then the previous year", () => {
+  test("walks remaining trades, then more filings, then stops", () => {
     expect(nextCongressPage(payload({ hasMore: true, nextOffset: 40 }))).toEqual({
       year: 2026,
       offset: 40,
@@ -33,11 +40,6 @@ describe("congress paging", () => {
       year: 2026,
       offset: 0,
       filingOffset: 20,
-    });
-    expect(nextCongressPage(payload({ hasMore: false, hasMoreFilings: false, year: 2026 }))).toEqual({
-      year: 2025,
-      offset: 0,
-      filingOffset: 0,
     });
     expect(nextCongressPage(payload({
       hasMore: false,
@@ -50,17 +52,34 @@ describe("congress paging", () => {
       offset: 0,
       filingOffset: 20,
     });
-    expect(canLoadMoreCongress(payload({ hasMore: false, hasMoreFilings: false, year: 2008 }))).toBe(false);
+  });
+
+  test("never crosses into an earlier year on its own", () => {
+    // Each earlier year is a fresh set of source documents to read.
+    expect(nextCongressPage(payload({ hasMore: false, hasMoreFilings: false }))).toBeNull();
+    expect(canLoadMoreCongress(payload({ hasMore: false, hasMoreFilings: false }))).toBe(false);
     expect(nextCongressPage(congressPageAfterEmpty(payload({
       hasMore: true,
-      year: 2026,
       filingsScanned: 20,
       filingCount: 80,
-    })))).toEqual({
+    })))).toBeNull();
+  });
+
+  test("offers the earlier year only when asked, and only back to 2008", () => {
+    expect(previousCongressYearPage(payload({ year: 2026 }))).toEqual({
       year: 2025,
       offset: 0,
       filingOffset: 0,
     });
+    expect(previousCongressYearPage(payload({ year: 2008 }))).toBeNull();
+  });
+
+  test("names the filings missing from an incomplete window", () => {
+    expect(congressScanNotice(payload())).toBeNull();
+    expect(congressScanNotice(payload({ filingsFailed: 2 }))).toBe("2 filings unavailable");
+    expect(congressScanNotice(payload({ filingsFailed: 1, filingsPending: 3 }))).toBe(
+      "4 filings not read yet, retrying later",
+    );
   });
 
   test("appends unique trades and members from the next page", () => {

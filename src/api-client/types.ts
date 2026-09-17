@@ -498,6 +498,12 @@ export interface CloudCongressHousePayload {
   year: number;
   indexUpdatedAt: string | null;
   filingsScanned: number;
+  /** Filings in the window the server could read. */
+  filingsParsed?: number;
+  /** Filings the source refused; the server retries them on its own schedule. */
+  filingsFailed?: number;
+  /** Filings left unread because the server's daily document budget is spent. */
+  filingsPending?: number;
   filingCount: number;
   filingOffset?: number;
   hasMore?: boolean;
