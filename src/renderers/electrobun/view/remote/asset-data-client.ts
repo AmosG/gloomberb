@@ -26,6 +26,7 @@ type PayloadBuilder = (...args: unknown[]) => Record<string, unknown>;
 
 const assetDataPayloads: Record<string, PayloadBuilder> = {
   canProvide: (ticker, exchange, context) => ({ ticker, exchange, context }),
+  primaryMarketSourceName: () => ({}),
   getCachedFinancialsForTargets: (targets, options) => ({ targets, options }),
   getQuotesBatch: (targets, options) => ({ targets, options }),
   getTickerFinancialsBatch: (targets, options) => ({ targets, options }),
