@@ -26,6 +26,7 @@ export {
   usePluginPaneState,
   usePluginState,
   usePluginTickerActions,
+  usePrunePluginPaneState,
   useSetPluginConfigStates,
 } from "../plugins/runtime";
 export type { PluginRuntimeAccess } from "../plugins/runtime";

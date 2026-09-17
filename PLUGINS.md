@@ -1168,6 +1168,7 @@ import {
   useAssetData,
   useMarketData,
   usePluginPaneState,
+  usePrunePluginPaneState,
   usePluginState,
   usePluginConfigState,
   usePluginTickerActions,
@@ -1181,6 +1182,15 @@ const { openCommandBar, showPane, hidePane, notify } = usePluginAppActions();
 
 // Per-pane layout state (scoped to the current pane instance)
 const [expanded, setExpanded] = usePluginPaneState("expanded", false);
+
+// Pane state is mirrored into the saved layout and written to disk, so a
+// value keyed per symbol (`articles:${symbol}`) grows with every ticker the
+// pane visits and every update copies all of it. Drop the keys the pane no
+// longer shows.
+const prunePaneState = usePrunePluginPaneState();
+useEffect(() => {
+  prunePaneState((key) => key.startsWith("articles:") && key !== `articles:${symbol}`);
+}, [prunePaneState, symbol]);
 
 // Persistent plugin state (survives restarts)
 const [cache, setCache] = usePluginState("cache", null, { schemaVersion: 1 });
