@@ -236,24 +236,6 @@ function earningsSettings(context: PaneSettingsContext): PaneSettingsDef {
 export const earningsModule: PluginModule = {
   setup(ctx) {
     attachEarningsCalendarPersistence(ctx.persistence);
-    ctx.registerCommand({
-      id: "earnings-monitor-shortcut",
-      label: "Earnings Monitor",
-      keywords: ["earnings", "monitor", "calendar", "em", "eps"],
-      shortcut: "EM",
-      shortcutArg: {
-        placeholder: "tickers",
-        kind: "text",
-        parse: (arg) => ({ tickers: arg.trim() }),
-      },
-      category: "data",
-      description: "Open upcoming earnings, optionally scoped to tickers.",
-      execute: (values) => {
-        ctx.createPaneFromTemplate("earnings-monitor-pane", {
-          arg: values?.tickers ?? "",
-        });
-      },
-    });
   },
 
   dispose() {
@@ -279,43 +261,23 @@ export const earningsModule: PluginModule = {
       id: "earnings-calendar-pane",
       paneId: "earnings-calendar",
       label: "Earnings Calendar",
-      description: "Upcoming earnings dates and estimates for your tickers.",
-      keywords: ["earn", "earnings", "calendar", "eps", "revenue", "quarterly"],
-      shortcut: { prefix: "ERN", argPlaceholder: "tickers", argKind: "ticker-list" },
+      description: "Upcoming earnings dates and estimates: alone, for your portfolio and watchlists; with tickers, for those.",
+      keywords: ["earn", "earnings", "calendar", "monitor", "em", "eps", "revenue", "quarterly"],
+      // Tickers are optional on purpose: ERN alone follows the active
+      // collection and must not silently narrow to the active ticker.
+      shortcut: { prefix: "ERN", argPlaceholder: "tickers", argKind: "ticker-list", argOptional: true },
       headless: earningsCalendarHeadless,
-      // The shortcut takes tickers, so honor them the way the report does.
-      // Ignoring them left `ERN NKE` scoped to the active collection, which
-      // rendered "No tickers in scope" while the report listed NKE's earnings.
+      canCreate: () => true,
+      // Tickers named on the command bar win over the collection. Ignoring
+      // them left `ERN NKE` scoped to the active collection, which rendered
+      // "No tickers in scope" while the report listed NKE's earnings.
       createInstance: (context, options) => {
         const symbols = earningsScopeSymbols(options);
         return {
-          title: symbols.length > 0 ? `ERN ${formatTickerListInput(symbols)}` : undefined,
-          settings: symbols.length > 0
-            ? { symbols, symbolsText: formatTickerListInput(symbols) }
-            : context.activeCollectionId
-              ? { collectionId: context.activeCollectionId }
-              : undefined,
-        };
-      },
-    },
-    {
-      id: "earnings-monitor-pane",
-      paneId: "earnings-calendar",
-      label: "Earnings Monitor",
-      description: "Upcoming earnings dates and estimates, optionally scoped to tickers.",
-      keywords: ["earn", "earnings", "monitor", "em", "eps", "revenue"],
-      canCreate: () => true,
-      createInstance: (context, options) => {
-        const raw = options?.arg?.trim() ?? "";
-        const symbols = raw ? parseTickerListInput(raw) : [];
-        return {
-          title: symbols.length > 0 ? `EM ${formatTickerListInput(symbols)}` : "Earnings Monitor",
+          title: symbols.length > 0 ? `ERN ${formatTickerListInput(symbols)}` : "Earnings Calendar",
           placement: "floating",
           settings: symbols.length > 0
-            ? {
-              symbols,
-              symbolsText: formatTickerListInput(symbols),
-            }
+            ? { symbols, symbolsText: formatTickerListInput(symbols) }
             : context.activeCollectionId
               ? { collectionId: context.activeCollectionId }
               : undefined,

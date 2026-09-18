@@ -56,7 +56,7 @@ Use `HELP` inside Gloomberb for the live shortcut list. The common command-bar p
 | `GE <tickers>` | Valuation multiple graph |
 | `GR <tickers>` | Security relationship graph |
 | `EE <ticker>` | Events view with earnings and revenue estimates |
-| `EM [tickers]` | Earnings monitor |
+| `ERN [tickers]` | Earnings calendar; alone, your portfolio and watchlists |
 | `SRCH [query]` | Full-text search across earnings call transcripts, news, and SEC filings |
 | `CALLS [ticker]` | Earnings call transcripts; alone, every transcribed call |
 | `JOBS [ticker]` | Hiring from the company's careers system; alone, every covered company |
