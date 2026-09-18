@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MarketNewsItem, NewsStoryItem } from "../../../../../types/news-source";
 import { colors } from "../../../../../theme/colors";
 import { TickerBadge } from "../../../../../components/ticker/badge";
-import { ExternalLink, ExternalLinkText } from "../../../../../components/ui";
+import { ExternalLinkText } from "../../../../../components/ui";
 import { collectNewsDisplayTickers } from "../../../../../news/ticker-symbols";
 import { useInlineTickers } from "../../../../../state/hooks/inline-tickers";
 import { isPlainKey } from "../../../../../utils/keyboard";
@@ -348,7 +348,6 @@ export function NewsDetailView({ item, focused, width, showTitle = true }: {
               ))}
             </Box>
           )}
-          <ExternalLink url={item.url} color={colors.textDim} />
         </Box>
       </ScrollBox>
     </Box>
