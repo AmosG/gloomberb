@@ -73,6 +73,8 @@ const VENDOR_LABELS: Record<string, string> = {
   successfactors: "SuccessFactors",
   jobvite: "Jobvite",
   jsonld: "careers site",
+  sitemap: "careers site",
+  amazon: "amazon.jobs",
 };
 
 type DetailTab = "roles" | "locations" | "seniority" | "salary";
