@@ -2,7 +2,7 @@ import { TextAttributes } from "../../../ui";
 import type { DataTableCell } from "../../../components";
 import type { OptionContract, OptionsChain } from "../../../types/financials";
 import { blendHex, colors } from "../../../theme/colors";
-import { blendForContrast, contrastRatio } from "../../../theme/color-utils";
+import { blendForContrast, blendForSeparation, contrastRatio } from "../../../theme/color-utils";
 import { formatCompact } from "../../../utils/format";
 import { formatMarketPrice } from "../../../market-data/market/format";
 import { optionSpread } from "./market-reference";
@@ -24,6 +24,13 @@ type OptionFieldDef = {
 };
 
 const OPTION_TEXT_MIN_CONTRAST = 4.5;
+// How far the in-the-money band has to stand off the out-of-the-money one. The
+// two sit edge to edge across the strike column, so this is the step the eye
+// actually reads, and holding it fixed is what makes the banding land the same
+// way on every palette. The ceiling keeps the band a tint of the background
+// rather than a wall of the side colour.
+const MONEYNESS_MIN_SEPARATION = 1.45;
+const MONEYNESS_MAX_TINT = 0.42;
 
 export const OPTION_FIELD_DEFS: OptionFieldDef[] = [
   { id: "bid", label: "Bid", header: "BID", width: 7, description: "Best bid price." },
@@ -210,11 +217,16 @@ function optionMoneynessBackground(
   rowState: { selected: boolean },
 ): string | undefined {
   if (rowState.selected || !column.side) return undefined;
-  const inTheMoney = inferColumnMoneyness(row, contract, column.side);
+  const outOfTheMoney = blendHex(colors.bg, colors.neutral, 0.055);
+  if (!inferColumnMoneyness(row, contract, column.side)) return outOfTheMoney;
   const sideColor = column.side === "call" ? colors.positive : colors.negative;
-  return inTheMoney
-    ? blendHex(colors.bg, sideColor, 0.13)
-    : blendHex(colors.bg, colors.neutral, 0.055);
+  return blendForSeparation(
+    colors.bg,
+    sideColor,
+    outOfTheMoney,
+    MONEYNESS_MIN_SEPARATION,
+    MONEYNESS_MAX_TINT,
+  );
 }
 
 function inferColumnMoneyness(
