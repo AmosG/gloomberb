@@ -476,6 +476,7 @@ export async function doctorPlugin(nameOrPath: string): Promise<PluginDoctorRepo
 
   const link = linkHostPackages(candidate);
   if (link.error) add("host-link", "fail", `gloomberb runtime is not linked: ${link.error}`);
+  else if (link.provider === "process") add("host-link", "ok", "served by the host process");
   else add("host-link", "ok", `linked ${link.linked.join(", ")}`);
 
   let plugin: GloomPlugin | null = null;

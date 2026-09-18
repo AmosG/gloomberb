@@ -30,6 +30,7 @@ const BUN_ONLY_MODULES = [
   "src/plugins/bundle.ts",
   "src/plugins/seed.ts",
   "src/plugins/host-link.ts",
+  "src/plugins/host-resolver.ts",
   "src/cli/restore-plugins.ts",
 ];
 

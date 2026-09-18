@@ -14,6 +14,13 @@ const HOST_MODULE_IMPORTERS = {
   "react/jsx-dev-runtime": () => import("react/jsx-dev-runtime"),
   "gloomberb/types/plugin": () => import("../types/plugin"),
   "gloomberb/types/persistence": () => import("../types/persistence"),
+  "gloomberb/types/broker": () => import("../types/broker"),
+  "gloomberb/types/config": () => import("../types/config"),
+  "gloomberb/types/data-provider": () => import("../types/data-provider"),
+  "gloomberb/types/financials": () => import("../types/financials"),
+  "gloomberb/types/instrument": () => import("../types/instrument"),
+  "gloomberb/types/ticker": () => import("../types/ticker"),
+  "gloomberb/types/trading": () => import("../types/trading"),
   "gloomberb/ui": () => import("../ui"),
   "gloomberb/components": () => import("../components"),
   "gloomberb/theme": () => import("../theme/colors"),
@@ -29,6 +36,25 @@ const HOST_MODULE_IMPORTERS = {
   "gloomberb/tickers": () => import("../public/tickers"),
   "gloomberb/i18n": () => import("../public/i18n"),
 } satisfies Record<SharedSpecifier, HostModuleImporter>;
+
+/**
+ * Public exports the host serves to plugins running in its own Bun process,
+ * but never to a browser renderer: `gloomberb/remote` reads the data
+ * directory, so a renderer bundle that imports it is meant to fail to compile.
+ */
+export const NATIVE_HOST_MODULE_IMPORTERS: Readonly<Record<string, HostModuleImporter>> = {
+  "gloomberb/remote": () => import("../public/remote"),
+};
+
+/**
+ * Every specifier the Bun process can hand a plugin directly, shared and
+ * native alike. This is what the runtime resolver publishes when the host has
+ * no package directory for a symlink to point at.
+ */
+export const PLUGIN_HOST_RESOLVER_IMPORTERS: Readonly<Record<string, HostModuleImporter>> = {
+  ...HOST_MODULE_IMPORTERS,
+  ...NATIVE_HOST_MODULE_IMPORTERS,
+};
 
 /** Import one host module without depending on bare Gloomberb package resolution. */
 export async function importPluginHostModule(specifier: string): Promise<object> {

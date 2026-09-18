@@ -1,6 +1,7 @@
 import { existsSync, lstatSync, mkdirSync, readlinkSync, rmSync, symlinkSync } from "fs";
 import { dirname, join, resolve } from "path";
 
+import { installPluginHostResolver } from "./host-resolver";
 import { isPluginPackageName, pluginDirectoryNames } from "./plugin-names";
 
 /**
@@ -18,6 +19,10 @@ import { isPluginPackageName, pluginDirectoryNames } from "./plugin-names";
  * Links are rebuilt after every install and update, because `bun install`
  * prunes entries it does not know about, and repaired at load time so a plugin
  * copied in by hand still works.
+ *
+ * A compiled or packaged host has no package directory to link to. It serves
+ * the same modules from inside the process instead (see host-resolver.ts),
+ * and this reports that as `provider: "process"` rather than as an error.
  */
 
 const LINKED_PACKAGES = ["gloomberb", "react", "react-dom"] as const;
@@ -112,7 +117,21 @@ function linkPeerPlugins(pluginDir: string, pluginsDir: string): string[] {
 export interface HostLinkResult {
   linked: string[];
   skipped: string[];
+  /**
+   * How the plugin reaches `gloomberb/*` and `react`: symlinks into a package
+   * directory, or the host process answering the imports itself.
+   */
+  provider: "symlink" | "process";
   error?: string;
+}
+
+export interface HostLinkOptions {
+  /**
+   * Registers the in-process resolver when there is no package root. Tests
+   * stub this: the real one changes how `react` resolves for the whole
+   * process, which is the point in a packaged host and a hazard in a test run.
+   */
+  installResolver?: () => boolean;
 }
 
 /**
@@ -123,12 +142,28 @@ export function linkHostPackages(
   pluginDir: string,
   hostRoot = findHostPackageRoot(),
   pluginsDir = dirname(pluginDir),
+  options: HostLinkOptions = {},
 ): HostLinkResult {
-  if (!hostRoot) return { linked: [], skipped: [...LINKED_PACKAGES], error: "Could not locate the Gloomberb install." };
-
-  const modulesDir = join(pluginDir, "node_modules");
   const linked: string[] = [];
   const skipped: string[] = [];
+
+  if (!hostRoot) {
+    // Peers still need their links: a sibling plugin is a directory the
+    // resolver knows nothing about.
+    const peers = linkPeerPlugins(pluginDir, pluginsDir);
+    const installResolver = options.installResolver ?? installPluginHostResolver;
+    if (installResolver()) {
+      return { linked: peers, skipped: [...LINKED_PACKAGES], provider: "process" };
+    }
+    return {
+      linked: peers,
+      skipped: [...LINKED_PACKAGES],
+      provider: "process",
+      error: "Could not locate the Gloomberb install.",
+    };
+  }
+
+  const modulesDir = join(pluginDir, "node_modules");
 
   for (const pkg of LINKED_PACKAGES) {
     const target = linkTarget(hostRoot, pkg);
@@ -152,11 +187,11 @@ export function linkHostPackages(
       linked.push(pkg);
     } catch (err) {
       skipped.push(pkg);
-      if (pkg === "gloomberb") return { linked, skipped, error: String(err) };
+      if (pkg === "gloomberb") return { linked, skipped, provider: "symlink", error: String(err) };
     }
   }
 
   linked.push(...linkPeerPlugins(pluginDir, pluginsDir));
 
-  return { linked, skipped };
+  return { linked, skipped, provider: "symlink" };
 }

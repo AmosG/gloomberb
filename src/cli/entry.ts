@@ -6,8 +6,10 @@ import type { CliLaunchRequest } from "../types/plugin";
 import {
   OPEN_TUI_NATIVE_SMOKE_COMMAND,
   OPEN_TUI_RUNTIME_SMOKE_COMMAND,
+  PLUGIN_HOST_SMOKE_COMMAND,
   smokeOpenTuiNative,
   smokeOpenTuiRuntime,
+  smokePluginHost,
 } from "./native-smoke";
 
 async function launchOpenTuiApp(options: {
@@ -35,6 +37,11 @@ export async function runCliEntrypoint(rawArgs = process.argv.slice(2)): Promise
 
   if (command === OPEN_TUI_RUNTIME_SMOKE_COMMAND) {
     await smokeOpenTuiRuntime();
+    process.exit(0);
+  }
+
+  if (command === PLUGIN_HOST_SMOKE_COMMAND) {
+    await smokePluginHost();
     process.exit(0);
   }
 

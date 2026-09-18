@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, readlinkSync, writeFileSync } from "fs";
+import { existsSync, mkdtempSync, mkdirSync, readlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { linkHostPackages } from "./host-link";
@@ -66,5 +66,68 @@ describe("linkPeerPlugins", () => {
     const result = linkHostPackages(pluginDir, hostRoot, pluginsDir);
 
     expect(result.linked).not.toContain("gloomberb-ibkr");
+  });
+
+  test("reports symlinks as the provider when a package root exists", () => {
+    const { hostRoot, pluginsDir, pluginDir } = setup("gloom-ibkr", "gloom-ibkr");
+
+    const result = linkHostPackages(pluginDir, hostRoot, pluginsDir);
+
+    expect(result.provider).toBe("symlink");
+    expect(result.error).toBeUndefined();
+    expect(readlinkSync(join(pluginDir, "node_modules", "gloomberb"))).toBe(hostRoot);
+  });
+});
+
+/**
+ * The compiled terminal binary and the packaged desktop app have no Gloomberb
+ * package on disk. Before the in-process resolver, this branch returned an
+ * error, the install printed a warning, and every external plugin failed to
+ * load with "Cannot find module 'gloomberb/utils'". The resolver itself is
+ * exercised in a compiled executable in host-resolver.test.ts; here the
+ * installer is stubbed because the real one rewires `react` for this process.
+ */
+describe("linkHostPackages without a package root", () => {
+  function setup(peerDep?: string) {
+    const root = mkdtempSync(join(tmpdir(), "gloom-host-link-noroot-"));
+    const pluginsDir = join(root, "plugins");
+    const pluginDir = join(pluginsDir, "gateway");
+    mkdirSync(pluginDir, { recursive: true });
+    if (peerDep) mkdirSync(join(pluginsDir, peerDep), { recursive: true });
+    writeFileSync(
+      join(pluginDir, "package.json"),
+      JSON.stringify({ name: "gateway", peerDependencies: peerDep ? { [peerDep]: ">=1.0.0" } : {} }),
+    );
+    return { pluginsDir, pluginDir };
+  }
+
+  test("hands the imports to the host process instead of failing", () => {
+    const { pluginsDir, pluginDir } = setup();
+    let installs = 0;
+
+    const result = linkHostPackages(pluginDir, null, pluginsDir, { installResolver: () => { installs += 1; return true; } });
+
+    expect(installs).toBe(1);
+    expect(result.provider).toBe("process");
+    expect(result.error).toBeUndefined();
+    expect(result.skipped).toEqual(["gloomberb", "react", "react-dom"]);
+    expect(existsSync(join(pluginDir, "node_modules", "gloomberb"))).toBe(false);
+  });
+
+  test("still links peer plugins, which the resolver cannot serve", () => {
+    const { pluginsDir, pluginDir } = setup("gloom-ibkr");
+
+    const result = linkHostPackages(pluginDir, null, pluginsDir, { installResolver: () => true });
+
+    expect(result.linked).toEqual(["gloom-ibkr"]);
+    expect(readlinkSync(join(pluginDir, "node_modules", "gloom-ibkr"))).toBe(join(pluginsDir, "gloom-ibkr"));
+  });
+
+  test("keeps the error when the process cannot register a resolver", () => {
+    const { pluginsDir, pluginDir } = setup();
+
+    const result = linkHostPackages(pluginDir, null, pluginsDir, { installResolver: () => false });
+
+    expect(result.error).toBe("Could not locate the Gloomberb install.");
   });
 });

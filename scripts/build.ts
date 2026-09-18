@@ -5,6 +5,7 @@ import { gzipSync } from "zlib";
 import {
   OPEN_TUI_NATIVE_SMOKE_COMMAND,
   OPEN_TUI_RUNTIME_SMOKE_COMMAND,
+  PLUGIN_HOST_SMOKE_COMMAND,
 } from "../src/cli/native-smoke";
 
 const rootDir = join(import.meta.dir, "..");
@@ -127,6 +128,10 @@ async function smokeTestBinary(outfile: string, os: string, arch: string) {
       failureMessage: `Packaged binary failed to load the OpenTUI runtime graph: ${outfile}`,
     },
     {
+      args: [PLUGIN_HOST_SMOKE_COMMAND],
+      failureMessage: `Packaged binary failed to load an external plugin against its own runtime: ${outfile}`,
+    },
+    {
       args: ["help"],
       failureMessage: `Packaged binary failed to launch: ${outfile}`,
     },
@@ -185,8 +190,17 @@ async function build(targetConfig: BuildTarget) {
   // React itself to production builds. Setting NODE_ENV in the environment or
   // through --define leaves jsxDEV calls behind that resolve to nothing at
   // runtime, so the binary crashes on first render.
+  //
+  // A standalone executable does not read package.json files at runtime
+  // unless told to, and without them a plugin's dependency that publishes an
+  // `exports` map cannot be resolved from `~/.gloomberb/plugins/*/node_modules`
+  // ("Cannot find package 'youtubei.js'" from the TV plugin, for one). The
+  // plugin-host smoke below imports such a package so this flag stays.
   const buildExitCode = await runProcess(
-    ["bun", "build", "--compile", "--production", `--target=${target}`, compileEntry, `--outfile=${outfile}`],
+    [
+      "bun", "build", "--compile", "--production", "--compile-autoload-package-json",
+      `--target=${target}`, compileEntry, `--outfile=${outfile}`,
+    ],
     `Failed to build ${target}`,
     { env: { ...process.env, GLOOMBERB_API_URL: "https://api.gloom.sh" } },
     true,

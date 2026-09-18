@@ -26,6 +26,18 @@ export const SHARED_SPECIFIERS = [
   "react/jsx-dev-runtime",
   "gloomberb/types/plugin",
   "gloomberb/types/persistence",
+  // Type modules also export runtime values (`TICKER_RESEARCH_PANE_ID`,
+  // `resolvePaneInstance`, `DEFAULT_COLUMNS`) that plugins reach for. A bundled
+  // copy would be harmless, but the compiled terminal binary and the packaged
+  // desktop app have no host package on disk to bundle it from, so the host
+  // serves these the same way it serves everything else.
+  "gloomberb/types/broker",
+  "gloomberb/types/config",
+  "gloomberb/types/data-provider",
+  "gloomberb/types/financials",
+  "gloomberb/types/instrument",
+  "gloomberb/types/ticker",
+  "gloomberb/types/trading",
   "gloomberb/ui",
   "gloomberb/components",
   "gloomberb/theme",
