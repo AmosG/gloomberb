@@ -208,7 +208,7 @@ export function EarningsCallsPane({ focused, width, height }: EarningsCallsViewP
     status?: number;
   } | null>(null);
   const [readerTab, setReaderTab] = useState<ReaderTab>("summary");
-  // A layout or `gloomberb shot ECT NVDA --quarter latest --reader summary`
+  // A layout or `gloomberb shot CALLS NVDA --quarter latest --reader summary`
   // can land straight on a transcript instead of the shelf. `quarter` takes
   // the same tokens as the headless option; only transcribed calls qualify,
   // since opening a call without one asks the server to produce it.

@@ -172,60 +172,13 @@ function transcriptResult(
   };
 }
 
-function transcriptOptions() {
-  return [
-    {
-      key: "section",
-      description: "Transcript section to return.",
-      type: "enum" as const,
-      values: [
-        { value: "overview" },
-        { value: "summary" },
-        { value: "transcript" },
-        { value: "qa", aliases: ["q&a"] },
-        { value: "guidance" },
-        { value: "risks" },
-        { value: "notable" },
-        { value: "analyst-focus", aliases: ["analyst"] },
-        { value: "participants", aliases: ["speakers"] },
-      ],
-      defaultValue: "overview",
-    },
-    {
-      key: "quarter",
-      description: "Fiscal quarter such as latest, FQ2-2026, or FY2026.",
-      type: "string" as const,
-      defaultValue: "latest",
-    },
-    {
-      key: "speaker",
-      description: "Speaker name, role, or role acronym such as CFO.",
-      type: "string" as const,
-      defaultValue: "",
-    },
-    {
-      key: "search",
-      description: "Text to find in transcript turns.",
-      type: "string" as const,
-      defaultValue: "",
-    },
-    {
-      key: "offset",
-      description: "Transcript segment offset for paging.",
-      type: "integer" as const,
-      defaultValue: 0,
-      minimum: 0,
-      maximum: 100_000,
-    },
-    {
-      key: "limit",
-      description: "Maximum transcript segments to return.",
-      type: "integer" as const,
-      defaultValue: 20,
-      minimum: 1,
-      maximum: 200,
-    },
-  ];
+/**
+ * `fn CALLS` lists calls; `fn CALLS NVDA` lists the company's calls. Naming a
+ * quarter or a section reads one transcript instead, with paging.
+ */
+function readsTranscript(args: HeadlessPaneLoadArgs): boolean {
+  return typeof args.argument === "string"
+    && (String(args.options.quarter ?? "").trim().length > 0 || String(args.options.section ?? "").trim().length > 0);
 }
 
 export function createEarningsCallsHeadless(
@@ -242,7 +195,7 @@ export function createEarningsCallsHeadless(
     options: [
       {
         key: "availability",
-        description: "Transcript availability to include.",
+        description: "Transcript availability to include when listing calls.",
         type: "enum",
         values: [
           { value: "all" },
@@ -252,47 +205,70 @@ export function createEarningsCallsHeadless(
         defaultValue: "all",
       },
       {
-        key: "limit",
-        description: "Maximum calls to return.",
+        key: "quarter",
+        description: "Read one transcript: latest, FQ2-2026, or FY2026. Needs a ticker.",
+        type: "string",
+        defaultValue: "",
+      },
+      {
+        key: "section",
+        description: "Transcript section to return; implies --quarter latest.",
+        type: "enum",
+        values: [
+          { value: "overview" },
+          { value: "summary" },
+          { value: "transcript" },
+          { value: "qa", aliases: ["q&a"] },
+          { value: "guidance" },
+          { value: "risks" },
+          { value: "notable" },
+          { value: "analyst-focus", aliases: ["analyst"] },
+          { value: "participants", aliases: ["speakers"] },
+        ],
+        defaultValue: "",
+      },
+      {
+        key: "speaker",
+        description: "Speaker name, role, or role acronym such as CFO, when reading a transcript.",
+        type: "string",
+        defaultValue: "",
+      },
+      {
+        key: "search",
+        description: "Text to find in transcript turns, when reading a transcript.",
+        type: "string",
+        defaultValue: "",
+      },
+      {
+        key: "offset",
+        description: "Transcript segment offset for paging.",
         type: "integer",
-        defaultValue: 50,
+        defaultValue: 0,
+        minimum: 0,
+        maximum: 100_000,
+      },
+      {
+        key: "limit",
+        description: "Maximum calls, or transcript segments, to return (50 calls, 20 segments by default).",
+        type: "integer",
         minimum: 1,
         maximum: 200,
       },
     ],
     columns: CALL_COLUMNS,
-    describe: (args) => args.argument
-      ? `Earnings Calls | ${String(args.argument)}`
-      : "Earnings Calls",
+    describe: (args) => {
+      if (readsTranscript(args)) {
+        return `Earnings Call Transcript | ${String(args.argument)} | ${String(args.options.quarter || "latest")}`;
+      }
+      return args.argument ? `Earnings Calls | ${String(args.argument)}` : "Earnings Calls";
+    },
     async load(args, context) {
       const ticker = typeof args.argument === "string" ? args.argument : null;
-      return projectEarningsCallsHeadless(
-        await dependencies.loadCalls(ticker, 200, context),
-        args,
-      );
-    },
-  };
-}
-
-export function createEarningsTranscriptHeadless(
-  dependencies: EarningsCallsHeadlessDependencies = defaultDependencies,
-): HeadlessPaneDefinition<"rows"> {
-  return {
-    shape: "rows",
-    argument: {
-      kind: "ticker",
-      placeholder: "ticker",
-      description: "Company symbol.",
-    },
-    options: transcriptOptions(),
-    columns: TRANSCRIPT_COLUMNS,
-    describe: (args) => (
-      `Earnings Call Transcript | ${String(args.argument)} | ${String(args.options.quarter)}`
-    ),
-    async load(args, context) {
-      const ticker = String(args.argument);
       const calls = await dependencies.loadCalls(ticker, 200, context);
-      const quarter = String(args.options.quarter ?? "latest");
+      if (!ticker || !readsTranscript(args)) {
+        return projectEarningsCallsHeadless(calls, { ...args, options: { ...args.options, limit: args.options.limit ?? 50 } });
+      }
+      const quarter = String(args.options.quarter || "latest");
       const selected = findCallForQuarter(calls.calls, quarter);
       if (!selected) {
         if (calls.unknownTicker) throw new Error(`${ticker} is not a known listed company.`);
@@ -306,10 +282,12 @@ export function createEarningsTranscriptHeadless(
       if (isPendingTranscript(transcript)) {
         throw new Error(`Transcript for ${ticker} ${quarter} is still being produced.`);
       }
-      return transcriptResult(transcript, selected, calls, args);
+      return transcriptResult(transcript, selected, calls, {
+        ...args,
+        options: { ...args.options, section: args.options.section || "overview", limit: args.options.limit ?? 20 },
+      });
     },
   };
 }
 
 export const earningsCallsHeadless = createEarningsCallsHeadless();
-export const earningsTranscriptHeadless = createEarningsTranscriptHeadless();

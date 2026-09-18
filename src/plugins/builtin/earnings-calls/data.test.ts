@@ -9,7 +9,7 @@ import {
   loadTranscriptWithClient,
   resetEarningsCallsPersistence,
 } from "./data";
-import { createEarningsCallsHeadless, createEarningsTranscriptHeadless } from "./headless";
+import { createEarningsCallsHeadless } from "./headless";
 
 type Client = Parameters<typeof loadEarningsCallsWithClient>[0];
 const calls: CloudEarningsCallPayload[] = Array.from({ length: 200 }, (_, i) => ({
@@ -102,8 +102,8 @@ for (const marker of ["pending", "unknownTicker"] as const) {
     expect(first[marker]).toBe(true);
     expect(second[marker]).toBe(true);
     expect(requests).toBe(marker === "pending" ? 2 : 1);
-    await expect(createEarningsTranscriptHeadless().load(
-      requestArgs, { apiClient: client } as HeadlessPaneContext,
+    await expect(createEarningsCallsHeadless().load(
+      { ...requestArgs, options: { quarter: "latest" } }, { apiClient: client } as HeadlessPaneContext,
     )).rejects.toThrow(marker === "pending" ? "still pending" : "not a known listed company");
   });
 }
