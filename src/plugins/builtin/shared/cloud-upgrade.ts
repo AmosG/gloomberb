@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo } from "react";
 import { apiClient } from "../../../api-client";
 import { recordResearchActivity, researchUpgradeUrl } from "../../../api-client/research-activity";
 import { getCurrentPluginTarget } from "../../current-target";
-import type { PaneFooterSegment } from "../../../components";
+import type { PaneFooterSegment, PaneHint } from "../../../components";
 import { tf } from "../../../i18n";
 import { useAppLanguage } from "../../../i18n/react";
 import { useShortcut } from "../../../react/input";
@@ -93,6 +93,11 @@ export interface CloudAccessFooter {
   access: PlanAccess;
   /** Null while the account already pays for Pro, or when nothing is degraded. */
   segment: PaneFooterSegment | null;
+  /**
+   * The call to action, for the pane to render beside its own shortcuts. Null
+   * whenever no `u` is bound, which leaves the pitch inside `segment`.
+   */
+  hint: PaneHint | null;
   openUpgrade: () => void;
 }
 
@@ -145,8 +150,11 @@ export function useCloudAccessFooter({
       id: segmentId,
       onPress: openUpgrade,
       parts: [{
+        // With a `u` bound the pitch is the [u]pgrade hint, so the status says
+        // only what is true of the data. Without one there is nowhere else for
+        // it to go.
         text: shortcutScope
-          ? tf("{delay} delayed · u try Pro live", { delay: delayLabel })
+          ? tf("{delay} delayed", { delay: delayLabel })
           : tf("{delay} delayed · try Pro live", { delay: delayLabel }),
         tone: "warning",
       }],
@@ -163,5 +171,12 @@ export function useCloudAccessFooter({
     showUpgrade,
   ]);
 
-  return { access, openUpgrade, segment };
+  const hint = useMemo<PaneHint | null>(
+    () => (shortcutScope && showUpgrade
+      ? { id: `${segmentId}-upgrade`, key: "u", label: "pgrade", onPress: openUpgrade }
+      : null),
+    [openUpgrade, segmentId, shortcutScope, showUpgrade],
+  );
+
+  return { access, hint, openUpgrade, segment };
 }

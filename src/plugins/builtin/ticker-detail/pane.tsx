@@ -170,9 +170,10 @@ export function TickerResearchPane({ focused, width, height }: PaneProps) {
     () => quoteFooterActive ? {
       // Chart owns additional footer actions, so keep its parent status compact.
       info: tickerQuoteFooterInfo(financials?.quote, cloudAccess.segment, resolvedTabId === "overview" ? width : undefined),
+      hints: cloudAccess.hint ? [cloudAccess.hint] : undefined,
       order: -1,
     } : null,
-    [cloudAccess.segment, financials?.quote, quoteFooterActive, resolvedTabId, width],
+    [cloudAccess.hint, cloudAccess.segment, financials?.quote, quoteFooterActive, resolvedTabId, width],
   );
 
   const tabBarHeight = paneSettings.hideTabs ? 0 : 1;

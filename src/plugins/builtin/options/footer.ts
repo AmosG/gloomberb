@@ -89,7 +89,7 @@ export function useOptionsAccessFooter({
   /** The contract under the cursor, reported as status rather than as a header. */
   reference?: OptionMarketReference | undefined;
 }): void {
-  const { access, segment } = useCloudAccessFooter({
+  const { access, hint: upgradeHint, segment } = useCloudAccessFooter({
     delayLabel: resolveOptionsDelayLabel(chain),
     focused,
     segmentId: "options-access",
@@ -118,6 +118,7 @@ export function useOptionsAccessFooter({
     loading,
     error,
     info,
-    hints,
+    // The pane's own actions keep the right edge they already hold.
+    hints: upgradeHint ? [upgradeHint, ...(hints ?? [])] : hints,
   });
 }
