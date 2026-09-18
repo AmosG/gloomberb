@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import type { CloudJobsSummaryPayload } from "../../../api-client/types";
 import {
+  buildAgeBars,
   buildPostingColumns,
   buildShareBars,
   formatAge,
   formatSalaryRange,
+  historyChartPoints,
   moversHaveWeekHistory,
-  primaryChart,
-  weeklyToChartPoints,
 } from "./model";
 
 function summary(overrides: Partial<CloudJobsSummaryPayload> = {}): CloudJobsSummaryPayload {
@@ -23,11 +23,10 @@ function summary(overrides: Partial<CloudJobsSummaryPayload> = {}): CloudJobsSum
     closed30d: 0,
     change30d: null,
     change90d: null,
-    postingVelocity: null,
     remoteShare: null,
     medianAgeDays: null,
     series: [{ day: "2026-09-17", open: 10, new: 10, closed: 0 }],
-    postedByWeek: [],
+    ageBuckets: [],
     functions: [],
     countries: [],
     seniority: [],
@@ -38,30 +37,28 @@ function summary(overrides: Partial<CloudJobsSummaryPayload> = {}): CloudJobsSum
   };
 }
 
-describe("weeklyToChartPoints", () => {
-  test("fills the missing weeks with zeros and pins the axis at zero", () => {
-    const points = weeklyToChartPoints({
-      postedByWeek: [
-        { weekStart: "2026-08-31", count: 4 },
-        { weekStart: "2026-09-14", count: 9 },
+describe("age bars", () => {
+  test("keep the payload order and size bars against the largest bucket", () => {
+    const rows = buildAgeBars({
+      openCount: 10,
+      ageBuckets: [
+        { id: "week", label: "Last 7 days", count: 2 },
+        { id: "month", label: "8 to 30 days", count: 8 },
       ],
     });
-    expect(points.map((point) => [point.date.toISOString().slice(0, 10), point.close])).toEqual([
-      ["2026-08-31", 4],
-      ["2026-09-07", 0],
-      ["2026-09-14", 9],
+    expect(rows.map((row) => [row.label, row.count, row.ratio, row.share])).toEqual([
+      ["Last 7 days", 2, 0.25, 0.2],
+      ["8 to 30 days", 8, 1, 0.8],
     ]);
-    // With no empty week in the window, one is added in front so the axis starts at zero.
-    const dense = weeklyToChartPoints({ postedByWeek: [{ weekStart: "2026-09-07", count: 3 }, { weekStart: "2026-09-14", count: 9 }] });
-    expect(dense.map((point) => point.close)).toEqual([0, 3, 9]);
+    expect(buildAgeBars({ openCount: 3, ageBuckets: undefined })).toEqual([]);
   });
 });
 
-describe("primaryChart", () => {
-  test("shows the intake curve until a week of daily history exists", () => {
-    expect(primaryChart(summary()).kind).toBe("intake");
+describe("historyChartPoints", () => {
+  test("waits for a week of daily points before drawing the history", () => {
+    expect(historyChartPoints(summary())).toBeNull();
     const series = Array.from({ length: 7 }, (_, index) => ({ day: `2026-09-1${index}`, open: 10 + index, new: 1, closed: 0 }));
-    expect(primaryChart(summary({ series })).kind).toBe("history");
+    expect(historyChartPoints(summary({ series }))?.length).toBe(7);
   });
 });
 
@@ -113,8 +110,8 @@ describe("table layout", () => {
   test("the new-this-week column only appears after the first read", () => {
     const mover = (openCount: number, new7d: number) => ({
       key: "x",
-      mover: { ticker: "X", companyName: null, openCount, employeeCount: null, change30d: null, postingVelocity: null, new7d, topFunction: null },
-      ticker: "X", company: "", open: "", change: "", changeValue: null, velocity: "", velocityValue: null, new7d: "", function: "",
+      mover: { ticker: "X", companyName: null, openCount, employeeCount: null, change30d: null, posted30d: null, new7d, topFunction: null, topCountry: null },
+      ticker: "X", company: "", open: "", change: "", changeValue: null, posted30d: "", posted30dValue: null, new7d: "", function: "", country: "", countryShare: null,
     });
     expect(moversHaveWeekHistory([mover(100, 100), mover(50, 50)])).toBe(false);
     expect(moversHaveWeekHistory([mover(100, 100), mover(50, 3)])).toBe(true);
