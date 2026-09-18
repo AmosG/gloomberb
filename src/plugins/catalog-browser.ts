@@ -35,6 +35,7 @@ import { tickerNewsModule } from "./builtin/news";
 import { browserNewsWireModule } from "./builtin/news/wire";
 import { secModule } from "./builtin/sec";
 import { insiderModule } from "./builtin/insider";
+import { jobsModule } from "./builtin/jobs";
 import { optionsModule } from "./builtin/options";
 import { optionsCalculatorModule } from "./builtin/options-calculator";
 import { composeBuiltinPlugin, type PluginModule } from "./builtin/plugin-module";
@@ -86,6 +87,8 @@ const browserTickerResearchPlugin = composeBuiltinPlugin({
     // Filings and Form 4s come through Gloom Cloud, behind a sign-in wall.
     secModule,
     insiderModule,
+    // Hiring data is a Gloom Cloud Pro dataset.
+    jobsModule,
   ],
 });
 
