@@ -401,6 +401,7 @@ export function OptionsView({ width, height, focused, onCapture = () => {} }: Op
     loading,
     quoteCoverage: optionQuoteCoverage,
     reference: selectedReference,
+    spreadColumnVisible: optionFieldIds.includes("spread"),
   });
 
   useEffect(() => {

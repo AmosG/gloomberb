@@ -555,7 +555,7 @@ test("starts at a held contract's expiry and preserves a researcher-selected rol
   expect(testSetup!.captureCharFrame()).toContain("Loading options chain");
   await act(async () => { selectTicker(ticker); });
   await renderSettled();
-  expect(testSetup!.captureCharFrame()).toMatch(/34\.05\s+34\s+.*340/);
+  expect(testSetup!.captureCharFrame()).toMatch(/34\.05\s+0\.3%\s+34\s+.*340/);
 });
 
 test("keeps the selected chain visible when its refresh fails", async () => {
@@ -613,7 +613,7 @@ test("stale underlying preserves contract observations but cannot seed current G
   const deltaColumns = lines[0]!.flatMap((cell, i) => cell.includes("Δ") ? [i] : []);
   expect(deltaColumns).toHaveLength(2);
   for (const row of lines.slice(1)) for (const i of deltaColumns) expect(row[i]).toBe("—");
-  expect(saved).toContain("10.05,10.15,10.1");
+  expect(saved).toContain("10.05,10.15,1.0%,10.1");
   await act(async () => { setStale(false); });
   await renderSettled();
   const recovered = testSetup!.captureCharFrame();
@@ -653,10 +653,12 @@ test("reports the contract under the cursor in the status bar instead of above t
   await renderSettled();
   const lines = testSetup!.captureCharFrame().split("\n");
   const status = lines.find((line) => line.includes("[c]alc"))!;
+  const body = lines.filter((line) => line !== status).join("\n");
   expect(status).toContain("AAPL260619C00101000");
-  // The spread is the one quote fact no column carries.
-  expect(status).toContain("spread 0.1 (1.0% of mid)");
   // Identity, bid, ask, last and the expiry all already exist above or in the
   // chain, so the body must not spend rows repeating them.
-  expect(lines.filter((line) => line !== status).join("\n")).not.toContain("AAPL260619C00101000");
+  expect(body).not.toContain("AAPL260619C00101000");
+  // The spread reads per strike in its own column, so the status bar drops it.
+  expect(body).toContain("C SPRD");
+  expect(status).not.toContain("spread");
 });
