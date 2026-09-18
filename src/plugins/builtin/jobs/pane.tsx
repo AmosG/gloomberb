@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import type { CloudJobsMoverPayload, CloudJobsSummaryPayload } from "../../../api-client/types";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAppendedPages } from "./pages";
+import type { CloudJobsMoverPayload, CloudJobsPosting, CloudJobsSummaryPayload } from "../../../api-client/types";
 import {
   Badge,
   Button,
@@ -12,6 +13,7 @@ import {
   Tabs,
   usePaneFooter,
   usePaneTicker,
+  useTableLoadMore,
   type DataTableCell,
   type PaneFooterSegment,
 } from "../../../components";
@@ -19,14 +21,14 @@ import { resolveChartPalette } from "../../../components/chart/core/palette";
 import { useAsyncResource } from "../../../react/async-resource";
 import { useShortcut } from "../../../react/input";
 import { blendHex, colors } from "../../../theme/colors";
-import { Box, Text, TextAttributes, useRendererHost, useUiCapabilities } from "../../../ui";
+import { Box, Text, TextAttributes, useRendererHost, useUiCapabilities, type ScrollBoxRenderable } from "../../../ui";
 import { formatCompact, formatNumber } from "../../../utils/format";
 import { isPlainKey } from "../../../utils/keyboard";
 import { SignInWall } from "../cloud/auth-actions";
 import { useCloudPlanAction, useCloudUpgradeAction } from "../shared/cloud-upgrade";
 import { usePlanAccess } from "../shared/plan-access";
 import { usePluginPaneState, usePluginTickerActions } from "../../runtime";
-import { fetchJobs, fetchJobsMovers, type JobsCompanyState } from "./client";
+import { fetchJobs, fetchJobsMovers, fetchJobsPostings, type JobsCompanyState } from "./client";
 import {
   DEFAULT_MOVER_SORT,
   DEFAULT_POSTING_SORT,
@@ -59,6 +61,9 @@ import { ShareBars } from "./share-bars";
 export const JOBS_PANE_ID = "jobs";
 
 const PENDING_POLL_MS = 20_000;
+const POSTINGS_PAGE = 100;
+const MOVERS_PAGE = 200;
+
 const VENDOR_LABELS: Record<string, string> = {
   greenhouse: "Greenhouse",
   lever: "Lever",
@@ -286,9 +291,24 @@ function CompanyView({
   const [tab, setTab] = usePluginPaneState<DetailTab>("jobs:tab", "roles");
   const [sort, setSort] = usePluginPaneState<PostingSort>("jobs:sort", DEFAULT_POSTING_SORT);
   const [selectedIdx, setSelectedIdx] = useState(0);
+  const rolesScrollRef = useRef<ScrollBoxRenderable | null>(null);
 
-  const rows = useMemo(() => sortPostingRows(buildPostingRows(summary.recent), sort), [summary, sort]);
-  const hasSalary = summary.recent.some((posting) => posting.salaryMin != null || posting.salaryMax != null);
+  // The summary carries the newest 40 roles; the rest page in on scroll.
+  const loadPostingsPage = useCallback(
+    (offset: number) => fetchJobsPostings(summary.ticker, { limit: POSTINGS_PAGE, offset }).then((page) => page.postings),
+    [summary.ticker],
+  );
+  const more = useAppendedPages<CloudJobsPosting>(
+    `${summary.ticker}:${summary.coverage.lastCollectedAt ?? ""}`,
+    summary.recent.length,
+    summary.openCount,
+    loadPostingsPage,
+  );
+  const postings = useMemo(() => [...summary.recent, ...more.items], [summary.recent, more.items]);
+  const loadMoreFromScroll = useTableLoadMore(rolesScrollRef, tab === "roles" && more.hasMore && !more.loadingMore, more.loadMore);
+
+  const rows = useMemo(() => sortPostingRows(buildPostingRows(postings), sort), [postings, sort]);
+  const hasSalary = postings.some((posting) => posting.salaryMin != null || posting.salaryMax != null);
   const columns = useMemo(() => buildPostingColumns(width, hasSalary), [width, hasSalary]);
   const functionRows = useMemo(() => buildShareBars(summary.functions, 7), [summary]);
   const countryRows = useMemo(() => buildShareBars(summary.countries, 12), [summary]);
@@ -319,6 +339,7 @@ function CompanyView({
   usePaneFooter(registrationId, () => {
     const info: PaneFooterSegment[] = [];
     if (loading) info.push({ id: "loading", parts: [{ text: "refreshing", tone: "muted" }] });
+    if (more.loadingMore) info.push({ id: "loading-more", parts: [{ text: "loading more roles", tone: "muted" }] });
     if (error) info.push({ id: "error", parts: [{ text: error.slice(0, 60), tone: "warning" }] });
     const vendor = summary.coverage.vendor ? VENDOR_LABELS[summary.coverage.vendor] ?? summary.coverage.vendor : null;
     const collected = formatCollectedAgo(summary.coverage.lastCollectedAt);
@@ -335,7 +356,7 @@ function CompanyView({
         : []),
     ];
     return { info, hints };
-  }, [loading, error, summary, tab, selected, openSelected, rendererHost]);
+  }, [loading, more.loadingMore, error, summary, tab, selected, openSelected, rendererHost]);
 
   const renderCell = useCallback((row: PostingRow, column: PostingColumn, _index: number, rowState: { selected: boolean }): DataTableCell => {
     const selectedColor = rowState.selected ? colors.selectedText : undefined;
@@ -362,7 +383,7 @@ function CompanyView({
   const barsWidth = wide ? width - chartWidth - 1 : width;
 
   const tabs = [
-    { label: `Roles ${summary.recent.length < summary.openCount ? `${summary.recent.length} of ${formatCompact(summary.openCount)}` : summary.openCount}`, value: "roles" },
+    { label: `Roles ${postings.length < summary.openCount ? `${postings.length} of ${formatCompact(summary.openCount)}` : summary.openCount}`, value: "roles" },
     { label: "Locations", value: "locations" },
     { label: "Seniority", value: "seniority" },
     { label: "Pay", value: "salary" },
@@ -388,6 +409,8 @@ function CompanyView({
         {tab === "roles" ? (
           <DataTableView<PostingRow, PostingColumn>
             focused={focused}
+            scrollRef={rolesScrollRef}
+            onBodyScrollActivity={loadMoreFromScroll}
             selection={{ kind: "index", selectedIndex: rows.length ? Math.min(selectedIdx, rows.length - 1) : -1, onChange: setSelectedIdx }}
             onActivate={() => openSelected()}
             rootWidth={width}
@@ -517,21 +540,35 @@ function CompanyPanel({
 function HomeView({ width, height, focused, registrationId }: { width: number; height: number; focused: boolean; registrationId: string }) {
   const { nativePaneChrome } = useUiCapabilities();
   const { navigateTicker } = usePluginTickerActions();
-  const request = useCallback(() => fetchJobsMovers(), []);
+  const request = useCallback(() => fetchJobsMovers(undefined, MOVERS_PAGE), []);
   const resource = useAsyncResource(request);
   const { data, status, error, reload } = resource;
   const [sort, setSort] = usePluginPaneState<MoverSort>("jobs:movers-sort", DEFAULT_MOVER_SORT);
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [open, setOpen] = usePluginPaneState<string | null>("jobs:open", null);
+  const tableScrollRef = useRef<ScrollBoxRenderable | null>(null);
 
-  const rows = useMemo(() => sortMoverRows(buildMoverRows(data?.movers ?? []), sort), [data, sort]);
+  const loadMoversPage = useCallback(
+    (offset: number) => fetchJobsMovers(undefined, MOVERS_PAGE, offset).then((page) => page.movers),
+    [],
+  );
+  const more = useAppendedPages<CloudJobsMoverPayload>(
+    data?.asOf ?? "",
+    data?.movers.length ?? 0,
+    data?.total ?? data?.movers.length ?? 0,
+    loadMoversPage,
+  );
+  const movers = useMemo(() => [...(data?.movers ?? []), ...more.items], [data, more.items]);
+  const loadMoreFromScroll = useTableLoadMore(tableScrollRef, !!data && !open && more.hasMore && !more.loadingMore, more.loadMore);
+
+  const rows = useMemo(() => sortMoverRows(buildMoverRows(movers), sort), [movers, sort]);
   const hasHistory = rows.some((row) => row.mover.change30d != null);
   const hasWeek = moversHaveWeekHistory(rows);
   const columns = useMemo(() => buildMoverColumns(width, hasHistory, hasWeek), [width, hasHistory, hasWeek]);
   const selected = rows[Math.min(selectedIdx, rows.length - 1)] ?? null;
   const openMover: CloudJobsMoverPayload | null = useMemo(
-    () => (open ? (data?.movers.find((mover) => mover.ticker === open) ?? null) : null),
-    [open, data],
+    () => (open ? (movers.find((mover) => mover.ticker === open) ?? null) : null),
+    [open, movers],
   );
   const detailOpen = !!open;
 
@@ -555,13 +592,14 @@ function HomeView({ width, height, focused, registrationId }: { width: number; h
       ? []
       : [
           ...(status === "loading" ? [{ id: "loading", parts: [{ text: "loading", tone: "muted" as const }] }] : []),
+          ...(more.loadingMore ? [{ id: "loading-more", parts: [{ text: "loading more companies", tone: "muted" as const }] }] : []),
           ...(error ? [{ id: "error", parts: [{ text: error.slice(0, 60), tone: "warning" as const }] }] : []),
           ...(data ? [{ id: "covered", parts: [{ text: `${formatNumber(data.covered, 0)} companies covered`, tone: "muted" as const }] }] : []),
         ],
     hints: open || selected
       ? [{ id: "ticker", key: "t", label: "icker", onPress: () => navigateTicker((open ?? selected?.ticker)!) }]
       : [],
-  }), [status, error, data, detailOpen, open, selected, navigateTicker]);
+  }), [status, more.loadingMore, error, data, detailOpen, open, selected, navigateTicker]);
 
   const renderCell = useCallback((row: MoverRow, column: MoverColumn, _index: number, rowState: { selected: boolean }): DataTableCell => {
     const selectedColor = rowState.selected ? colors.selectedText : undefined;
@@ -593,6 +631,8 @@ function HomeView({ width, height, focused, registrationId }: { width: number; h
     <Box flexDirection="column" width={width} height={height}>
       <DataTableStackView<MoverRow, MoverColumn>
         focused={focused}
+        scrollRef={tableScrollRef}
+        onBodyScrollActivity={loadMoreFromScroll}
         detailOpen={detailOpen}
         onBack={() => setOpen(null)}
         detailTitle={openMover ? [openMover.ticker, openMover.companyName].filter(Boolean).join(" · ") : open ?? undefined}

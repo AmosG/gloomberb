@@ -268,9 +268,10 @@ export function cloudJobsPostingsPath(ticker: string, params: CloudJobsPostingsP
   return appendQuery(`/cloud/jobs/${encodeURIComponent(normalizeIssuerResearchTicker(ticker))}/postings`, search);
 }
 
-export function cloudJobsMoversPath(limit?: number): string {
+export function cloudJobsMoversPath(limit?: number, offset?: number): string {
   const search = new URLSearchParams();
   if (limit != null) search.set("limit", String(limit));
+  if (offset) search.set("offset", String(offset));
   return appendQuery("/cloud/jobs", search);
 }
 

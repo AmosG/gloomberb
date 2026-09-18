@@ -644,6 +644,8 @@ export interface CloudJobsMoverPayload {
 export interface CloudJobsMoversPayload {
   asOf: string;
   covered: number;
+  /** Companies in the ranking; `movers` is one page of them. */
+  total?: number;
   movers: CloudJobsMoverPayload[];
 }
 

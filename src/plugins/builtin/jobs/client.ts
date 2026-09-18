@@ -75,8 +75,9 @@ export function fetchJobsPostings(
 export function fetchJobsMovers(
   client: JobsCloudClient = apiClient,
   limit?: number,
+  offset?: number,
 ): Promise<CloudJobsMoversPayload> {
-  return client.getCloudJobsMovers(limit);
+  return client.getCloudJobsMovers(limit, offset);
 }
 
 export function resetJobsCache(): void {
