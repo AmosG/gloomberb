@@ -60,6 +60,15 @@ describe("formatMarketPrice", () => {
     expect(formatMarketPrice(0.000123456789, { assetCategory: "CRYPTO" })).toBe("0.00012346");
   });
 
+  test("scales crypto precision by magnitude instead of always spending eight decimals", () => {
+    expect(formatMarketPrice(109556.1640625, { assetCategory: "CRYPTO" })).toBe("109,556.16");
+    expect(formatMarketPrice(118531.39161566, { assetCategory: "CRYPTO" })).toBe("118,531.39");
+    expect(formatMarketPrice(3421.8843212, { assetCategory: "CRYPTO" })).toBe("3,421.88");
+    expect(formatMarketPrice(2.44190216, { assetCategory: "CRYPTO" })).toBe("2.4419");
+    expect(formatMarketPrice(0.8618999719619751, { assetCategory: "CRYPTO" })).toBe("0.86189997");
+    expect(formatMarketPrice(0.00000526, { assetCategory: "CRYPTO" })).toBe("0.00000526");
+  });
+
   test("keeps tiny nonzero quotes, ranges and signed changes meaningful without asset metadata", () => {
     expect(formatMarketPriceWithCurrency(0.000005100000180391362, "USD")).toBe("$0.0000051");
     expect(formatMarketPriceWithCurrency(0.000005259999852569308, "USD")).toBe("$0.00000526");

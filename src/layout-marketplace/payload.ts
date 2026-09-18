@@ -1,4 +1,5 @@
 import type { PaneRuntimeState } from "../core/state/app/types";
+import { publicTickerBindingSymbol } from "../tickers/selection";
 import {
   CURRENT_CONFIG_VERSION,
   removePaneInstances,
@@ -10,6 +11,7 @@ import type {
   PaneDef,
   PaneSharePrivateFields,
 } from "../types/plugin";
+import type { TickerRecord } from "../types/ticker";
 
 const MAX_LAYOUT_BYTES = 128 * 1024;
 // Pane runtime state doubles as a cache (news panes keep six figures of bytes of
@@ -467,30 +469,51 @@ function mapBinding(binding: PaneBinding | undefined, ids: ReadonlyMap<string, s
     : binding ? structuredClone(binding) : undefined;
 }
 
+/**
+ * A fixed binding carries the sender's broker contract and listing, neither of
+ * which the wire format accepts. The listing's venue survives inside the public
+ * ticker key so the receiver resolves the same instrument; the broker contract
+ * stays on the device.
+ */
+function publishableBinding(binding: PaneBinding | undefined, ids: ReadonlyMap<string, string>): PaneBinding | undefined {
+  if (binding?.kind !== "fixed") return mapBinding(binding, ids);
+  const symbol = publicTickerBindingSymbol(binding) ?? binding.symbol.trim().toUpperCase();
+  return symbol ? { kind: "fixed", symbol } : { kind: "none" };
+}
+
+export interface PublishableLayoutContext {
+  /** Local ticker records, so panes can pin listings the receiver cannot look up. */
+  tickers?: ReadonlyMap<string, TickerRecord>;
+}
+
 function publishableLayout(
   publicLayout: LayoutConfig,
   paneState: Record<string, PaneRuntimeState>,
   panes: ReadonlyMap<string, PaneDef>,
+  context: PublishableLayoutContext = {},
 ): LayoutMarketplacePayload {
   const ids = new Map(publicLayout.instances.map((instance, index) => [instance.instanceId, `p${index + 1}`]));
   const projectedState: Record<string, PaneRuntimeState> = {};
-  const instances = publicLayout.instances.map((instance) => {
-    const instanceId = ids.get(instance.instanceId)!;
-    const def = panes.get(instance.paneId);
+  const instances = publicLayout.instances.map((sourceInstance) => {
+    const instanceId = ids.get(sourceInstance.instanceId)!;
+    const def = panes.get(sourceInstance.paneId);
+    const instance = def?.portableShare?.prepare && context.tickers
+      ? def.portableShare.prepare(sourceInstance, { tickers: context.tickers })
+      : sourceInstance;
     const privacy = def?.portableShare?.private;
     // A pane from a plugin this terminal lacks arrived already scrubbed by
     // whoever published it; keep its config through the generic filter so
     // publishing from here never drops a teammate's pane.
     const params = sanitizeRecord(instance.params, privacy?.params);
     const settings = sanitizeRecord(instance.settings, privacy?.settings);
-    const state = sanitizeRecord(paneState[instance.instanceId], privacy?.state);
+    const state = sanitizeRecord(paneState[sourceInstance.instanceId], privacy?.state);
     if (state) projectedState[instanceId] = state as PaneRuntimeState;
     const title = !privacy?.title ? instance.title?.trim() : undefined;
     return {
       instanceId,
       paneId: instance.paneId,
       ...(title ? { title } : {}),
-      ...(instance.binding ? { binding: mapBinding(instance.binding, ids) } : {}),
+      ...(instance.binding ? { binding: publishableBinding(instance.binding, ids) } : {}),
       ...(params ? { params: params as Record<string, string> } : {}),
       ...(settings ? { settings } : {}),
     };
@@ -541,10 +564,29 @@ function parsePublishablePayload(
   });
 }
 
-function withoutCacheFields(state: PaneRuntimeState): PaneRuntimeState {
+function withoutOversizedEntries(value: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(
-    Object.entries(state).filter(([, value]) => encodedSize(value) <= MAX_PANE_STATE_FIELD_BYTES),
-  ) as PaneRuntimeState;
+    Object.entries(value).filter(([, entry]) => encodedSize(entry) <= MAX_PANE_STATE_FIELD_BYTES),
+  );
+}
+
+/**
+ * Plugin pane state nests every key of a plugin under one `pluginState` field,
+ * so an article backlog cached there would otherwise take the pane's selection
+ * and open item with it. Oversized keys drop individually instead.
+ */
+function withoutCacheFields(state: PaneRuntimeState): PaneRuntimeState {
+  const trimmed = withoutOversizedEntries(state);
+  const pluginState = state.pluginState;
+  if (record(pluginState) && !("pluginState" in trimmed)) {
+    const plugins = Object.fromEntries(Object.entries(pluginState).flatMap(([pluginId, keys]) => {
+      if (!record(keys)) return [];
+      const kept = withoutOversizedEntries(keys);
+      return Object.keys(kept).length > 0 ? [[pluginId, kept] as const] : [];
+    }));
+    if (Object.keys(plugins).length > 0) trimmed.pluginState = plugins;
+  }
+  return trimmed as PaneRuntimeState;
 }
 
 function withoutLargestState(
@@ -559,13 +601,14 @@ export function publishableMarketplaceLayout(
   layout: LayoutConfig,
   paneState: Record<string, PaneRuntimeState>,
   panes: ReadonlyMap<string, PaneDef>,
+  context: PublishableLayoutContext = {},
 ): LayoutMarketplacePayload {
   return publishableLayout(removePaneInstances(
     layout,
     layout.instances
       .filter((instance) => instance.paneId === "layout-marketplace")
       .map((instance) => instance.instanceId),
-  ), paneState, panes);
+  ), paneState, panes, context);
 }
 
 export function publishableMarketplacePane(
@@ -573,6 +616,7 @@ export function publishableMarketplacePane(
   paneState: PaneRuntimeState,
   panes: ReadonlyMap<string, PaneDef>,
   resolvedTicker?: string | null,
+  context: PublishableLayoutContext = {},
 ): LayoutMarketplacePayload {
   const def = panes.get(pane.paneId);
   if (!def) throw new Error("This pane is unavailable.");
@@ -593,7 +637,7 @@ export function publishableMarketplacePane(
       height: size.height,
     }],
     detached: [],
-  }, { [pane.instanceId]: paneState }, panes);
+  }, { [pane.instanceId]: paneState }, panes, context);
 }
 
 export function materializeMarketplaceLayout(

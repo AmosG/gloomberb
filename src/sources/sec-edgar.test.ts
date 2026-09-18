@@ -159,9 +159,14 @@ describe("parseCompanyFactsFinancialStatements", () => {
       ] } },
     } } });
     expect(statements.annualStatements.map(({ date, netIncome, fieldAvailability }) => ({ date, netIncome, availableAt: fieldAvailability?.netIncome }))).toEqual([
-      { date: "2017-09-03", netIncome: 2_714_000_000, availableAt: "2018-10-26" },
+      { date: "2017-09-03", netIncome: undefined, availableAt: undefined },
       { date: "2018-09-02", netIncome: 3_140_000_000, availableAt: "2020-10-07" },
     ]);
+    expect(statements.annualStatements[0]).toMatchObject({
+      netIncomeIncludingNoncontrollingInterests: 2_714_000_000,
+      fieldAvailability: { netIncomeIncludingNoncontrollingInterests: "2018-10-26" },
+      unavailableFields: ["netIncome", "netIncomeCommonStockholders"],
+    });
   });
 
   test("separates annual facts from quarter disclosures in the same 10-K and fiscal-year label", () => {
@@ -873,12 +878,18 @@ test("statement retrieval verifies the issuer and preserves class identity witho
     facts: { "us-gaap": {
       Revenues: { units: { USD: [{ start: "2025-01-01", end: "2025-12-31", val: 100, form: "10-K", filed: "2026-02-15" }] } },
       EarningsPerShareDiluted: { units: { "USD/shares": [{ start: "2025-01-01", end: "2025-12-31", val: 200, form: "10-K", filed: "2026-02-15" }] } },
+      WeightedAverageNumberOfSharesOutstandingBasic: { units: { shares: [{ start: "2025-01-01", end: "2025-12-31", val: 100, form: "10-K", filed: "2026-02-15" }] } },
+      WeightedAverageNumberOfDilutedSharesOutstanding: { units: { shares: [{ start: "2025-01-01", end: "2025-12-31", val: 110, form: "10-K", filed: "2026-02-15" }] } },
     } },
   };
   client.fetchJson = async () => raw;
   const value = await client.getFinancialStatements("BRK.B");
   expect(value.annualStatements[0]).toMatchObject({ currency: "USD", totalRevenue: 100 });
   expect(value.annualStatements[0].eps).toBeUndefined();
+  expect(value.annualStatements[0].basicShares).toBeUndefined();
+  expect(value.annualStatements[0].dilutedShares).toBeUndefined();
+  expect(value.annualStatements[0].fieldAvailability).not.toHaveProperty("basicShares");
+  expect(value.annualStatements[0].fieldAvailability).not.toHaveProperty("dilutedShares");
   client.fetchJson = async () => ({ ...raw, cik: 789019 });
   await expect(client.getFinancialStatements("BRK.B")).rejects.toThrow("issuer mismatch");
 });

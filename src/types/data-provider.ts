@@ -170,6 +170,12 @@ export interface AssetDataProvider {
   getCachedQuery?<K extends CachedAssetMethod>(method: K, args: CachedAssetArgs<K>): CachedQueryHandle<CachedAssetValue<K>>;
 
   canProvide?(ticker: string, exchange?: string, context?: MarketDataRequestContext): Promise<boolean> | boolean;
+  /**
+   * Name of the source a plain market request reaches first. A router answers
+   * for its highest-priority member; a remote transport asks the process that
+   * owns the router. Absent on a plain provider, whose own name is the answer.
+   */
+  primaryMarketSourceName?(): string | null | Promise<string | null>;
   getCachedFinancialsForTargets?(targets: CachedFinancialsTarget[], options?: { allowExpired?: boolean; includeStaleQuotes?: boolean }): Map<string, TickerFinancials> | Promise<Map<string, TickerFinancials>>;
   getQuotesBatch?(targets: QuoteSubscriptionTarget[], options?: { forceRefresh?: boolean }): Promise<QuoteBatchResult[]>;
   getTickerFinancialsBatch?(targets: CachedFinancialsTarget[], options?: { forceRefresh?: boolean }): Promise<TickerFinancialsBatchResult[]>;

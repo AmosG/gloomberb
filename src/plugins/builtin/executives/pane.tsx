@@ -142,6 +142,18 @@ function ExecutiveRows({
   rows: CloudExecutiveRowPayload[];
   width: number;
 }) {
+  if (width < 52) {
+    return <Box flexDirection="column">
+      {rows.map((row) => <Prose
+        key={`${row.name}-${row.total}`}
+        text={[row.name, row.title, equityShare(row) ? `${equityShare(row)} equity` : null].filter(Boolean).join(" · ")}
+        width={width}
+        prefix={`${formatPay(row.total).padEnd(9)} `}
+        prefixColor={colors.textBright}
+        color={colors.textDim}
+      />)}
+    </Box>;
+  }
   // Name, title, equity share, total. The title takes whatever is left.
   const totalWidth = 9;
   const equityWidth = 5;

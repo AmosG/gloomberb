@@ -8,10 +8,13 @@ import { instrumentFromTicker } from "../../../market-data/request-types";
 import { usePaneTicker } from "../../../state/app/context";
 import type { ScrollBoxRenderable } from "../../../ui";
 import { EmptyState, FeedDataTableStackView, Spinner, useExternalLinkFooter, useTableLoadMore, type FeedDataTableItem } from "../../../components";
-import { usePluginPaneState } from "../../runtime";
+import { useDebouncedPluginPaneState, usePluginPaneState } from "../../runtime";
 import { isUsEquityTicker } from "../../../utils/sec";
 import { truncateWithEllipsis as truncateText } from "../../../utils/text-wrap";
 import { createTickerSurfacePaneTemplate } from "../shared/ticker-surface";
+import { isCloudSessionRequired, useResearchCloudSession } from "../shared/research-cloud-session";
+import { SignInWall } from "../cloud/auth-actions";
+import { getSharedMarketDataCoordinator } from "../../../market-data/coordinator";
 import {
   buildInsiderTransactionDetailBody,
   buildInsiderTransactionTitle,
@@ -90,7 +93,11 @@ function InsiderView({ width, height, focused }: { width: number; height: number
   const tickerKey = ticker?.metadata.ticker ?? "none";
   const [selectedIdx, setSelectedIdx] = usePluginPaneState<number>(`insider:selectedIdx:${tickerKey}`, 0);
   const [nameFilter, setNameFilter] = usePluginPaneState<string | null>(`insider:nameFilter:${tickerKey}`, null);
-  const [openItemId, setOpenItemId] = useState<string | null>(null);
+  const [openItemId, setOpenItemIdState] = useDebouncedPluginPaneState<string | null>(`insider:openItemId:${tickerKey}`, null);
+  const setOpenItemId = useCallback(
+    (itemId: string | null) => setOpenItemIdState(itemId, { immediate: true }),
+    [setOpenItemIdState],
+  );
   const eligibleTicker = isUsEquityTicker(ticker);
   const instrument = instrumentFromTicker(ticker, ticker?.metadata.ticker ?? null);
 
@@ -124,6 +131,17 @@ function InsiderView({ width, height, focused }: { width: number; height: number
     filingsEntry?.phase === "error"
       ? (filingsEntry.error?.message ?? "Failed to load SEC filings")
       : null;
+  // Hosted, the only filings source is Gloom Cloud, which needs an account.
+  const cloudSession = useResearchCloudSession();
+  const authWall = allFilings.length === 0 && isCloudSessionRequired(error);
+  const sessionKeyRef = useRef(cloudSession.requestKey);
+  useEffect(() => {
+    if (sessionKeyRef.current === cloudSession.requestKey) return;
+    sessionKeyRef.current = cloudSession.requestKey;
+    const coordinator = getSharedMarketDataCoordinator();
+    if (!coordinator || !instrument || !eligibleTicker) return;
+    void coordinator.loadSecFilings({ instrument, count: SEC_FILING_SCAN_LIMIT }, { forceRefresh: true });
+  }, [cloudSession.requestKey, eligibleTicker, instrument]);
 
   const { contentCache: contentMap, pendingCount } = useSecFilingContentCache({
     scopeKey: `${ticker?.metadata.ticker ?? "none"}:${ticker?.metadata.exchange ?? ""}`,
@@ -209,6 +227,7 @@ function InsiderView({ width, height, focused }: { width: number; height: number
     return <EmptyState title="No ticker selected." message="Select a ticker to view insider activity." />;
   }
   if (!eligibleTicker) return renderFilingNotice("Insider transactions are only shown for US equities.", width);
+  if (authWall) return <SignInWall action="view insider transactions" needsVerification={cloudSession.needsVerification} />;
   if (loading && allFilings.length === 0) return <Spinner label="Loading insider filings..." />;
   if (error) return <EmptyState title="Insider filings unavailable." message={error} />;
   if (!loading && form4Filings.length === 0) {
@@ -223,6 +242,7 @@ function InsiderView({ width, height, focused }: { width: number; height: number
       items={feedItems}
       selectedIdx={selectedIdx}
       onSelect={setSelectedIdx}
+      openItemId={openItemId}
       onOpenItemIdChange={setOpenItemId}
       onRootKeyDown={handleRootKeyDown}
       sourceLabel="Insider"

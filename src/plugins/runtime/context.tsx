@@ -37,6 +37,7 @@ export interface PluginRuntimeAccess extends CapabilityInvoker {
   hidePane(paneId: string): void;
   focusPane(paneId: string): void;
   openPaneSettings(paneId?: string): void;
+  sharePane(paneId?: string): void;
   openPluginCommandWorkflow(commandId: string): void;
   notify(notification: AppNotificationRequest): void;
   subscribeResumeState(pluginId: string, key: string, listener: () => void): () => void;

@@ -23,12 +23,12 @@ function obs(values: Array<[string, number]>) {
   return values.map(([date, value]) => ({ date, value }));
 }
 
-/** Synthetic cache includes the legacy index-points input; Z.1 is 38.0T / 40.0T. */
+/** Synthetic cache; Z.1 nonfinancial equities / net worth is 38.0T / 40.0T, all equities 52.0T. */
 const LEGS: Array<[string, Array<{ date: string; value: number }>]> = [
-  ["W5000", obs([
-    ["2024-01-02", 60_000],
-    ["2025-01-02", 68_000],
-    ["2026-06-15", 76_200],
+  ["Z1_CORPORATE_EQUITIES", obs([
+    ["2024-01-01", 42_000_000],
+    ["2025-01-01", 48_000_000],
+    ["2026-01-01", 52_000_000],
   ])],
   ["GDP", obs([
     ["2024-01-01", 28_000],
@@ -145,20 +145,19 @@ afterEach(async () => {
 
 
 describe("MarketValuationPane", () => {
-  test("retired index-point ratios stay unavailable beside valid monetary and direct measures", async () => {
+  test("market-cap ratios build from the Z.1 equities sum beside direct measures", async () => {
     const frame = await renderPane();
     // A percent, a bare multiple, and two yields all sit in one VALUE column.
     for (const label of ["Buffett", "CAPE", "Tobin Q", "Equity alloc", "Div yield", "Cap / M2"]) {
       expect(frame).toContain(label);
     }
-    expect(frame).not.toContain("234%");
-    expect(frame).toMatch(/Buffett\s+--\s+Unavailable/);
+    expect(frame).not.toContain("Unavailable");
+    // 52.0T over GDP interpolated to 2026-01-01 (about 32.0T), M2 (about 22.8T), profits 4.8T.
+    expect(frame).toMatch(/Buffett\s+16\d%/);
+    expect(frame).toMatch(/Cap \/ M2\s+22\d%/);
+    expect(frame).toMatch(/Cap \/ profits\s+10\.8/);
     expect(frame).toContain("41.2");
     expect(frame).toContain("0.95");
-    expect(frame).not.toContain("329%");
-    expect(frame).toMatch(/Cap \/ profits\s+--\s+Unavailable/);
-    expect(frame).toMatch(/Cap \/ M2\s+--\s+Unavailable/);
-    expect(frame).toContain("index points; dollar market capitalization is unavailable");
   });
 
   test("detail follows the selected indicator without repeating the row", async () => {
@@ -226,23 +225,6 @@ describe("shouldPersistSelection", () => {
   });
 });
 
-
-test("unavailable rows remain selectable alongside usable indicators", async () => {
-  await renderPane({ indicator: "buffett" }, 80);
-  const lines = setup!.captureCharFrame().split("\n");
-  const y = lines.findIndex((line) => /CAPE\s+41.2/.test(line));
-  expect(y).toBeGreaterThan(0);
-  await act(async () => { await setup!.mockMouse.click(3, y); });
-  await settle();
-  expect(setup!.captureCharFrame()).not.toContain("Buffett Indicator unavailable");
-  expect(setup!.captureCharFrame()).toContain("ATL");
-  await act(async () => {
-    await setup!.mockInput.pressArrow("up");
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  });
-  await settle();
-  expect(setup!.captureCharFrame()).toContain("Buffett Indicator unavailable");
-});
 
 test("a short stacked pane scrolls to monetary basis and extrema dates", async () => {
   await renderPane({ indicator: "tobins-q" }, 48, 25);

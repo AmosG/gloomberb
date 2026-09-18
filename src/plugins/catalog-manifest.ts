@@ -41,7 +41,6 @@ const EDITORIAL: Record<
     featured: true,
     icon: "plugin-icons/gloomberb-cloud.svg",
   },
-  ai: { categories: ["ai"] },
   alerts: { categories: ["alerts"] },
   application: { categories: ["core"] },
   broker: { categories: ["broker"] },

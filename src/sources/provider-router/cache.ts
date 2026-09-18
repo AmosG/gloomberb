@@ -3,6 +3,8 @@ import type { CachedResourceRecord, ResourceStore } from "../../data/resource-st
 import type { TimeRange } from "../../time-series/range";
 import type { BrokerContractRef } from "../../types/instrument";
 import type { PricePoint, Quote, TickerFinancials } from "../../types/financials";
+import { retractKnownCloudValuation } from "../gloomberb-cloud/valuation-observations";
+import { withdrawKnownProviderStatements } from "../../utils/statement-observations";
 import type { CachePolicy, CachePolicyMap } from "../../types/persistence";
 import { canonicalExchange, parsePublicTickerKey, resolveExchangeTimeZone } from "../../utils/exchanges";
 import { redactUnavailableFundamentals, RETRACTABLE_VALUATION_FIELDS } from "../../utils/fundamentals";
@@ -10,7 +12,7 @@ import { isPriceHistoryStaleForCurrentWindow } from "../../utils/price-history";
 import { brokerContractIdentityKey } from "../../utils/instrument-identity";
 
 const MARKET_NAMESPACE = "market";
-const FINANCIALS_SCHEMA_VERSION = 8;
+const FINANCIALS_SCHEMA_VERSION = 9;
 const QUOTE_SCHEMA_VERSION = 2;
 
 const DEFAULT_CACHE_POLICIES = {
@@ -188,6 +190,14 @@ export function listCachedResources<T>(
       if (!requestedExchange && declaredExchange === "AMEX"
         && record.schemaVersion < (kind === "financials" ? 8 : 2)) return false;
     }
+    // Earlier SEC projections used consolidated/common income as parent income.
+    // Refetch the filing evidence; unrelated vendor statements remain usable.
+    if (kind === "financials" && record.schemaVersion < 9) {
+      const value = record.value as TickerFinancials;
+      if ([...(value.annualStatements ?? []), ...(value.quarterlyStatements ?? [])]
+        .some((row) => row.dateSource === "sec"
+          && (row.netIncome !== undefined || row.netIncomeCommonStockholders !== undefined))) return false;
+    }
     // Older SEC projections can mix pre/post-split EPS in one long history.
     // Refresh the source evidence instead of relabeling old numbers locally.
     if (kind === "financials" && record.schemaVersion < 7) {
@@ -204,10 +214,25 @@ export function listCachedResources<T>(
     return ![...(value.annualStatements ?? []), ...(value.quarterlyStatements ?? [])]
       .some((row) => row.availableAt || Object.keys(row.fieldAvailability ?? {}).length > 0);
   }).map((record) => {
+    if (kind === "financials") {
+      const financials = record.value as TickerFinancials;
+      const ownSymbol = financials.quote?.symbol ?? financials.quoteMetadata?.symbol;
+      const withdrawn = withdrawKnownProviderStatements(financials, {
+        symbol: record.entityKey.startsWith("contract:") ? ownSymbol ?? "" : record.entityKey,
+        exchange: record.variantKey.match(/(?:^|;)exchange=([^;]+)/)?.[1],
+      }, record.sourceKey);
+      if (withdrawn !== record.value) record = { ...record, stale: true, value: withdrawn as T };
+    }
     if (kind !== "financials" || record.sourceKey !== "provider:gloomberb-cloud") return record;
     // Legacy cloud aggregates lost the nested quote's stale flag. Retain valid
     // issuer data, but obtain the quote through its independent freshness route.
     let value = record.value as TickerFinancials;
+    const retracted = retractKnownCloudValuation(value, {
+      symbol: record.entityKey,
+      exchange: record.variantKey.match(/(?:^|;)exchange=([^;]+)/)?.[1],
+    });
+    const knownInvalidValuation = retracted !== value;
+    value = retracted;
     const legacyValuation = hasUnverifiedLegacyAsmlValuation(record, value);
     if (record.schemaVersion < 4) value = { ...value, quote: undefined, quoteContributions: undefined };
     // A new client can cache an old backend response during a rolling deploy.
@@ -221,7 +246,7 @@ export function listCachedResources<T>(
       dividendYield: undefined, dividendYieldBasis: undefined, dividendYieldSource: undefined } };
     if (legacyValuation) value = { ...value, fundamentals: redactUnavailableFundamentals({ ...value.fundamentals,
       unavailableFields: [...RETRACTABLE_VALUATION_FIELDS] }) };
-    return { ...record, stale: record.stale || legacyYield || legacyValuation, value: value as T };
+    return { ...record, stale: record.stale || legacyYield || legacyValuation || knownInvalidValuation, value: value as T };
   });
   if (records.length === 0) return [];
 

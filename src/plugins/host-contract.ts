@@ -48,6 +48,13 @@ export const SHARED_SPECIFIERS = [
   // Quote subscriptions live in host state; a bundled copy would open its own
   // feed and never see the host's updates.
   "gloomberb/quotes",
+  // The ticker repository and the event bus behind it belong to the running
+  // app: a plugin writing into its own copy would save tickers nothing else
+  // can see.
+  "gloomberb/tickers",
+  // The selected language is host state, and a bundled copy of the tables
+  // would answer in English no matter what the user picked.
+  "gloomberb/i18n",
 ] as const;
 
 export type SharedSpecifier = (typeof SHARED_SPECIFIERS)[number];

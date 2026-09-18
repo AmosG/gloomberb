@@ -111,3 +111,37 @@ test("inconsistent OHLC quarantines risk windows, retains original diagnostics a
   expect(recovered.stats?.find((stat) => stat.key === "rSquared")?.value).toBeCloseTo(1);
   expect(recovered.errors).toEqual([]);
 });
+
+test("risk consumers request daily bars, clip oversized buffers, and disclose incomplete rolling windows", async () => {
+  const ctx = context();
+  const source = await ctx.marketData.getPriceHistory("ABC", "", "1Y");
+  const calls: unknown[][] = [];
+  ctx.marketData = createTestDataProvider({
+    getPriceHistory: async () => { throw new Error("Automatic resolution must not be used"); },
+    getPriceHistoryForResolution: async (...request) => {
+      calls.push(request);
+      return [{ date: new Date("2025-01-01"), close: 1 }, ...source];
+    },
+  });
+  const request = args(["ABC", "SPY"]);
+  request.options = { range: "1M", rangePreset: "1M", correlationWindow: 30 };
+  const correlation = await correlationHeadless.load(request, ctx);
+  const relationship = await relationshipHeadless.load(request, ctx);
+  expect(calls.map(call => call.slice(2, 4))).toEqual(Array.from({ length: 4 }, () => ["1M", "1d"]));
+  expect(correlation.rows[0]?.sampleSize).toBe(6);
+  expect(relationship.metadata).toMatchObject({ firstDate: "2026-01-01", lastDate: "2026-01-07", returnCount: 6 });
+  expect(relationship.errors).toEqual(["Rolling correlation needs 30 shared returns; 6 available."]);
+  expect(relationship.metadata?.returnAlignment).toContain("cash distributions and FX conversion are excluded");
+});
+
+test("a zero-variance latest rolling window never publishes an older correlation as current", async () => {
+  const ctx = context();
+  ctx.marketData = createTestDataProvider({ getPriceHistory: async () => [100, 110, 105, 120, 115, 130, 130, 130, 130, 130, 130].map((close, i) => ({ date: new Date(Date.UTC(2026, 8, i + 1)), close })) });
+  const result = await relationshipHeadless.load(args(["ABC", "SPY"]), ctx);
+  expect(result.series[1]?.points.length).toBeGreaterThan(0);
+  expect(result.series[1]?.points.at(-1)).toEqual({ date: "2026-09-11T00:00:00.000Z", value: null });
+  expect(result.stats?.find(stat => stat.key === "latestCorrelation")?.value).toBeNull();
+  expect(result.metadata?.latestCorrelation).toBeNull();
+  expect(result.errors).toEqual([expect.stringContaining("zero return variance in the latest 5 shared returns")]);
+  expect(result.metadata?.regression).toMatchObject({ rSquared: 1, sampleSize: 10 });
+});

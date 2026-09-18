@@ -40,6 +40,16 @@ function formatYieldAxis(value: number): string {
   return `${value.toFixed(2)}%`;
 }
 
+const pointKey = (point: YieldPoint) => point.maturity;
+const noop = () => {};
+function renderPointCell(point: YieldPoint, column: { id: string }) {
+  return {
+    text: column.id === "yield"
+      ? formatYield(point.yield)
+      : column.id === "asOf" ? point.asOf ?? "—" : point.maturity,
+  };
+}
+
 export function YieldCurvePane({ focused, width, height }: PaneProps) {
   const [requestedDate, setRequestedDate] = usePaneSettingValue<string>("asOfDate", "");
   const [draftDate, setDraftDate] = useState(requestedDate);
@@ -164,10 +174,9 @@ export function YieldCurvePane({ focused, width, height }: PaneProps) {
 
           <Box marginTop={1} height={12}>
             <DataTableView columns={TABLE_COLUMNS} items={points} selection={{ kind: "none" }}
-              focused={focused && !editing} sortColumnId={null} sortDirection="asc" onHeaderClick={() => {}}
-              getItemKey={(point) => point.maturity} rootHeight={12} emptyStateTitle="No Treasury observations"
-              renderCell={(point, column) => ({ text: column.id === "yield" ? formatYield(point.yield)
-                : column.id === "asOf" ? point.asOf ?? "—" : point.maturity })} />
+              focused={focused && !editing} sortColumnId={null} sortDirection="asc" onHeaderClick={noop}
+              getItemKey={pointKey} rootHeight={12} emptyStateTitle="No Treasury observations"
+              renderCell={renderPointCell} />
           </Box>
         </Box>
       </ScrollBox>

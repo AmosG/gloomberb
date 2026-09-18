@@ -54,6 +54,44 @@ test("a cached 50-call pane request cannot satisfy a 200-call research export", 
   expect(limits).toEqual([50, 200]);
 });
 
+test("a later page is requested from the server and never answers the cached first page", async () => {
+  attachEarningsCallsPersistence(new MemoryPluginPersistence());
+  const requested: Array<{ limit?: number; offset?: number }> = [];
+  const client = clientWith(async ({ limit = 50, offset = 0 } = {}) => {
+    requested.push({ limit, offset });
+    return { calls: calls.slice(offset, offset + limit) };
+  });
+  const first = await loadEarningsCallsWithClient(client, "SYN", { limit: 50 });
+  expect(first.calls[0]!.id).toBe("controlled-0");
+  expect(first.sourceLimitReached).toBe(true);
+
+  const second = await loadEarningsCallsWithClient(client, "SYN", { limit: 50, offset: 50 });
+  expect(second.calls[0]!.id).toBe("controlled-50");
+  // A page is live data: asking again reaches the server rather than a cache
+  // entry that would also shadow the first page.
+  const secondAgain = await loadEarningsCallsWithClient(client, "SYN", { limit: 50, offset: 50 });
+  expect(secondAgain.calls[0]!.id).toBe("controlled-50");
+  const cachedFirst = await loadEarningsCallsWithClient(client, "SYN", { limit: 50 });
+  expect(cachedFirst.calls[0]!.id).toBe("controlled-0");
+  expect(requested).toEqual([
+    { limit: 50, offset: 0 },
+    { limit: 50, offset: 50 },
+    { limit: 50, offset: 50 },
+  ]);
+});
+
+test("a failing later page surfaces its error instead of an expired first page", async () => {
+  const store = new MemoryPluginPersistence();
+  attachEarningsCallsPersistence(store);
+  const client = clientWith(async ({ offset = 0 } = {}) => {
+    if (offset > 0) throw new ApiRequestError("Controlled page outage", 503);
+    return { calls: calls.slice(0, 50) };
+  });
+  await loadEarningsCallsWithClient(client, "SYN", { limit: 50 });
+  await expect(loadEarningsCallsWithClient(client, "SYN", { limit: 50, offset: 50 }))
+    .rejects.toThrow("Controlled page outage");
+});
+
 for (const marker of ["pending", "unknownTicker"] as const) {
   test(`empty results retain ${marker} semantics for the pane and transcript export`, async () => {
     attachEarningsCallsPersistence(new MemoryPluginPersistence());

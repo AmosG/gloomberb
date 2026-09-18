@@ -1,5 +1,5 @@
 import type { TimeSeriesPoint } from "./types";
-import type { CloudFredSeriesInfoPayload } from "../api-client";
+import type { CloudFredSeriesInfoPayload, CloudFredSeriesPayload } from "../api-client";
 
 const ICE_CREDIT_SERIES = new Set([
   "BAMLC0A0CM", "BAMLC0A1CAAA", "BAMLC0A2CAA", "BAMLC0A3CA", "BAMLC0A4CBBB",
@@ -17,6 +17,7 @@ export function fredCreditCoverageNotice(
   seriesId: string,
   info: CloudFredSeriesInfoPayload | null,
   visibleStart: number | null,
+  observations: CloudFredSeriesPayload["observations"] = [],
 ): string | null {
   const id = seriesId.trim().toUpperCase();
   if (!ICE_CREDIT_SERIES.has(id) || info?.id.trim().toUpperCase() !== id) return null;
@@ -27,6 +28,17 @@ export function fredCreditCoverageNotice(
   const retention = /Starting in April 2026, this series will only include 3 years of observations\./.test(info.notes)
     ? " FRED limits this ICE series to 3 years."
     : "";
+  // Series metadata and observations can refresh independently. An observation
+  // outside the declared span disproves that span; the query's first/last row
+  // cannot establish replacement source coverage either.
+  const contradictory = observations.some((observation) => {
+    const date = sourceDate(observation.date);
+    return date !== null && observation.value !== null && Number.isFinite(observation.value)
+      && (date < start || date > end);
+  });
+  if (contradictory) {
+    return `FRED coverage metadata does not match the returned observations; exact coverage dates are unavailable.${retention}`;
+  }
   return `FRED coverage: ${info.observationStart} to ${info.observationEnd}. Earlier dates are unavailable from this source.${retention}`;
 }
 

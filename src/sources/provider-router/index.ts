@@ -430,6 +430,15 @@ export class AssetDataRouter implements DataProvider {
       .filter((provider): provider is DataProvider => !!provider);
   }
 
+  /**
+   * Name of the provider a plain market request reaches first: the enabled
+   * capability with the best priority, or the fallback when nothing else is
+   * registered. Broker-scoped requests can still route elsewhere.
+   */
+  primaryMarketSourceName(): string | null {
+    return this.providersInPriorityOrder()[0]?.name ?? null;
+  }
+
   private providersInPriorityOrder(): DataProvider[] {
     const providers = [...this.sortedProviders()];
     const fallbackProvider = this.fallbackSource?.market ?? null;

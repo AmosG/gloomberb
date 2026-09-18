@@ -41,7 +41,7 @@ afterEach(async () => {
 });
 
 describe("useThrottledCursorSymbol", () => {
-  test("keeps the highlighted row immediate while settling the committed cursor", async () => {
+  test("commits the first step at once and settles the rest of a burst to its last symbol", async () => {
     testSetup = await testRender(<ThrottledCursorHarness />, {
       width: 24,
       height: 1,
@@ -59,8 +59,9 @@ describe("useThrottledCursorSymbol", () => {
       await testSetup!.renderOnce();
     });
 
+    // A single step reaches followers without waiting out the throttle.
     expect(latestCursorSymbol).toBe("MSFT");
-    expect(latestCommittedCursorSymbol).toBe("AAPL");
+    expect(latestCommittedCursorSymbol).toBe("MSFT");
 
     await act(async () => {
       setHarnessCursorSymbol?.("NVDA");
@@ -70,8 +71,10 @@ describe("useThrottledCursorSymbol", () => {
       await testSetup!.renderOnce();
     });
 
+    // A second step inside the window is deferred, so a held key cannot
+    // commit every row it passes.
     expect(latestCursorSymbol).toBe("NVDA");
-    expect(latestCommittedCursorSymbol).toBe("AAPL");
+    expect(latestCommittedCursorSymbol).toBe("MSFT");
 
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, TEST_THROTTLE_MS + 20));
@@ -110,7 +113,7 @@ describe("useThrottledCursorSymbol", () => {
     });
 
     expect(latestCursorSymbol).toBe("AMD");
-    expect(latestCommittedCursorSymbol).toBe("AAPL");
+    expect(latestCommittedCursorSymbol).toBe("MSFT");
 
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, TEST_THROTTLE_MS + 20));
@@ -148,7 +151,7 @@ describe("useThrottledCursorSymbol", () => {
       await testSetup!.renderOnce();
     });
 
-    expect(latestCommittedCursorSymbol).toBe("AAPL");
+    expect(latestCommittedCursorSymbol).toBe("MSFT");
 
     await act(async () => {
       flushHarnessCursorSymbol?.("NVDA");

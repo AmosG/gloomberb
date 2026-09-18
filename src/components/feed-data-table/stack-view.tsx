@@ -63,9 +63,13 @@ interface FeedDataTableStackViewProps {
   emptyStateHint?: string;
   isItemRead?: (item: FeedDataTableItem) => boolean;
   onOpenItem?: (item: FeedDataTableItem, index: number) => void;
+  /** Controlled open item, for panes that keep it in pane state so it restores and travels with a share. */
+  openItemId?: string | null;
   onOpenItemIdChange?: (itemId: string | null) => void;
   scrollRef?: RefObject<ScrollBoxRenderable | null>;
   onBodyScrollActivity?: () => void;
+  /** Warms the detail of an item once the cursor rests on its row; see DataTableStackView. */
+  prefetchDetail?: (item: FeedDataTableItem, index: number) => void;
 }
 
 function timestampValue(item: FeedDataTableItem): number {
@@ -149,16 +153,24 @@ export function FeedDataTableStackView({
   emptyStateHint,
   isItemRead,
   onOpenItem,
+  openItemId: controlledOpenItemId,
   onOpenItemIdChange,
   scrollRef,
   onBodyScrollActivity,
+  prefetchDetail,
 }: FeedDataTableStackViewProps) {
   const language = useAppLanguage();
   const [sortPreference, setSortPreference] = useState<SortPreference>({
     columnId: "time",
     direction: "desc",
   });
-  const [openItemId, setOpenItemId] = useState<string | null>(null);
+  const [localOpenItemId, setLocalOpenItemId] = useState<string | null>(null);
+  const controlled = controlledOpenItemId !== undefined;
+  const openItemId = controlled ? controlledOpenItemId : localOpenItemId;
+  const setOpenItemId = useCallback((itemId: string | null) => {
+    if (controlled) onOpenItemIdChange?.(itemId);
+    else setLocalOpenItemId(itemId);
+  }, [controlled, onOpenItemIdChange]);
   const detailScrollRef = useRef<ScrollBoxRenderable>(null);
   const detailTextWidth = Math.max(width - 2, 12);
   const columns = useMemo(
@@ -201,14 +213,16 @@ export function FeedDataTableStackView({
   }, [onOpenItem]);
 
   useEffect(() => {
-    if (openItemId && !openItem) {
+    // A controlled id may name an item that is still loading; the owner
+    // decides when to give it up.
+    if (openItemId && !openItem && !controlled) {
       setOpenItemId(null);
     }
-  }, [openItem, openItemId]);
+  }, [controlled, openItem, openItemId, setOpenItemId]);
 
   useEffect(() => {
-    onOpenItemIdChange?.(activeOpenItemId);
-  }, [activeOpenItemId, onOpenItemIdChange]);
+    if (!controlled) onOpenItemIdChange?.(activeOpenItemId);
+  }, [activeOpenItemId, controlled, onOpenItemIdChange]);
 
   useEffect(() => {
     if (!openItemId) return;
@@ -347,6 +361,7 @@ export function FeedDataTableStackView({
         onChange: (_index, row) => onSelect(row.itemIndex),
       }}
       onActivate={(row) => openRow(row)}
+      prefetchDetail={prefetchDetail ? (row) => prefetchDetail(row.item, row.itemIndex) : undefined}
       rootBefore={rootBefore}
       rootAfter={rootAfter}
       rootWidth={width}

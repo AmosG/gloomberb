@@ -52,8 +52,16 @@ function ContentShareApp({ id }: { id: string }) {
   }>({});
   useEffect(() => {
     const controller = new AbortController();
-    getShare(id, (url, init) => fetch(url, { ...init, signal: controller.signal }))
-      .then((share) => setState(share ? { share } : { error: "This share is unavailable or has expired." }))
+    getShare(id, (url, init) => fetch(url, { ...init, signal: controller.signal }), { trackView: false })
+      .then((share) => {
+        if (share?.kind === "pane") {
+          // A pane share is a live hand-off: the hosted terminal opens on the
+          // shared pane. Nothing here needs to render first.
+          window.location.replace(openLiveShareUrl(id));
+          return;
+        }
+        setState(share ? { share } : { error: "This share is unavailable or has expired." });
+      })
       .catch(() => { if (!controller.signal.aborted) setState({ error: "This share could not be loaded." }); });
     return () => controller.abort();
   }, [id]);

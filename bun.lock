@@ -5,8 +5,6 @@
     "": {
       "name": "react",
       "dependencies": {
-        "@earendil-works/pi-agent-core": "0.81.1",
-        "@earendil-works/pi-ai": "0.81.1",
         "@opentui/core": "^0.3.2",
         "@opentui/react": "^0.3.2",
         "@tanstack/react-virtual": "^3.14.2",
@@ -15,7 +13,6 @@
         "qrcode-generator": "^2.0.4",
         "react": "19.2.7",
         "react-dom": "19.2.7",
-        "typebox": "1.1.38",
         "web-tree-sitter": "0.25.10",
       },
       "devDependencies": {
@@ -23,6 +20,7 @@
         "@types/react-dom": "^19.2.3",
         "@types/three": "0.165.0",
         "electrobun": "^1.18.1",
+        "gloom-byok-ai": "github:gloom-sh/gloom-byok-ai",
         "gloom-fear-greed": "github:gloom-sh/gloom-fear-greed",
         "gloom-ipo-calendar": "github:gloom-sh/gloom-ipo-calendar",
         "gloom-market-halts": "github:gloom-sh/gloom-market-halts",
@@ -558,6 +556,8 @@
     "get-uri": ["get-uri@6.0.5", "", { "dependencies": { "basic-ftp": "^5.0.2", "data-uri-to-buffer": "^6.0.2", "debug": "^4.3.4" } }, "sha512-b1O07XYq8eRuVzBNgJLstU6FYc1tS6wnMtF1I1D9lE8LxZSOGZ7LhxN54yPP6mGw5f2CkXY2BQUL9Fx41qvcIg=="],
 
     "gifwrap": ["gifwrap@0.10.1", "", { "dependencies": { "image-q": "^4.0.0", "omggif": "^1.0.10" } }, "sha512-2760b1vpJHNmLzZ/ubTtNnEx5WApN/PYWJvXvgS+tL1egTTthayFYIQQNi136FLEDcN/IyEY2EcGpIITD6eYUw=="],
+
+    "gloom-byok-ai": ["gloom-byok-ai@github:gloom-sh/gloom-byok-ai#4be5cdd", { "dependencies": { "@earendil-works/pi-agent-core": "0.81.1", "@earendil-works/pi-ai": "0.81.1", "typebox": "1.1.38" }, "peerDependencies": { "gloomberb": ">=0.13.3", "react": ">=19" }, "optionalPeers": ["gloomberb", "react"] }, "gloom-sh-gloom-byok-ai-4be5cdd", "sha512-iL+iofG1Qo0/zS1Q+C4sbNiAxTmBovC8mQ/c2BKXkZUftP4YxPiUfUdldaLCRLznEXi05Ui1XNJ8VPYWWFZAuw=="],
 
     "gloom-fear-greed": ["gloom-fear-greed@github:gloom-sh/gloom-fear-greed#fd7302f", { "peerDependencies": { "gloomberb": ">=0.15.0", "react": ">=19" }, "optionalPeers": ["gloomberb", "react"] }, "gloom-sh-gloom-fear-greed-fd7302f", "sha512-oW1PXI/xmUMzS2QPfB5bH8f3cRZEmRx3BBjQ0uorgdWdeJXDbSKhSiaXXolrAnLKz3xL5jkkpeyTffl2T5wQoQ=="],
 

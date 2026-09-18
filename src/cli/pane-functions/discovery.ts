@@ -144,6 +144,7 @@ function buildDiscoveryContext({
     pinTicker: () => {},
     navigateTicker: () => {},
     openPaneSettings: () => {},
+    sharePane: () => {},
     on: () => () => {},
     emit: () => {},
     notify: () => {},

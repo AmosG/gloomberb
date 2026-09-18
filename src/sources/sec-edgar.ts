@@ -1,5 +1,7 @@
 import type { SecFilingDocument, SecFilingItem } from "../types/data-provider";
-import type { FinancialStatement } from "../types/financials";
+import type { FinancialStatement, IncomeStatementSource } from "../types/financials";
+import { INCOME_STATEMENT_FIELDS } from "../utils/income-statement";
+import { withdrawKnownSecQuarter } from "../utils/statement-observations";
 import { createSecEpsBasisResolver } from "../utils/sec-eps-basis";
 import { truncateWithEllipsis } from "../utils/text-wrap";
 import { decodeHtmlEntities } from "../utils/html-entities";
@@ -57,6 +59,7 @@ type LookupEntry = {
 };
 
 type CompanyFactsEntry = {
+  concept?: string;
   tagPriority?: number;
   accn?: string;
   start?: string;
@@ -91,7 +94,9 @@ const COMPANY_FACTS_STATEMENT_FIELDS: CompanyFactsStatementField[] = [
   },
   { field: "grossProfit", tags: ["GrossProfit"], units: ["USD"], periodType: "duration" },
   { field: "operatingIncome", tags: ["OperatingIncomeLoss"], units: ["USD"], periodType: "duration" },
-  { field: "netIncome", tags: ["NetIncomeLoss", "ProfitLoss"], units: ["USD"], periodType: "duration" },
+  { field: "netIncome", tags: ["NetIncomeLoss"], units: ["USD"], periodType: "duration" },
+  { field: "netIncomeIncludingNoncontrollingInterests", tags: ["ProfitLoss"], units: ["USD"], periodType: "duration" },
+  { field: "netIncomeCommonStockholders", tags: ["NetIncomeLossAvailableToCommonStockholdersBasic"], units: ["USD"], periodType: "duration" },
   {
     field: "operatingCashFlow",
     tags: [
@@ -119,6 +124,8 @@ const COMPANY_FACTS_STATEMENT_FIELDS: CompanyFactsStatementField[] = [
     periodType: "instant",
   },
   { field: "eps", tags: ["EarningsPerShareDiluted"], units: ["USD/shares"], periodType: "duration" },
+  { field: "basicShares", tags: ["WeightedAverageNumberOfSharesOutstandingBasic"], units: ["shares"], periodType: "duration" },
+  { field: "dilutedShares", tags: ["WeightedAverageNumberOfDilutedSharesOutstanding"], units: ["shares"], periodType: "duration" },
 ];
 
 function normalize(value?: string): string {
@@ -572,6 +579,37 @@ function fillCompanyFactsStatementRows(
 function finalizeCompanyFactsStatements(rows: Map<string, FinancialStatement>, selectedFacts: Map<string, CompanyFactsEntry>, resolveEps: ReturnType<typeof createSecEpsBasisResolver>): FinancialStatement[] {
   const statements = Array.from(rows.values()).sort((left, right) => left.date.localeCompare(right.date));
   for (const statement of statements) {
+    const bases: Record<string, IncomeStatementSource["basis"]> = {
+      netIncome: "parent", netIncomeIncludingNoncontrollingInterests: "consolidated", netIncomeCommonStockholders: "common",
+    };
+    for (const field of INCOME_STATEMENT_FIELDS) {
+      const fact = selectedFacts.get(`${statement.date}:${field}`);
+      if (!fact?.concept) continue;
+      statement.fieldSources ??= {};
+      statement.fieldSources[field] = {
+        source: "sec", concept: fact.concept, basis: bases[field]!, unit: "USD", endDate: fact.end!,
+        ...(fact.accn ? { accessionNumber: fact.accn } : {}),
+        ...(fact.filed ? { filed: fact.filed } : {}),
+        ...(fact.start ? { startDate: fact.start } : {}),
+      };
+    }
+    if (statement.fieldSources) {
+      const missing = INCOME_STATEMENT_FIELDS.filter(field => !statement.fieldSources?.[field]);
+      if (missing.length) statement.unavailableFields = missing;
+    }
+    for (const field of ["basicShares", "dilutedShares"] as const) {
+      const fact = selectedFacts.get(`${statement.date}:${field}`);
+      if (!fact) continue;
+      // Use the accession's proved basis, never the EPS-specific numeric result:
+      // reported share counts cannot be divided or multiplied as EPS values.
+      const { basis, availableAt } = resolveEps(fact);
+      if (basis && (basis.status !== "split-adjusted" || basis.factor !== 1)) {
+        delete statement[field];
+        if (statement.fieldAvailability) delete statement.fieldAvailability[field];
+      } else if (basis && availableAt) {
+        statement.fieldAvailability = { ...statement.fieldAvailability, [field]: availableAt };
+      }
+    }
     const epsFact = selectedFacts.get(`${statement.date}:eps`);
     if (epsFact) {
       const normalized = resolveEps(epsFact);
@@ -623,7 +661,7 @@ export function parseCompanyFactsFinancialStatements(payload: unknown): SecCompa
   const fieldEntries = COMPANY_FACTS_STATEMENT_FIELDS.map((field) => ({
     field,
     entries: field.tags.flatMap((tag, tagPriority) => companyFactsEntries(payload, tag, field.units)
-      .map((entry) => ({ ...entry, tagPriority }))),
+      .map((entry) => ({ ...entry, tagPriority, concept: tag }))),
   }));
   // Balance-sheet facts have no duration. Anchor their dates to actual annual
   // periods, so quarterly comparative snapshots in a 10-K stay quarterly.
@@ -638,10 +676,10 @@ export function parseCompanyFactsFinancialStatements(payload: unknown): SecCompa
   }
 
   const resolveEps = createSecEpsBasisResolver(payload);
-  return {
+  return withdrawKnownSecQuarter({
     annualStatements: finalizeCompanyFactsStatements(annualRows, annualSelectedFacts, resolveEps),
     quarterlyStatements: finalizeCompanyFactsStatements(quarterlyRows, quarterlySelectedFacts, resolveEps),
-  };
+  }, companyFactsRecord(payload)?.cik);
 }
 
 export class SecEdgarClient {
@@ -775,8 +813,10 @@ export class SecEdgarClient {
     const statements = parseCompanyFactsFinancialStatements(payload);
     if (/[.-]/.test(normalizedTicker)) {
       for (const row of [...statements.annualStatements, ...statements.quarterlyStatements]) {
-        delete row.eps;
-        if (row.fieldAvailability) delete row.fieldAvailability.eps;
+        for (const field of ["eps", "basicShares", "dilutedShares"] as const) {
+          delete row[field];
+          if (row.fieldAvailability) delete row.fieldAvailability[field];
+        }
       }
     }
     return statements;

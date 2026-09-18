@@ -31,10 +31,13 @@ export const financialStatementsHeadless: HeadlessPaneDefinition<"rows"> = {
     const statementCurrency = financialStatementCurrency(financials, [
       ...financials.annualStatements, ...financials.quarterlyStatements,
     ]);
-    const dates = table?.statements.map(({ date, currency, dateSource, providerDate, dateEvidence, availableAt, fieldAvailability, epsBasis, aggregation }) => ({
+    const dates = table?.statements.map(({ date, currency, dateSource, providerDate, dateEvidence, availableAt, fieldAvailability, fieldSources, unavailableFields, withdrawnObservations, epsBasis, aggregation }) => ({
       date, currency: currency ?? statementCurrency ?? null,
       availableAt: availableAt ?? null,
       fieldAvailability: fieldAvailability ? { ...fieldAvailability } : null,
+      ...(fieldSources ? { fieldSources } : {}),
+      ...(unavailableFields ? { unavailableFields } : {}),
+      ...(withdrawnObservations ? { withdrawnObservations } : {}),
       ...(epsBasis ? { epsBasis } : {}),
       ...(aggregation ? { aggregation } : {}),
       dateSource: date === "TTM" ? "derived" : dateSource ?? "provider",

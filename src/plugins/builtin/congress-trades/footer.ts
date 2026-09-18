@@ -16,10 +16,13 @@ export function useCongressTradesFooter({
   detailMode,
   detailTrade,
   error,
+  loadPreviousYear,
+  notice,
   openSelectedTicker,
   openSelectedTradeMember,
   openSelectedTradeSource,
   payload,
+  previousYear,
   selectedTrade,
   status,
 }: {
@@ -27,10 +30,14 @@ export function useCongressTradesFooter({
   detailMode: DetailMode;
   detailTrade: CloudCongressTradePayload | null;
   error: string | null;
+  loadPreviousYear: (() => void) | null;
+  /** Set when the window came back incomplete, so the gap is visible. */
+  notice: string | null;
   openSelectedTicker: () => void;
   openSelectedTradeMember: () => void;
   openSelectedTradeSource: () => void;
   payload: CloudCongressHousePayload | null;
+  previousYear: number | null;
   selectedTrade: CloudCongressTradePayload | null;
   status: LoadStatus;
 }) {
@@ -40,24 +47,33 @@ export function useCongressTradesFooter({
         { id: "asof", parts: [{ text: `updated ${formatTimeAgo(payload.asOf)}`, tone: "muted" as const }] },
       ] : []),
       ...(status === "loading" ? [{ id: "loading", parts: [{ text: "loading", tone: "muted" as const }] }] : []),
+      ...(notice ? [{ id: "scan", parts: [{ text: notice, tone: "muted" as const }] }] : []),
       ...(error ? [{ id: "error", parts: [{ text: error, tone: "warning" as const }] }] : []),
     ],
-    hints: detailMode?.kind !== "member" && activeTab === "trades" && (detailTrade ?? selectedTrade)
-      ? [
-          { id: "member", key: "m", label: "ember", onPress: openSelectedTradeMember },
-          { id: "ticker", key: "t", label: "icker", onPress: openSelectedTicker, disabled: !(detailTrade?.ticker ?? selectedTrade?.ticker) },
-          { id: "open", key: "o", label: "pen", onPress: openSelectedTradeSource, disabled: !(detailTrade ?? selectedTrade)?.sourceUrl },
-        ]
-      : [],
+    hints: [
+      ...(detailMode?.kind !== "member" && activeTab === "trades" && (detailTrade ?? selectedTrade)
+        ? [
+            { id: "member", key: "m", label: "ember", onPress: openSelectedTradeMember },
+            { id: "ticker", key: "t", label: "icker", onPress: openSelectedTicker, disabled: !(detailTrade?.ticker ?? selectedTrade?.ticker) },
+            { id: "open", key: "o", label: "pen", onPress: openSelectedTradeSource, disabled: !(detailTrade ?? selectedTrade)?.sourceUrl },
+          ]
+        : []),
+      ...(!detailMode && loadPreviousYear && previousYear
+        ? [{ id: "prev-year", key: "p", label: `rev year ${previousYear}`, onPress: loadPreviousYear }]
+        : []),
+    ],
   }), [
     activeTab,
     detailMode,
     detailTrade,
     error,
+    loadPreviousYear,
+    notice,
     openSelectedTicker,
     openSelectedTradeMember,
     openSelectedTradeSource,
     payload,
+    previousYear,
     selectedTrade,
     status,
   ]);

@@ -51,6 +51,8 @@ export const FUTURES_PANE_ID = "futures";
 
 const FUTURES_SYMBOLS = FUTURES_CONTRACTS.map((contract) => contract.symbol);
 
+const alwaysNavigable = () => true;
+
 function FuturesPane({ focused, width, height }: PaneProps) {
   const { pinTicker } = usePluginTickerActions();
   const dataProvider = useAssetData();
@@ -110,6 +112,16 @@ function FuturesPane({ focused, width, height }: PaneProps) {
       return next;
     });
   }, []);
+
+  // Memoized so the table's row memo holds while the selection moves.
+  const renderSectorHeader = useCallback((row: FuturesTableRow) => (
+    row.type === "header"
+      ? {
+        text: `${visibleCollapsed.has(row.sector) ? "▶" : "▼"} ${FUTURES_SECTOR_LABELS[row.sector]}`,
+        onMouseDown: () => toggleSector(row.sector),
+      }
+      : null
+  ), [toggleSector, visibleCollapsed]);
 
   const cycleSort = useCallback((step: 1 | -1) => {
     setSortPreference((current) => cycleSortPreference<FuturesColumnId>(
@@ -192,7 +204,7 @@ function FuturesPane({ focused, width, height }: PaneProps) {
         getId: (row) => futuresRowId(row),
         onChange: (id) => setSelectedId(id),
       }}
-      isNavigable={() => true}
+      isNavigable={alwaysNavigable}
       onActivate={(row) => {
         if (row.type === "header") {
           toggleSector(row.sector);
@@ -207,13 +219,8 @@ function FuturesPane({ focused, width, height }: PaneProps) {
       sortColumnId={sortPreference.columnId}
       sortDirection={sortPreference.direction}
       onHeaderClick={(columnId) => setSortPreference((current) => nextFuturesSort(current, columnId))}
-      getItemKey={(row) => futuresRowId(row)}
-      renderSectionHeader={(row) => row.type === "header"
-        ? {
-          text: `${visibleCollapsed.has(row.sector) ? "▶" : "▼"} ${FUTURES_SECTOR_LABELS[row.sector]}`,
-          onMouseDown: () => toggleSector(row.sector),
-        }
-        : null}
+      getItemKey={futuresRowId}
+      renderSectionHeader={renderSectorHeader}
       renderCell={renderCell}
       emptyStateTitle={searchQuery.trim()
         ? "No matching contracts."

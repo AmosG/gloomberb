@@ -25,7 +25,11 @@ export function BreakingPane({ focused, width, height }: PaneProps) {
   const [selectedArticleId, setSelectedArticleId] = useDebouncedPluginPaneState<string | null>("breaking:selectedArticleId", null);
   const [sortPreference, setSortPreference] = usePluginPaneState<NewsSortPreference>("breaking:sort", DEFAULT_SORT);
   const loadNewsStory = useLoadNewsStory();
-  const { detailArticle, detailLoading, detailError, openArticle, closeDetail } = useNewsArticleDetail(articles, loadNewsStory);
+  const { detailArticle, detailLoading, detailError, openArticle, closeDetail } = useNewsArticleDetail(
+    articles,
+    loadNewsStory,
+    "breaking:openArticleId",
+  );
   const { readArticleIds, markArticleRead } = useNewsReadState();
 
   useNewsArticleFooter({

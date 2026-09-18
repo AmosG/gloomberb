@@ -68,12 +68,17 @@ import {
 import { resolveChartComposerShortcut } from "./shortcuts";
 import { ChartSeriesQuickAdd } from "./quick-add";
 import { useLiveStreamingSetting } from "../shared/live-streaming";
-import { usePublicShare } from "../shared/public-share";
-import { buildChartShareData } from "../../../shares/chart-snapshot";
+import { usePluginAppActions } from "../../runtime";
 import { isPlainKey } from "../../../utils/keyboard";
 
 const RANGE_TABS = RANGES.map((range, index) => ({ label: `${index + 1}:${range}`, value: range }));
 const AUTO_VIEWPORT_DEBOUNCE_MS = 350;
+/**
+ * Drawings persist into pane settings on a short debounce after the pointer
+ * settles. A share reads those settings, so it waits at least that long for a
+ * stroke finished a moment before the key press.
+ */
+const SHARE_SETTLE_DELAY_MS = 450;
 /** Bar pitch AUTO aims for; the coarser neighbour wins ties so bars stay readable. */
 const AUTO_RESOLUTION_BAR_PIXELS = 7;
 const MINIMUM_AUTO_RESOLUTION_POINTS = 60;
@@ -276,18 +281,11 @@ function ChartComposerSurface({
     ),
     [resolution.bufferedSeries, resolution.legendSeries, resolution.series, spec],
   );
-  const shareWarnings = useMemo(() => [...resolution.errors, ...resolution.warnings], [resolution.errors, resolution.warnings]);
-  const shareData = useMemo(() => buildChartShareData(plottedSeries, activeRuntimeViewport?.requestViewport ?? viewport, shareWarnings),
-    [plottedSeries, activeRuntimeViewport?.requestViewport, viewport, shareWarnings]);
-  const createPublicShare = usePublicShare();
-  const shareChart = useCallback(() => {
-    // Read the latest gesture immediately, even before its history request's
-    // debounce commits. Sharing should match the window visible at the click.
-    const visibleWindow = requestViewportOwnerRef.current === authoredViewportKey
-      ? requestViewportRef.current ?? viewport : viewport;
-    const data = buildChartShareData(plottedSeries, visibleWindow, shareWarnings);
-    if (data) void createPublicShare({ kind: "chart", data });
-  }, [createPublicShare, plottedSeries, viewport, shareWarnings, authoredViewportKey]);
+  const { sharePane } = usePluginAppActions();
+  const shareTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (shareTimerRef.current !== null) clearTimeout(shareTimerRef.current);
+  }, []);
   const [interactionCaptured, setInteractionCapturedState] = useState(false);
   // Typing in quick-add must not freeze the plot: it only takes the keyboard.
   const [modalCaptured, setModalCaptured] = useState(false);
@@ -345,6 +343,24 @@ function ChartComposerSurface({
       }
     };
   }, [authoredViewportKey, persistedInteractionViewport, setStoredInteractionViewport]);
+  const commitRuntimeViewport = useCallback(() => {
+    const requestViewport = requestViewportRef.current;
+    if (!requestViewport) return;
+    const adaptiveViewport = spec.viewport.resolution === "auto"
+      ? adaptiveViewportRef.current
+      : null;
+    setRuntimeViewportState({
+      key: authoredViewportKey,
+      adaptiveViewport,
+      requestViewport,
+    });
+    setStoredInteractionViewport({
+      authoredViewportKey,
+      start: requestViewport.start.toISOString(),
+      end: requestViewport.end.toISOString(),
+      adaptive: adaptiveViewport !== null,
+    } satisfies ChartInteractionViewport);
+  }, [authoredViewportKey, setStoredInteractionViewport, spec.viewport.resolution]);
   const handleChartViewportChange = useCallback((
     next: { start: Date; end: Date } | null,
     _interaction: "pan" | "reset" | "zoom",
@@ -371,24 +387,22 @@ function ChartComposerSurface({
     if (spec.viewport.resolution === "auto") adaptiveViewportRef.current = viewport;
     runtimeViewportTimerRef.current = globalThis.setTimeout(() => {
       runtimeViewportTimerRef.current = null;
-      const requestViewport = requestViewportRef.current;
-      if (!requestViewport) return;
-      const adaptiveViewport = spec.viewport.resolution === "auto"
-        ? adaptiveViewportRef.current
-        : null;
-      setRuntimeViewportState({
-        key: authoredViewportKey,
-        adaptiveViewport,
-        requestViewport,
-      });
-      setStoredInteractionViewport({
-        authoredViewportKey,
-        start: requestViewport.start.toISOString(),
-        end: requestViewport.end.toISOString(),
-        adaptive: adaptiveViewport !== null,
-      } satisfies ChartInteractionViewport);
+      commitRuntimeViewport();
     }, AUTO_VIEWPORT_DEBOUNCE_MS);
-  }, [authoredViewportKey, setStoredInteractionViewport, spec.viewport.resolution]);
+  }, [authoredViewportKey, commitRuntimeViewport, spec.viewport.resolution]);
+  const shareChart = useCallback(() => {
+    // The share reads pane settings, so the gesture in flight lands there first.
+    if (runtimeViewportTimerRef.current !== null) {
+      clearTimeout(runtimeViewportTimerRef.current);
+      runtimeViewportTimerRef.current = null;
+      commitRuntimeViewport();
+    }
+    if (shareTimerRef.current !== null) return;
+    shareTimerRef.current = globalThis.setTimeout(() => {
+      shareTimerRef.current = null;
+      sharePane(paneId);
+    }, SHARE_SETTLE_DELAY_MS);
+  }, [commitRuntimeViewport, paneId, sharePane]);
 
   useRemoteUiNode({
     role: "chart-data",
@@ -479,7 +493,7 @@ function ChartComposerSurface({
   );
   useShortcut((event) => {
     if (interactionCaptureRef.current || dialogOpen) return;
-    if (publicSharing && shareData && isPlainKey(event, "y")) {
+    if (publicSharing && isPlainKey(event, "y")) {
       event.preventDefault();
       event.stopPropagation();
       shareChart();
@@ -568,9 +582,9 @@ function ChartComposerSurface({
       { id: "series", key: "s", label: "eries", onPress: footerSeries },
       { id: "indicators", key: "i", label: "ndicators", onPress: openIndicators, disabled: indicatorsDisabled },
       { id: "formulas", key: "f", label: "ormulas", onPress: openFormulas, disabled: formulasDisabled },
-      ...(publicSharing ? [{ id: "share", key: "y", label: " share", onPress: footerShare, disabled: !shareData }] : []),
+      ...(publicSharing ? [{ id: "share", key: "y", label: " share", onPress: footerShare }] : []),
     ],
-  }), [resolution.loading, footerSeries, openIndicators, indicatorsDisabled, openFormulas, formulasDisabled, publicSharing, footerShare, !!shareData]);
+  }), [resolution.loading, footerSeries, openIndicators, indicatorsDisabled, openFormulas, formulasDisabled, publicSharing, footerShare]);
 
   const emptyMessage = spec.series.length === 0
     ? "Add a series to start the chart"

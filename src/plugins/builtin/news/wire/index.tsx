@@ -63,8 +63,7 @@ const FeedPane = createNewsPresetPane({
 
 let disposeBreakingNewsNotifications: (() => void) | null = null;
 
-export const newsWireModule: PluginModule = {
-  panes: [
+const newsWirePanes: PluginModule["panes"] = [
     { id: "news-top", name: "Top News", icon: "T", component: TopPane, defaultPosition: "right", defaultMode: "floating", defaultFloatingSize: { width: 90, height: 30 } },
     { id: "news-feed", name: "News Feed", icon: "N", component: FeedPane, defaultPosition: "right", defaultMode: "floating", defaultFloatingSize: { width: 100, height: 35 } },
     { id: "news-industry", name: "Sector News", icon: "S", component: IndustryPane, defaultPosition: "right", defaultMode: "floating", defaultFloatingSize: { width: 100, height: 35 } },
@@ -105,13 +104,35 @@ export const newsWireModule: PluginModule = {
         ],
       },
     },
-  ],
-  paneTemplates: [
-    { id: "news-top-pane", paneId: "news-top", label: "Top News", description: "Curated top market stories ranked by importance", keywords: ["top", "news", "headlines", "stories"], shortcut: { prefix: "TOP" } },
-    { id: "news-feed-pane", paneId: "news-feed", label: "News Feed", description: "Chronological market news firehose", keywords: ["news", "feed", "firehose", "wire", "stream"], shortcut: { prefix: "N" }, headless: newsFeedHeadless },
-    { id: "news-industry-pane", paneId: "news-industry", label: "Sector News", description: "Market news filtered by sector", keywords: ["news", "industry", "sector", "ni", "filter"], shortcut: { prefix: "NI" } },
-    { id: "news-breaking-pane", paneId: "news-breaking", label: "Breaking News", description: "Breaking and urgent market news", keywords: ["first", "breaking", "urgent", "alert", "flash"], shortcut: { prefix: "FIRST" } },
-  ],
+];
+
+const newsWirePaneTemplates: PluginModule["paneTemplates"] = [
+  { id: "news-top-pane", paneId: "news-top", label: "Top News", description: "Curated top market stories ranked by importance", keywords: ["top", "news", "headlines", "stories"], shortcut: { prefix: "TOP" } },
+  { id: "news-feed-pane", paneId: "news-feed", label: "News Feed", description: "Chronological market news firehose", keywords: ["news", "feed", "firehose", "wire", "stream"], shortcut: { prefix: "N" }, headless: newsFeedHeadless },
+  { id: "news-industry-pane", paneId: "news-industry", label: "Sector News", description: "Market news filtered by sector", keywords: ["news", "industry", "sector", "ni", "filter"], shortcut: { prefix: "NI" } },
+  { id: "news-breaking-pane", paneId: "news-breaking", label: "Breaking News", description: "Breaking and urgent market news", keywords: ["first", "breaking", "urgent", "alert", "flash"], shortcut: { prefix: "FIRST" } },
+];
+
+/**
+ * The wire panes on Gloom Cloud news alone. The hosted browser cannot fetch
+ * RSS feeds itself, so it gets the panes without the feed source and its
+ * command; a shared wire pane still opens there on the same story.
+ */
+export const browserNewsWireModule: PluginModule = {
+  panes: newsWirePanes,
+  paneTemplates: newsWirePaneTemplates,
+  setup(ctx) {
+    disposeBreakingNewsNotifications = setupBreakingNewsNotifications(ctx);
+  },
+  dispose() {
+    disposeBreakingNewsNotifications?.();
+    disposeBreakingNewsNotifications = null;
+  },
+};
+
+export const newsWireModule: PluginModule = {
+  panes: newsWirePanes,
+  paneTemplates: newsWirePaneTemplates,
   setup(ctx) {
     const initialSettings = loadNewsFeedSettings(ctx.configState);
     if (initialSettings.needsMigration) {

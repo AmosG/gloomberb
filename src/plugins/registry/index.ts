@@ -130,6 +130,7 @@ export class PluginRegistry implements PluginRuntimeAccess {
   openCommandBarFn: ((query?: string) => void) = () => {};
   openPluginCommandWorkflowFn: ((commandId: string) => void) = () => {};
   openPaneSettingsFn: ((paneId?: string) => void) = () => {};
+  sharePaneFn: ((paneId?: string) => void) = () => {};
   openWindowModeFn: ((paneId?: string, mode?: WindowEditMode) => void) = () => {};
   showPaneFn: ((paneId: string) => void) = () => {};
   createPaneFromTemplateFn: ((templateId: string, options?: PaneTemplateCreateOptions) => void) = () => {};
@@ -181,6 +182,9 @@ export class PluginRegistry implements PluginRuntimeAccess {
   };
   openPaneSettings = (paneId?: string) => {
     this.openPaneSettingsFn(paneId);
+  };
+  sharePane = (paneId?: string) => {
+    this.sharePaneFn(paneId);
   };
   openWindowMode = (paneId?: string, mode?: WindowEditMode) => {
     this.openWindowModeFn(paneId, mode);
@@ -238,8 +242,8 @@ export class PluginRegistry implements PluginRuntimeAccess {
     this.remoteCapabilityInvoke = options.remoteCapabilityInvoke;
     this.events = new EventBus();
     this.contributions = new RegistryContributions({
-      wrapPaneDef: (pluginId, pane) => wrapPaneDefWithRuntime(pluginId, pane, this),
-      wrapTickerResearchTabDef: (pluginId, tab) => wrapTickerResearchTabDefWithRuntime(pluginId, tab, this),
+      wrapPaneDef: (pluginId, pane) => wrapPaneDefWithRuntime(this.stateNamespace(pluginId), pane, this),
+      wrapTickerResearchTabDef: (pluginId, tab) => wrapTickerResearchTabDefWithRuntime(this.stateNamespace(pluginId), tab, this),
       wrapBrokerAdapter: this.wrapBrokerAdapter,
     });
 
@@ -364,49 +368,61 @@ export class PluginRegistry implements PluginRuntimeAccess {
     }
   }
 
+  /**
+   * Where a plugin's saved state lives, which is its id unless it declares
+   * otherwise. A plugin that was renamed keeps reading and writing the state
+   * the user already has instead of starting again under the new id.
+   */
+  private stateNamespace(pluginId: string): string {
+    return this.plugins.get(pluginId)?.stateId ?? pluginId;
+  }
+
   subscribeResumeState(pluginId: string, key: string, listener: () => void): () => void {
-    return this.resumeStateListeners.subscribe(pluginId, key, listener);
+    return this.resumeStateListeners.subscribe(this.stateNamespace(pluginId), key, listener);
   }
 
   getResumeState<T = unknown>(pluginId: string, key: string, schemaVersion?: number): T | null {
-    return this.persistence.pluginState.get<T>(pluginId, `resume:${key}`, schemaVersion)?.value ?? null;
+    const stateId = this.stateNamespace(pluginId);
+    return this.persistence.pluginState.get<T>(stateId, `resume:${key}`, schemaVersion)?.value ?? null;
   }
 
   setResumeState(pluginId: string, key: string, value: unknown, schemaVersion?: number): void {
-    this.persistence.pluginState.set(pluginId, `resume:${key}`, value, schemaVersion);
-    this.resumeStateListeners.emit(pluginId, key);
+    const stateId = this.stateNamespace(pluginId);
+    this.persistence.pluginState.set(stateId, `resume:${key}`, value, schemaVersion);
+    this.resumeStateListeners.emit(stateId, key);
   }
 
   deleteResumeState(pluginId: string, key: string): void {
-    this.persistence.pluginState.delete(pluginId, `resume:${key}`);
-    this.resumeStateListeners.emit(pluginId, key);
+    const stateId = this.stateNamespace(pluginId);
+    this.persistence.pluginState.delete(stateId, `resume:${key}`);
+    this.resumeStateListeners.emit(stateId, key);
   }
 
   getConfigState<T = unknown>(pluginId: string, key: string): T | null {
-    return this.getPluginConfigValueFn<T>(pluginId, key);
+    return this.getPluginConfigValueFn<T>(this.stateNamespace(pluginId), key);
   }
 
   setConfigState(pluginId: string, key: string, value: unknown): Promise<void> {
-    return this.setPluginConfigValueFn(pluginId, key, value);
+    return this.setPluginConfigValueFn(this.stateNamespace(pluginId), key, value);
   }
 
   setConfigStates(pluginId: string, values: Record<string, unknown>): Promise<void> {
-    return this.setPluginConfigValuesFn(pluginId, values);
+    return this.setPluginConfigValuesFn(this.stateNamespace(pluginId), values);
   }
 
   deleteConfigState(pluginId: string, key: string): Promise<void> {
-    return this.deletePluginConfigValueFn(pluginId, key);
+    return this.deletePluginConfigValueFn(this.stateNamespace(pluginId), key);
   }
 
   getConfigStateKeys(pluginId: string): string[] {
-    return Object.keys(this.getConfigFn().pluginConfig[pluginId] ?? {}).sort();
+    return Object.keys(this.getConfigFn().pluginConfig[this.stateNamespace(pluginId)] ?? {}).sort();
   }
 
   /** False while a plugin with a `configSchema` is missing a required value. */
   isPluginConfigured(pluginId: string): boolean {
     const plugin = this.plugins.get(pluginId);
     if (!plugin) return true;
-    return isPluginConfigured(plugin, this.getConfigFn().pluginConfig[pluginId] ?? {});
+    return isPluginConfigured(plugin, this.getConfigFn().pluginConfig[this.stateNamespace(pluginId)] ?? {});
   }
 
   private resolvePaneTarget(paneId: string): string | undefined {
@@ -516,17 +532,22 @@ export class PluginRegistry implements PluginRuntimeAccess {
       marketData: this.marketData,
       connectionHealth: this.connectionHealth,
       tickerRepository: this.tickerRepository,
-      persistence: createPluginPersistence(this.persistence.pluginState, this.persistence.resources, `plugin:${pluginId}`, pluginId),
+      persistence: createPluginPersistence(
+        this.persistence.pluginState,
+        this.persistence.resources,
+        `plugin:${this.stateNamespace(pluginId)}`,
+        this.stateNamespace(pluginId),
+      ),
       log: debugLog.createLogger(pluginId),
       resume: createPluginResumeState({
-        pluginId,
+        pluginId: this.stateNamespace(pluginId),
         getResumeState: (key, version) => this.getResumeState(pluginId, key, version),
         setResumeState: (key, value, version) => this.setResumeState(pluginId, key, value, version),
         deleteResumeState: (key) => this.deleteResumeState(pluginId, key),
         getPaneRuntimeState: (paneId) => this.getPaneRuntimeStateFn(paneId),
         updatePaneRuntimeState: (paneId, patch) => this.updatePaneRuntimeStateFn(paneId, patch),
       }),
-      teamState: createPluginTeamState(pluginId),
+      teamState: createPluginTeamState(this.stateNamespace(pluginId)),
       paneSettings: createPluginPaneSettingsState({
         getLayout: () => this.getLayoutFn(),
         updateLayout: (layout) => this.updateLayoutFn(layout),
@@ -553,6 +574,7 @@ export class PluginRegistry implements PluginRuntimeAccess {
       pinTicker: this.pinTicker,
       navigateTicker: this.navigateTicker,
       openPaneSettings: this.openPaneSettings,
+      sharePane: this.sharePane,
       on: (event, handler) => {
         const dispose = this.events.on(event, handler);
         items.eventDisposers.push(dispose);
@@ -599,7 +621,7 @@ export class PluginRegistry implements PluginRuntimeAccess {
       this.slots.register(plugin, this);
 
       const setupCommand = createPluginSetupCommand(plugin, {
-        getValues: () => this.getConfigFn().pluginConfig[plugin.id] ?? {},
+        getValues: () => this.getConfigFn().pluginConfig[this.stateNamespace(plugin.id)] ?? {},
         setValues: (values) => this.setConfigStates(plugin.id, values),
         notify: (body, type) => this.notifyFn({ body, type }),
       });

@@ -24,6 +24,7 @@ import {
   CATALOG_FILTERS,
   CHART_COMPOSER_TEMPLATE_ID,
   DATA_CATALOG_PANE_ID,
+  DEFAULT_CATALOG_MARKET_SOURCE,
   catalogEmptyCopy,
   catalogExpressionForRow,
   catalogInstrumentMatchesQuery,
@@ -31,10 +32,12 @@ import {
   filterCatalogRows,
   listStaticCatalogInventory,
   looksLikeCatalogTickerQuery,
+  resolveCatalogMarketSource,
   type CatalogFilterId,
   type CatalogSeriesRow,
 } from "./catalog-inventory";
 import { useCatalogUniverse } from "./use-series-catalog";
+import { getSharedRegistry } from "../../registry";
 
 type CatalogColumnId = "series" | "source" | "kind" | "expression";
 type CatalogColumn = DataTableColumn & { id: CatalogColumnId };
@@ -45,6 +48,22 @@ interface CatalogSortPreference {
 }
 
 const DEFAULT_SORT: CatalogSortPreference = { columnId: "source", direction: "asc" };
+
+/**
+ * Which provider a plain market request reaches first. Re-asked on every
+ * mount, so toggling the cloud plugin and reopening the catalog reflects it.
+ */
+function useCatalogMarketSource(): string {
+  const [source, setSource] = useState(DEFAULT_CATALOG_MARKET_SOURCE);
+  useEffect(() => {
+    let cancelled = false;
+    void resolveCatalogMarketSource(getSharedRegistry()?.marketData).then((name) => {
+      if (!cancelled) setSource(name);
+    });
+    return () => { cancelled = true; };
+  }, []);
+  return source;
+}
 
 function nextSortPreference(
   current: CatalogSortPreference,
@@ -101,11 +120,14 @@ export function DataCatalogPane({ focused, width, height }: PaneProps) {
   const loading = tickerQuery && universeLoading;
   const emptyCopy = catalogEmptyCopy(loading, searchQuery);
 
+  const marketSource = useCatalogMarketSource();
+
   const rows = useMemo(() => {
-    const staticRows = listStaticCatalogInventory(instruments);
+    const staticRows = listStaticCatalogInventory(instruments, marketSource);
     const resolvedRows = tickerQuery
       ? catalogRowsForResolvedInstruments(
         instruments.filter((instrument) => catalogInstrumentMatchesQuery(instrument, searchQuery)),
+        marketSource,
       )
       : [];
     const merged = new Map<string, CatalogSeriesRow>();
@@ -119,7 +141,7 @@ export function DataCatalogPane({ focused, width, height }: PaneProps) {
       compareSortValues(sortValue(columnId, left), sortValue(columnId, right), direction)
       || left.label.localeCompare(right.label)
     ));
-  }, [filter, instruments, searchQuery, sortPreference, tickerQuery]);
+  }, [filter, instruments, marketSource, searchQuery, sortPreference, tickerQuery]);
 
   useEffect(() => {
     if (selectedId && rows.some((row) => row.id === selectedId)) return;

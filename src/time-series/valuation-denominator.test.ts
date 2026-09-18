@@ -186,11 +186,14 @@ test("TTM keeps a complete common numerator and averaged shares; partial common 
   expect(extractFundamentalSeries(data, source("auto")).at(-1)?.value).toBe(6);
 });
 
-test("derived Q4 common earnings preserve independent field provenance through TTM and unresolved EPS still blocks fallback", () => {
+test("reported Q4 common earnings use their own income and share dates while unresolved EPS blocks fallback", () => {
   const annual: FinancialStatement = { date: "2025-12-31", currency: "USD", netIncome: 100, netIncomeCommonStockholders: 60, dilutedShares: 10,
     fieldAvailability: { netIncome: "2026-03-01", netIncomeCommonStockholders: "2026-03-05", dilutedShares: "2026-03-06" } };
-  const quarters = ["2025-03-31", "2025-06-30", "2025-09-30"].map((date, index) => ({ date, currency: "USD", netIncome: 25,
+  const quarters: FinancialStatement[] = ["2025-03-31", "2025-06-30", "2025-09-30"].map((date, index) => ({ date, currency: "USD", netIncome: 25,
     netIncomeCommonStockholders: [10, 20, 15][index], dilutedShares: [8, 10, 12][index], availableAt: "2025-11-01" }));
+  // Common allocations and weighted-average shares both require quarter inputs.
+  quarters.push({ date: "2025-12-31", currency: "USD", netIncomeCommonStockholders: 15, dilutedShares: 10,
+    fieldAvailability: { netIncomeCommonStockholders: "2026-03-05", dilutedShares: "2026-03-06" } });
   const q4 = deriveQuarterlyStatements(quarters, [annual]).at(-1)!;
   expect(q4).toMatchObject({ netIncomeCommonStockholders: 15, dilutedShares: 10,
     fieldAvailability: { netIncomeCommonStockholders: "2026-03-05", dilutedShares: "2026-03-06" } });
@@ -199,6 +202,7 @@ test("derived Q4 common earnings preserve independent field provenance through T
   expect(points.at(-1)?.value).toBe(10);
   expect(points[0]?.availableAt?.toISOString()).toBe("2026-03-06T00:00:00.000Z");
   annual.epsBasis = { status: "unresolved", source: "sec", originalValue: 6, basisDate: "2026-03-01", evidence: [] };
+  quarters[3]!.epsBasis = { ...annual.epsBasis, originalValue: 1.5 };
   expect(extractFundamentalSeries(data, source("annual"))).toEqual([]);
   expect(extractFundamentalSeries(data, source("ttm"))).toEqual([]);
 });

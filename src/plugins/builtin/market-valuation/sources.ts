@@ -50,9 +50,50 @@ export function historyToObservations(
   return observations;
 }
 
+type FredLoad = DatedObservation[] | SeriesCacheInput;
+
+function fredObservations(loaded: FredLoad): DatedObservation[] {
+  return Array.isArray(loaded) ? loaded : loaded.observations;
+}
+
+function fredProvider(loaded: FredLoad): SeriesCacheInput["provider"] | undefined {
+  return Array.isArray(loaded) ? undefined : loaded.provider;
+}
+
+/**
+ * Adds legs on their shared dates. The result carries the oldest fetch time and
+ * is stale if any leg is, so freshness never looks better than the worst input.
+ */
+export function sumFredSeries(legs: readonly FredLoad[]): SeriesCacheInput {
+  if (legs.length === 0) throw new Error("No series to sum");
+  const valuesByDate = new Map<string, number[]>();
+  for (const leg of legs) {
+    for (const obs of fredObservations(leg)) {
+      if (typeof obs.value !== "number" || !Number.isFinite(obs.value)) continue;
+      const values = valuesByDate.get(obs.date) ?? [];
+      values.push(obs.value);
+      valuesByDate.set(obs.date, values);
+    }
+  }
+  const observations: DatedObservation[] = [];
+  for (const [date, values] of valuesByDate) {
+    if (values.length !== legs.length) continue;
+    observations.push({ date, value: values.reduce((sum, value) => sum + value, 0) });
+  }
+  observations.sort((a, b) => a.date.localeCompare(b.date));
+  if (observations.length === 0) throw new Error("Summed series share no observation dates");
+  const providers = legs.map(fredProvider).filter((provider): provider is NonNullable<typeof provider> => !!provider);
+  if (providers.length === 0) return { observations };
+  const fetchedAt = providers.map((provider) => provider.fetchedAt).filter((value): value is string => !!value).sort()[0] ?? null;
+  const staleFlags = providers.map((provider) => provider.stale);
+  const stale = staleFlags.some((flag) => flag === true) ? true : staleFlags.every((flag) => flag === false) ? false : null;
+  return { observations, provider: { fetchedAt, stale } };
+}
+
 export function provenanceFor(def: SeriesDef): DatedSeries["provenance"] {
   switch (def.source.kind) {
     case "fred":
+    case "fred-sum":
       return "fred";
     case "market-history":
       return "market";
@@ -87,6 +128,12 @@ export function createSourceLoader(deps: ValuationSourceDeps) {
           ...(Array.isArray(loaded) ? { observations: loaded } : loaded),
           provenance: "fred",
         };
+      }
+      case "fred-sum": {
+        const legs = await Promise.all(
+          source.seriesIds.map((seriesId) => deps.loadFred(seriesId, source.limit)),
+        );
+        return { seriesId: def.key, ...sumFredSeries(legs), provenance: "fred" };
       }
       case "market-history":
         return {

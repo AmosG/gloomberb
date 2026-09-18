@@ -89,6 +89,15 @@ function secTypeColor(secType: string, selected: boolean): string {
   }
 }
 
+// Stable table adapters so memoized rows survive pane re-renders.
+const auctionKey = (auction: TreasuryAuction) => auction.id;
+const renderAuctionRow = (
+  auction: TreasuryAuction,
+  column: AuctionColumn,
+  _index: number,
+  rowState: { selected: boolean },
+) => renderAuctionCell(auction, column, rowState);
+
 function renderAuctionCell(
   auction: TreasuryAuction,
   column: AuctionColumn,
@@ -393,8 +402,8 @@ export function TreasuryAuctionsPane({ focused, width, height }: PaneProps) {
         onHeaderClick={(columnId) => setSortPreference((current) => (
           nextAuctionSort(current, columnId as AuctionColumnId)
         ))}
-        getItemKey={(auction) => auction.id}
-        renderCell={(auction, column, _index, rowState) => renderAuctionCell(auction, column, rowState)}
+        getItemKey={auctionKey}
+        renderCell={renderAuctionRow}
         emptyStateTitle={searchQuery.trim() ? "No matching auctions." : "No recent auctions."}
         emptyStateHint={searchQuery.trim() ? "Clear search." : undefined}
       />

@@ -131,6 +131,40 @@ describe("PluginRegistry lifecycle", () => {
     expect(registry.allPlugins.has("throwing-dispose")).toBe(false);
     expect(registry.panes.has("disposable-pane")).toBe(false);
   });
+
+  test("a renamed plugin keeps reading and writing the state saved under its old id", async () => {
+    const registry = createRegistry();
+    const pluginConfig: Record<string, Record<string, unknown>> = { legacy: { model: "saved" } };
+    registry.getConfigFn = () => ({
+      ...createDefaultConfig("/tmp/gloomberb-state-id-test"),
+      pluginConfig,
+    });
+    registry.setPluginConfigValueFn = async (pluginId, key, value) => {
+      pluginConfig[pluginId] = { ...(pluginConfig[pluginId] ?? {}), [key]: value };
+    };
+    registry.getPluginConfigValueFn = <T = unknown>(pluginId: string, key: string): T | null => (
+      (pluginConfig[pluginId]?.[key] as T | undefined) ?? null
+    );
+
+    let context: GloomPluginContext | null = null;
+    await registry.register({
+      id: "renamed",
+      stateId: "legacy",
+      name: "Renamed",
+      version: "1.0.0",
+      setup: (ctx) => { context = ctx; },
+    });
+
+    const ctx = context!;
+    expect(ctx.configState.get("model")).toBe("saved");
+    expect(ctx.configState.keys()).toEqual(["model"]);
+    await ctx.configState.set("model", "chosen");
+    expect(pluginConfig.legacy?.model).toBe("chosen");
+    expect(pluginConfig.renamed).toBeUndefined();
+
+    ctx.resume.setState("thread", { id: "one" });
+    expect(registry.getResumeState("legacy", "thread")).toEqual({ id: "one" });
+  });
 });
 
 describe("built-in composite plugin ownership", () => {

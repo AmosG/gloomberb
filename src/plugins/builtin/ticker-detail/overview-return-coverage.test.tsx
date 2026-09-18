@@ -8,7 +8,6 @@ import { buildTickerReport, ticker as runTickerCommand } from "../../../cli/comm
 import { createTestDataProvider } from "../../../test-support/data-provider";
 import type { MarketContext } from "../../../cli/types";
 import type { TickerFinancials } from "../../../types/financials";
-import { buildTickerAiContext } from "../ai/ticker-context";
 import { OverviewTab } from "./overview-tab";
 
 const config = createDefaultConfig("/tmp/gloom-fund-coverage-test-unused");
@@ -20,7 +19,7 @@ afterEach(async () => {
 });
 
 for (const withSummary of [true, false]) for (const covered of [false, true]) {
-  test(`${covered ? "covered zero" : "incomplete"} fund returns ${withSummary ? "with cached summary" : "without company fundamentals"} agree across overview, text, JSON and AI context`, async () => {
+  test(`${covered ? "covered zero" : "incomplete"} fund returns ${withSummary ? "with cached summary" : "without company fundamentals"} agree across overview, text and JSON`, async () => {
     const financials: TickerFinancials = {
       annualStatements: [], quarterlyStatements: [],
       priceHistory: [
@@ -63,12 +62,8 @@ for (const withSummary of [true, false]) for (const covered of [false, true]) {
     expect(closed).toBe(1);
     expect(captured.fundamentals?.return1Y).toBe(covered ? 0 : undefined);
     expect(captured.fundamentals?.return3Y).toBe(covered ? 0 : undefined);
-    const context = buildTickerAiContext(savedTicker, financials, "USD");
-    expect(context.includes("1Y Return: 0 (fraction)")).toBe(covered);
-    expect(context).not.toContain("1Y Return: 0.05");
     expect(financials.fundamentals?.return1Y).toBe(withSummary ? .05 : undefined);
     if (!withSummary) {
-      expect(context).not.toContain("Fundamentals source:");
       if (covered) expect(Object.keys(captured.fundamentals)).toEqual(["return1Y", "return3Y"]);
       else expect(captured.fundamentals).toBeUndefined();
     }

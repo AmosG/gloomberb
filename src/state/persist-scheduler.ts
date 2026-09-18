@@ -1,12 +1,18 @@
 export const CONFIG_SAVE_DEBOUNCE_MS = 500;
+/** For config fields that change on every cursor move (recent tickers, the live pane-state mirror). */
+export const LOW_PRIORITY_CONFIG_SAVE_DEBOUNCE_MS = 5_000;
 export const SESSION_SAVE_DEBOUNCE_MS = 1000;
 export const PLUGIN_STATE_SAVE_DEBOUNCE_MS = 500;
 
 const pendingFlushes = new Set<() => Promise<void>>();
+const inFlightSaves = new Set<Promise<void>>();
 
-/** Drain delayed writes before the browser suspends or discards this page. */
+/** Drain scheduled and running writes before a renderer suspends or exits. */
 export async function flushPendingPersistence(): Promise<void> {
-  await Promise.allSettled([...pendingFlushes].map((flush) => flush()));
+  while (pendingFlushes.size > 0 || inFlightSaves.size > 0) {
+    const flushing = [...pendingFlushes].map((flush) => flush());
+    await Promise.allSettled([...flushing, ...inFlightSaves]);
+  }
 }
 
 export interface PersistSchedulerOptions<T> {
@@ -16,7 +22,8 @@ export interface PersistSchedulerOptions<T> {
 }
 
 export interface PersistScheduler<T> {
-  schedule(value: T): void;
+  /** A shorter `delayMs` than the pending one brings the write forward. */
+  schedule(value: T, delayMs?: number): void;
   flush(): Promise<void>;
   cancel(): void;
   saveImmediately(value: T): Promise<void>;
@@ -28,6 +35,7 @@ export function createPersistScheduler<T>({
   onError,
 }: PersistSchedulerOptions<T>): PersistScheduler<T> {
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let pendingDelayMs = Number.POSITIVE_INFINITY;
   let pendingValue: T | undefined;
   let hasPendingValue = false;
   let inFlight: Promise<void> = Promise.resolve();
@@ -47,6 +55,13 @@ export function createPersistScheduler<T>({
         throw error;
       }
     });
+    // A timer or immediate save may already have left the pending drain set
+    // when the renderer exits. Track queued saves until their writes settle.
+    inFlightSaves.add(saveTask);
+    void saveTask.then(
+      () => { inFlightSaves.delete(saveTask); },
+      () => { inFlightSaves.delete(saveTask); },
+    );
     // Keep the serialization chain usable after a failed immediate save while
     // still returning that failure to its caller.
     inFlight = saveTask.catch(() => {});
@@ -56,6 +71,7 @@ export function createPersistScheduler<T>({
   const drain = async () => {
     clearTimer();
     pendingFlushes.delete(drain);
+    pendingDelayMs = Number.POSITIVE_INFINITY;
     if (!hasPendingValue) return inFlight;
     const value = pendingValue as T;
     pendingValue = undefined;
@@ -64,14 +80,18 @@ export function createPersistScheduler<T>({
   };
 
   return {
-    schedule(value: T): void {
+    schedule(value: T, requestedDelayMs = delayMs): void {
       pendingValue = value;
       hasPendingValue = true;
       pendingFlushes.add(drain);
+      // Still a debounce, but the shortest delay asked for since the last
+      // write wins: a value scheduled with a long delay must not push back
+      // one that asked to be written sooner.
+      pendingDelayMs = Math.min(pendingDelayMs, Math.max(0, requestedDelayMs));
       clearTimer();
       timer = setTimeout(() => {
         void drain();
-      }, Math.max(0, delayMs));
+      }, pendingDelayMs);
     },
     flush(): Promise<void> {
       return drain();
@@ -79,12 +99,14 @@ export function createPersistScheduler<T>({
     cancel(): void {
       clearTimer();
       pendingFlushes.delete(drain);
+      pendingDelayMs = Number.POSITIVE_INFINITY;
       pendingValue = undefined;
       hasPendingValue = false;
     },
     saveImmediately(value: T): Promise<void> {
       clearTimer();
       pendingFlushes.delete(drain);
+      pendingDelayMs = Number.POSITIVE_INFINITY;
       pendingValue = undefined;
       hasPendingValue = false;
       return enqueueSave(value, false);

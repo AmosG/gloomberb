@@ -73,6 +73,11 @@ function buildColumns(width: number, stacked: boolean): Column[] {
   ];
 }
 
+// Stable table adapters so memoized rows survive pane re-renders.
+const indicatorKey = (row: IndicatorRow) => row.indicator.id;
+const renderIndicatorCell = (row: IndicatorRow, column: Column) => cellsFor(row)[column.id];
+const noop = () => {};
+
 function cellsFor(row: IndicatorRow): Record<ColumnId, DataTableCell> {
   const view = row.view;
   if (!view || view.current.ratio == null || !view.zone) {
@@ -279,10 +284,10 @@ export function MarketValuationPane({ focused, width, height }: PaneProps) {
             getId: (view) => view.indicator.id,
             onChange: (id, _item, _index, reason) => chooseIndicator(String(id), reason),
           }}
-          onHeaderClick={() => {}}
+          onHeaderClick={noop}
           onRootKeyDown={handlePaneKey}
-          getItemKey={(view) => view.indicator.id}
-          renderCell={(view, column) => cellsFor(view)[column.id]}
+          getItemKey={indicatorKey}
+          renderCell={renderIndicatorCell}
           emptyStateTitle={normalizedQuery ? "No indicator matches." : error ?? "No indicators."}
         />
       </Box>

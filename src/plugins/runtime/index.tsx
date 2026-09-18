@@ -20,6 +20,7 @@ export {
   usePluginConfigState,
   usePluginPaneState,
   usePluginState,
+  usePrunePluginPaneState,
   useSetPluginConfigStates
 } from "./state";
 
@@ -53,6 +54,7 @@ export function usePluginAppActions() {
     hidePane: runtime.hidePane,
     focusPane: runtime.focusPane,
     openPaneSettings: runtime.openPaneSettings,
+    sharePane: runtime.sharePane,
     openPluginCommandWorkflow: runtime.openPluginCommandWorkflow,
     notify: runtime.notify,
   };

@@ -26,6 +26,7 @@ export {
   usePluginPaneState,
   usePluginState,
   usePluginTickerActions,
+  usePrunePluginPaneState,
   useSetPluginConfigStates,
 } from "../plugins/runtime";
 export type { PluginRuntimeAccess } from "../plugins/runtime";
@@ -55,6 +56,7 @@ export {
   usePaneCollection,
   usePaneInstanceId,
   usePaneSettingValue,
+  usePaneStateValue,
   usePaneTitle,
   usePaneTicker,
   useTickers,
@@ -72,6 +74,22 @@ export { useViewport } from "../react/input";
 // (a CLI launch or a shortcut argument) and has to read them back on mount.
 export { usePaneInstance } from "../state/app/context";
 
+// Which ticker a pane is on, resolved the way the host resolves it: the pane's
+// own selection when it has one, the shared selection otherwise. A pane that
+// reads app state directly (rather than through `usePaneTicker`) needs it, and
+// the action type to dispatch back into the store.
+export { resolveTickerForPane } from "../state/app/context";
+export type { AppAction } from "../state/app/context";
+
+// Turning a row in a plugin's own table into the app's ticker selection, with
+// the host's rules for opening a new pane or reusing the current one.
+export { useTickerSourceActivate } from "../plugins/builtin/shared/ticker-source";
+
+// Financials and FX for a list of tickers, from the same query store the
+// built-in tables read, so a plugin table shows the values the rest of the app
+// already fetched instead of fetching them again.
+export { useFxRatesMap, useTickerFinancialsMap } from "../market-data/hooks";
+
 // Loading one thing asynchronously into a pane: data, loading, error, reload.
 // Every data pane needs this, and a plugin that hand-rolls it drifts from the
 // host's cancellation and stale-response handling.
@@ -79,8 +97,9 @@ export { useAsyncResource } from "../react/async-resource";
 
 // Periodic refresh tied to app activity, and the "updated 2m ago" label that
 // goes with it, so plugin panes refresh on the same cadence as built-ins and
-// stop while the app is in the background.
-export { useAutoRefresh, useUpdatedAgo } from "../plugins/builtin/shared/auto-refresh";
+// stop while the app is in the background. `AGE_TICK_MS` is that cadence, for
+// a pane that re-renders its own age column on the same clock.
+export { AGE_TICK_MS, useAutoRefresh, useUpdatedAgo } from "../plugins/builtin/shared/auto-refresh";
 
 // The class behind `useConnectionHealth()`. A value export so a plugin test
 // can construct one to exercise its own connection-status registration.

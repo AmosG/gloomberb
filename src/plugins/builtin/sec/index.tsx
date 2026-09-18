@@ -32,6 +32,8 @@ import {
   useSecFilingContentCache,
 } from "./filing-content";
 import { usePaneStatusLinkFooter } from "../shared/pane-footer";
+import { isCloudSessionRequired, useResearchCloudSession } from "../shared/research-cloud-session";
+import { SignInWall } from "../cloud/auth-actions";
 import { secHeadless } from "./headless";
 import {
   getFilingDisplayTitle,
@@ -215,7 +217,16 @@ function SecView({ width, height, focused }: { width: number; height: number; fo
   const { ticker } = usePaneTicker();
   const selectionKey = `selectedIdx:${ticker?.metadata.ticker ?? "none"}`;
   const [selectedIdx, setSelectedIdx] = useDebouncedPluginPaneState<number>(selectionKey, 0);
-  const [openItemId, setOpenItemId] = useState<string | null>(null);
+  // The open filing is what the pane shows, so it is pane state: it restores
+  // on relaunch and a shared pane opens on the same document.
+  const [openItemId, setOpenItemIdState] = useDebouncedPluginPaneState<string | null>(
+    `openAccession:${ticker?.metadata.ticker ?? "none"}`,
+    null,
+  );
+  const setOpenItemId = useCallback(
+    (itemId: string | null) => setOpenItemIdState(itemId, { immediate: true }),
+    [setOpenItemIdState],
+  );
   const eligibleTicker = isUsEquityTicker(ticker);
   const instrument = instrumentFromTicker(ticker, ticker?.metadata.ticker ?? null);
   const filingsEntry = useSecFilingsQuery(
@@ -236,7 +247,23 @@ function SecView({ width, height, focused }: { width: number; height: number; fo
     setVisibleCount(SEC_FILING_PAGE_SIZE);
   }, [ticker?.metadata.ticker, ticker?.metadata.exchange]);
   const loading = filingsEntry?.phase === "loading" || filingsEntry?.phase === "refreshing";
+  // A restored or shared open filing can sit past the first page, or be gone
+  // from the feed entirely.
+  useEffect(() => {
+    if (!openItemId || filings.length === 0) return;
+    const index = filings.findIndex((filing) => filing.accessionNumber === openItemId);
+    if (index < 0) {
+      if (!loading) setOpenItemId(null);
+      return;
+    }
+    if (index >= visibleCount) {
+      setVisibleCount(Math.ceil((index + 1) / SEC_FILING_PAGE_SIZE) * SEC_FILING_PAGE_SIZE);
+    }
+  }, [filings, loading, openItemId, setOpenItemId, visibleCount]);
   const error = filingsEntry?.error && filingsEntry.error.reasonCode !== "NO_DATA" ? filingsEntry.error.message : null;
+  // Hosted, the only filings source is Gloom Cloud, which needs an account.
+  const cloudSession = useResearchCloudSession();
+  const authWall = filings.length === 0 && isCloudSessionRequired(error);
 
   const openFiling = openItemId
     ? filings.find((filing) => filing.accessionNumber === openItemId) ?? null
@@ -268,6 +295,18 @@ function SecView({ width, height, focused }: { width: number; height: number; fo
     .map((target) => contentErrors.get(target.accessionNumber)).find(Boolean);
   const detailError = openFiling ? documentsError ?? activeContentError ?? null : null;
 
+  // The document list is the first of the two round trips behind a filing.
+  // Warming it while the cursor rests on the row leaves only the content
+  // fetch for Enter; the content itself stays on demand, as the note above
+  // says, so a scroll through the list does not fire a request per filing.
+  const prefetchDocuments = useCallback((item: { id: string }) => {
+    const coordinator = getSharedMarketDataCoordinator();
+    const filing = visibleFilings.find((candidate) => candidate.accessionNumber === item.id);
+    if (!coordinator || !filing) return;
+    if (coordinator.getSecDocumentsEntry(filing.accessionNumber).phase !== "idle") return;
+    void coordinator.loadSecFilingDocuments(filing).catch(() => {});
+  }, [visibleFilings]);
+
   const refresh = useCallback(() => {
     const coordinator = getSharedMarketDataCoordinator();
     if (!coordinator || !instrument || !eligibleTicker) return;
@@ -278,6 +317,13 @@ function SecView({ width, height, focused }: { width: number; height: number; fo
     void retryContent();
   }, [instrument, eligibleTicker, openFiling, documentsError, openDocuments.length, retryContent]);
   useShortcut((event) => { if (isPlainKey(event, "r")) refresh(); }, { enabled: focused, scope: "sec" });
+  // Signing in must retry the request the wall was shown for.
+  const sessionKeyRef = useRef(cloudSession.requestKey);
+  useEffect(() => {
+    if (sessionKeyRef.current === cloudSession.requestKey) return;
+    sessionKeyRef.current = cloudSession.requestKey;
+    refresh();
+  }, [cloudSession.requestKey, refresh]);
 
   useEffect(() => {
     if (visibleFilings.length > 0 && selectedIdx >= visibleFilings.length) {
@@ -292,7 +338,7 @@ function SecView({ width, height, focused }: { width: number; height: number; fo
     source: openFiling?.form,
     label: "filing",
     loading: loading || loadingDocuments || !!loadingKey,
-    error: error ?? detailError,
+    error: authWall ? null : error ?? detailError,
     showOpenHint: !!openFiling?.filingUrl,
   });
 
@@ -300,6 +346,7 @@ function SecView({ width, height, focused }: { width: number; height: number; fo
     return <EmptyState title="No ticker selected." message="Select a ticker to view SEC filings." />;
   }
   if (!eligibleTicker) return renderFilingNotice("SEC filings are only shown for US equities.", width);
+  if (authWall) return <SignInWall action="view SEC filings" needsVerification={cloudSession.needsVerification} />;
   if (loading && filings.length === 0) return <Spinner label="Loading SEC filings..." />;
   if (error && filings.length === 0) return <EmptyState title="SEC filings unavailable." message={error} />;
   if (filings.length === 0) return renderFilingNotice(`No recent SEC filings for ${ticker.metadata.ticker}.`, width);
@@ -321,7 +368,9 @@ function SecView({ width, height, focused }: { width: number; height: number; fo
       )}
       selectedIdx={selectedIdx}
       onSelect={setSelectedIdx}
+      openItemId={openItemId}
       onOpenItemIdChange={setOpenItemId}
+      prefetchDetail={prefetchDocuments}
       rootBefore={<Box flexDirection="column" paddingX={1}>
         {secFilingIssuers(filings).map((issuer) => <Prose key={issuer.cik} text={secIssuerLabel(issuer)} width={Math.max(width - 2, 12)} />)}
       </Box>}

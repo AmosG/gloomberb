@@ -11,6 +11,7 @@ import {
   useAppSelector,
   usePaneInstance,
   usePaneStateValue,
+  usePaneAppConfig,
 } from "../../../state/app/context";
 import { useChartQueries, useFxRatesMap, useTickerFinancialsMap } from "../../../market-data/hooks";
 import { buildPortfolioFinancialsMap } from "../../../market-data/portfolio-financials";
@@ -62,7 +63,7 @@ function PortfolioAnalyticsPane({ focused, width, height }: PaneProps) {
   const cachedFinancials = useAppSelector((state) => state.financials);
   const cachedExchangeRates = useAppSelector((state) => state.exchangeRates);
   const brokerAccounts = useAppSelector((state) => state.brokerAccounts);
-  const config = useAppSelector((state) => state.config);
+  const config = usePaneAppConfig();
   const paneInstance = usePaneInstance();
   const requestedPortfolioId = paneInstance?.params?.portfolioId ?? paneInstance?.params?.collectionId;
   const fallbackPortfolioId = useMemo(

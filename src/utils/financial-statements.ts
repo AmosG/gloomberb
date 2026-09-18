@@ -1,14 +1,17 @@
 import type { FinancialStatement } from "../types/financials";
+import { copyIncomeField, incomeFieldOwner, INCOME_STATEMENT_FIELDS, isIncomeStatementField } from "./income-statement";
+import { hasStatementWithdrawals, mergeStatementWithdrawals, redactWithdrawnStatement } from "./statement-observations";
 
 export const FINANCIAL_VINTAGE_NOTICE = "Latest available statements may include restatements. Historical as-of values are not reconstructed.";
 export const SEC_EPS_BASIS_NOTICE = "SEC EPS uses corroborated split-adjusted share bases. Unverified bases are unavailable.";
 
-const STATEMENT_METADATA_KEYS = new Set(["date", "dateSource", "providerDate", "dateEvidence", "currency", "availableAt", "fieldAvailability", "epsBasis"]);
+const STATEMENT_METADATA_KEYS = new Set(["date", "dateSource", "providerDate", "dateEvidence", "currency", "availableAt", "fieldAvailability", "epsBasis", "fieldSources", "unavailableFields", "withdrawnObservations"]);
 const NEARBY_PERIOD_END_MS = 7 * 24 * 60 * 60 * 1_000;
 
 /** An explicit field map is authoritative: omitted fields have unknown availability. */
 export function statementFieldAvailability(row: FinancialStatement | undefined, field: string): string | undefined {
-  const value = row?.fieldAvailability !== undefined ? row.fieldAvailability?.[field] : row?.availableAt;
+  const filed = isIncomeStatementField(field) ? row?.fieldSources?.[field]?.filed : undefined;
+  const value = filed ?? (row?.fieldAvailability !== undefined ? row.fieldAvailability?.[field] : row?.availableAt);
   return value && Number.isFinite(Date.parse(value)) ? value : undefined;
 }
 
@@ -74,6 +77,7 @@ function hasMatchingFinancialValues(left: FinancialStatement, right: FinancialSt
 }
 
 function isVerifiedCalendarAlias(left: FinancialStatement, right: FinancialStatement): boolean {
+  if (hasStatementWithdrawals(left) || hasStatementWithdrawals(right)) return false;
   if (left.date === right.date || left.date.slice(0, 7) !== right.date.slice(0, 7)) return false;
   const monthEnd = (row: FinancialStatement) => {
     const date = new Date(`${row.date}T00:00:00Z`);
@@ -110,6 +114,7 @@ function matchFallbackRow(
   return fallbackRows
     .flatMap((row) => {
       if (usedFallbackRows.has(row)) return [];
+      if (hasStatementWithdrawals(primary) || hasStatementWithdrawals(row)) return [];
       const fallbackTime = statementDateTime(row);
       if (fallbackTime === null) return [];
       const distance = Math.abs(fallbackTime - primaryTime);
@@ -122,8 +127,8 @@ export function mergeFinancialStatementRows(
   primaryRows: FinancialStatement[],
   fallbackRows: FinancialStatement[],
 ): FinancialStatement[] {
-  primaryRows = coalesceFinancialPeriodAliases(primaryRows);
-  fallbackRows = coalesceFinancialPeriodAliases(fallbackRows);
+  primaryRows = coalesceFinancialPeriodAliases(primaryRows.map(redactWithdrawnStatement));
+  fallbackRows = coalesceFinancialPeriodAliases(fallbackRows.map(redactWithdrawnStatement));
   if (primaryRows.length === 0) return fallbackRows;
   if (fallbackRows.length === 0) return primaryRows;
 
@@ -133,13 +138,14 @@ export function mergeFinancialStatementRows(
     if (fallback) usedFallbackRows.add(fallback);
     // Keep the preferred report intact when providers use different reporting currencies.
     if (row.currency && fallback?.currency && row.currency !== fallback.currency) return row;
-    const merged = {
+    let merged = {
       ...fallback,
       ...row,
       // Prefer the date backed by filing provenance. Generic provider merges
       // otherwise retain their primary provider's period identity.
       date: canonicalStatementDate(row, fallback),
     } as FinancialStatement;
+    mergeStatementWithdrawals(merged, [row, ...(fallback ? [fallback] : [])]);
     const correctedFallbackEps = !row.epsBasis && !!fallback?.epsBasis && row.eps === fallback.epsBasis.originalValue;
     if (row.eps !== undefined && !row.epsBasis && !correctedFallbackEps) delete merged.epsBasis;
     // Period provenance belongs to the selected date. It must not leak from a
@@ -152,9 +158,31 @@ export function mergeFinancialStatementRows(
     if (dateOwner?.dateEvidence) merged.dateEvidence = dateOwner.dateEvidence;
     if (merged.dateSource === "sec" && row.date !== merged.date && !merged.providerDate) merged.providerDate = row.date;
     const fieldAvailability: Record<string, string> = {};
-    const keys = metricKeys(row, fallback);
+    const keys = [...new Set([...metricKeys(row, fallback), ...INCOME_STATEMENT_FIELDS])];
 
     for (const key of keys) {
+      // Nearby vendor dates alone do not corroborate the identity of an income
+      // observation. Retain the primary's own value and attribution together.
+      if (isIncomeStatementField(key) && fallback && row.date !== fallback.date
+        && (row.fieldSources?.[key] || fallback.fieldSources?.[key]
+          || row.unavailableFields?.includes(key) || fallback.unavailableFields?.includes(key))) {
+        const owner = row.date === merged.date ? row : fallback;
+        copyIncomeField(merged, owner, key);
+        if (typeof merged[key] === "number") {
+          const available = statementFieldAvailability(owner, key);
+          if (available) fieldAvailability[key] = available;
+        }
+        continue;
+      }
+      const incomeOwner = isIncomeStatementField(key) ? incomeFieldOwner(key, row, fallback) : undefined;
+      if (incomeOwner && isIncomeStatementField(key)) {
+        copyIncomeField(merged, incomeOwner, key);
+        if (typeof merged[key] === "number") {
+          const available = statementFieldAvailability(incomeOwner, key);
+          if (available) fieldAvailability[key] = available;
+        }
+        continue;
+      }
       // A refreshed SEC decision supersedes precisely the original EPS still
       // held by a primary cache; unrelated provider values keep their priority.
       if (key === "eps" && correctedFallbackEps) {
@@ -188,6 +216,8 @@ export function mergeFinancialStatementRows(
 
     // A fallback row-level date cannot safely date a different primary value.
     // Retained fallback fields still carry their own per-field provenance.
+    merged = redactWithdrawnStatement(merged);
+    for (const key of keys) if (!hasMetricValue(merged, key)) delete fieldAvailability[key];
     const retainedMetricKeys = keys.filter((key) => hasMetricValue(merged, key));
     const availableAt = completeAvailability(retainedMetricKeys.map((key) => fieldAvailability[key]));
     if (availableAt) merged.availableAt = availableAt;

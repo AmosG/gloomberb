@@ -1,10 +1,29 @@
 import { measurePerf } from "../../utils/perf-marks";
 
+/**
+ * Each streamed quote arrives in its own task, so a busy tape would otherwise
+ * commit and paint once per tick. Listeners hear about the first change at
+ * once and about the rest of a burst at most this often; a quote landing
+ * 100ms late is invisible, a render per tick is not.
+ */
+export const MARKET_DATA_NOTIFY_THROTTLE_MS = 100;
+
+let notifyThrottleMs = MARKET_DATA_NOTIFY_THROTTLE_MS;
+
+/**
+ * Pane tests drive the coordinator tick by tick and assert after a zero
+ * timer; the test harness turns pacing off so they keep that precision.
+ */
+export function setMarketDataNotifyThrottle(ms: number): void {
+  notifyThrottleMs = Math.max(0, ms);
+}
+
 export class MarketDataCoordinatorEvents {
   private version = 0;
   private pendingVersionBump = false;
   private pendingChangedKeys = new Set<string>();
   private pendingNotify = false;
+  private lastNotifyAt = Number.NEGATIVE_INFINITY;
   private pendingListeners = new Set<() => void>();
   private readonly listeners = new Set<() => void>();
   private readonly keyListeners = new Map<string, Set<() => void>>();
@@ -78,11 +97,16 @@ export class MarketDataCoordinatorEvents {
   private scheduleNotify(): void {
     if (this.pendingNotify) return;
     this.pendingNotify = true;
-    setTimeout(() => this.flushNotify(), 0);
+    const sinceLastNotify = performance.now() - this.lastNotifyAt;
+    const delay = sinceLastNotify >= notifyThrottleMs
+      ? 0
+      : Math.ceil(notifyThrottleMs - sinceLastNotify);
+    setTimeout(() => this.flushNotify(), delay);
   }
 
   private flushNotify(): void {
     this.pendingNotify = false;
+    this.lastNotifyAt = performance.now();
     const listeners = [...this.pendingListeners];
     this.pendingListeners.clear();
     for (const listener of listeners) {

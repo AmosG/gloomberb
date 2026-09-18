@@ -99,3 +99,15 @@ export { isPlainArrowDown, isPlainArrowUp, stopSearchFocusNavigation } from "../
 // perf logger, so a plugin's hot paths show up in the same trace as the app's
 // instead of being invisible.
 export { measurePerf, measurePerfAsync } from "../utils/perf-marks";
+
+// Opening a URL a provider handed back, and bounding a call that may never
+// answer. Both are security or startup rules the host already settled: an
+// auth flow must not launch a `file:` or `javascript:` URL, and optional
+// discovery must not hold up a launch forever.
+export { safeExternalUrl } from "../utils/external-url";
+export { withDeadline } from "../utils/async-deadline";
+
+// Which renderer this copy of the plugin is running in. A plugin with a native
+// half needs it to tell the terminal, where it owns the panes, from the Bun
+// process behind the desktop view, where it only answers capability calls.
+export { getCurrentPluginTarget } from "../plugins/current-target";

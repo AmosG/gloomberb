@@ -2,6 +2,38 @@ import { expect, test } from "bun:test";
 import { buildYahooStatements, computeYahooReturn, latestYahooMetric, parseYahooTimeseries } from "./financials";
 import { loadYahooTickerFinancials } from "./snapshots";
 
+test("Yahoo annual summary never borrows a wholly omitted latest-year metric", async () => {
+  for (const currentValue of [undefined, 0]) {
+    const annual = {
+      annualNetIncome: 200, annualOperatingIncome: 300,
+      annualDilutedEPS: 2, annualDilutedAverageShares: 100,
+    };
+    const raw = Object.entries(annual).map(([key, value]) => ({
+      meta: { type: [key] },
+      [key]: [
+        { asOfDate: "2024-12-31", currencyCode: "USD", reportedValue: { raw: value } },
+        ...(currentValue === undefined ? [] : [{ asOfDate: "2025-12-31", currencyCode: "USD", reportedValue: { raw: currentValue } }]),
+      ],
+    }));
+    raw.push({ meta: { type: ["annualTotalRevenue"] }, annualTotalRevenue: [
+      { asOfDate: "2025-12-31", currencyCode: "USD", reportedValue: { raw: 1000 } },
+    ] });
+    raw.push({ meta: { type: ["quarterlyTotalRevenue"] }, quarterlyTotalRevenue: [
+      { asOfDate: "2026-06-30", currencyCode: "USD", reportedValue: { raw: 400 } },
+    ] });
+    const financials = await loadYahooTickerFinancials("CONTROL", {
+      providerId: "yahoo", fetchAssetProfile: async () => undefined,
+      fetchChart: async () => ({ meta: { currency: "USD", regularMarketPrice: 10 }, history: [{ date: new Date("2026-09-16"), close: 10 }] }),
+      fetchExtendedHoursData: async () => ({}), fetchQuoteSupplement: async () => ({}), fetchTimeseries: async () => raw,
+    });
+    expect(financials.fundamentals).toMatchObject({ revenue: 1000, financialCurrency: "USD" });
+    for (const field of ["netIncome", "eps", "sharesOutstanding", "operatingMargin", "profitMargin"] as const) {
+      expect(financials.fundamentals?.[field]).toBe(currentValue);
+    }
+    expect(financials.annualStatements[0]).toMatchObject({ date: "2024-12-31", netIncome: 200, eps: 2, dilutedShares: 100 });
+  }
+});
+
 test("Yahoo preserves report currency and calculates operating margin from operating income", async () => {
   const metrics = { annualTotalRevenue: 1000, annualOperatingIncome: 200, annualEBITDA: 300, annualNetIncome: 150 };
   const financials = await loadYahooTickerFinancials("TSM", {

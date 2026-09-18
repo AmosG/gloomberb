@@ -40,11 +40,21 @@ function inferredHistoryIntervalMs(points: PricePoint[]): number | null {
   return null;
 }
 
+// Cached history carries ISO strings for dates, and every pass over a
+// series (normalizing, sorting, charting) parses each one again; a sort
+// comparator does it twice per comparison. Points are never edited in
+// place, so the parse is kept per point.
+const pointTimestamps = new WeakMap<PricePoint, number>();
+
 export function getPricePointTimestamp(point: PricePoint): number {
   const value = point.date as Date | string | number | null | undefined;
   if (value instanceof Date) return value.getTime();
   if (value == null) return Number.NaN;
-  return new Date(value).getTime();
+  const cached = pointTimestamps.get(point);
+  if (cached !== undefined) return cached;
+  const time = new Date(value).getTime();
+  pointTimestamps.set(point, time);
+  return time;
 }
 
 function hasFiniteClose(point: PricePoint): boolean {
@@ -83,9 +93,21 @@ function comparePricePointsByDate(left: PricePoint, right: PricePoint): number {
   return 0;
 }
 
+// The merged financials view is rebuilt on every quote tick and normalizes
+// the same history array each time. Arrays are replaced, not edited, so the
+// result is kept per input array.
+const normalizedHistories = new WeakMap<PricePoint[], PricePoint[]>();
+
 export function normalizePriceHistory(points: PricePoint[]): PricePoint[] {
   if (points.length === 0) return points;
+  const cached = normalizedHistories.get(points);
+  if (cached) return cached;
+  const normalized = normalizePriceHistoryUncached(points);
+  normalizedHistories.set(points, normalized);
+  return normalized;
+}
 
+function normalizePriceHistoryUncached(points: PricePoint[]): PricePoint[] {
   const validPoints: PricePoint[] = [];
   let sawDistinctTimestamp = false;
   let firstTimestamp: number | null = null;

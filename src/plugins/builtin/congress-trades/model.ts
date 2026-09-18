@@ -14,6 +14,7 @@ export const CONGRESS_TRADE_LIMIT = 200;
 export const CONGRESS_FILING_LIMIT = 60;
 export const CONGRESS_MEMBER_TRADE_LIMIT = 2000;
 export const CONGRESS_MEMBER_FILING_LIMIT = 500;
+export const CONGRESS_EARLIEST_YEAR = 2008;
 
 export type CongressTab = "trades" | "members";
 export type LoadStatus = "idle" | "loading" | "loaded" | "error";
@@ -263,6 +264,13 @@ export function canLoadMoreCongress(payload: CloudCongressHousePayload): boolean
   return nextCongressPage(payload) != null;
 }
 
+/**
+ * The next page a scroll may load on its own.
+ *
+ * Paging stops at the year boundary: each new filing window is a source read,
+ * so crossing into an earlier year is an explicit request, never the result of
+ * someone scrolling past the end of the table.
+ */
 export function nextCongressPage(payload: CloudCongressHousePayload): CloudCongressHouseParams | null {
   if (payload.hasMore) {
     return {
@@ -278,9 +286,26 @@ export function nextCongressPage(payload: CloudCongressHousePayload): CloudCongr
       filingOffset: payload.nextFilingOffset ?? congressFilingOffset(payload) + payload.filingsScanned,
     };
   }
-  if (payload.year > 2008) {
-    return { year: payload.year - 1, offset: 0, filingOffset: 0 };
-  }
+  return null;
+}
+
+/** The first page of the year before this one, for an explicit "earlier year". */
+export function previousCongressYearPage(
+  payload: CloudCongressHousePayload,
+): CloudCongressHouseParams | null {
+  if (payload.year <= CONGRESS_EARLIEST_YEAR) return null;
+  return { year: payload.year - 1, offset: 0, filingOffset: 0 };
+}
+
+/**
+ * What the pane says when a window came back incomplete. Filings the source
+ * could not give us are named rather than silently missing from the table.
+ */
+export function congressScanNotice(payload: CloudCongressHousePayload): string | null {
+  const pending = payload.filingsPending ?? 0;
+  const failed = payload.filingsFailed ?? 0;
+  if (pending > 0) return `${pending + failed} filings not read yet, retrying later`;
+  if (failed > 0) return `${failed} filings unavailable`;
   return null;
 }
 

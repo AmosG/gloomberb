@@ -28,6 +28,9 @@
     "./layout": "./src/public/layout.ts",
     "./market-data": "./src/public/market-data.ts",
     "./quotes": "./src/public/quotes.ts",
+    "./tickers": "./src/public/tickers.ts",
+    "./i18n": "./src/public/i18n.ts",
+    "./remote": "./src/public/remote.ts",
     "./dialog": "./src/ui/dialog.tsx",
     "./broker": "./src/public/broker.ts"
   },
@@ -87,6 +90,7 @@
     "@types/react-dom": "^19.2.3",
     "@types/three": "0.165.0",
     "electrobun": "^1.18.1",
+    "gloom-byok-ai": "github:gloom-sh/gloom-byok-ai",
     "gloom-fear-greed": "github:gloom-sh/gloom-fear-greed",
     "gloom-ipo-calendar": "github:gloom-sh/gloom-ipo-calendar",
     "gloom-market-halts": "github:gloom-sh/gloom-market-halts",
@@ -102,8 +106,6 @@
     "typescript": "^5.9.2"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "0.81.1",
-    "@earendil-works/pi-ai": "0.81.1",
     "@opentui/core": "^0.3.2",
     "@opentui/react": "^0.3.2",
     "@tanstack/react-virtual": "^3.14.2",
@@ -112,7 +114,6 @@
     "qrcode-generator": "^2.0.4",
     "react": "19.2.7",
     "react-dom": "19.2.7",
-    "typebox": "1.1.38",
     "web-tree-sitter": "0.25.10"
   },
   "patchedDependencies": {

@@ -772,8 +772,31 @@ export function createBlankLayout(): LayoutConfig {
   return cloneLayout(BLANK_LAYOUT);
 }
 
+// Every pane hook selects its instance on every store update, so a linear
+// scan multiplies by subscriber count times dispatch rate. Layout updates
+// replace the instances array, which keys the index; the entry is verified on
+// read so an in-place edit can only cost a rebuild, never a stale hit.
+const paneInstanceIndexes = new WeakMap<readonly PaneInstanceConfig[], Map<string, number>>();
+
+function buildPaneInstanceIndex(instances: readonly PaneInstanceConfig[]): Map<string, number> {
+  const index = new Map<string, number>();
+  instances.forEach((instance, position) => {
+    if (!index.has(instance.instanceId)) index.set(instance.instanceId, position);
+  });
+  paneInstanceIndexes.set(instances, index);
+  return index;
+}
+
 export function findPaneInstance(layout: LayoutConfig, instanceId: string): PaneInstanceConfig | undefined {
-  return layout.instances.find((instance) => instance.instanceId === instanceId);
+  const instances = layout.instances;
+  let index = paneInstanceIndexes.get(instances) ?? buildPaneInstanceIndex(instances);
+  let position = index.get(instanceId);
+  let candidate = position === undefined ? undefined : instances[position];
+  if (candidate?.instanceId === instanceId) return candidate;
+  index = buildPaneInstanceIndex(instances);
+  position = index.get(instanceId);
+  candidate = position === undefined ? undefined : instances[position];
+  return candidate?.instanceId === instanceId ? candidate : undefined;
 }
 
 export function createDefaultConfig(dataDir: string): AppConfig {

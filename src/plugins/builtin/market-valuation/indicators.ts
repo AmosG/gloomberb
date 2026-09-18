@@ -8,7 +8,6 @@ const MILLIONS_TO_BILLIONS = 0.001;
 const QUARTERLY_STALE_MS = 270 * DAY_MS;
 /** Shiller republishes monthly; two missed months means something is wrong. */
 const MONTHLY_STALE_MS = 75 * DAY_MS;
-const DAILY_STALE_MS = 5 * DAY_MS;
 
 function percent(value: number): string {
   return `${Math.round(value)}%`;
@@ -23,20 +22,16 @@ function ratio(value: number): string {
 }
 
 /**
- * Retained source identity for saved indicators and old caches. Price-index points
- * are not dollar market capitalization: a historical divisor would be required.
- * Never scale these observations into a monetary ratio (see valuation-reference.md).
+ * Dollar market value of US corporate equities from the Z.1 financial accounts:
+ * nonfinancial corporate business plus domestic financial sectors, both quarterly
+ * end-of-period liabilities in USD millions. FRED removed the Wilshire series in
+ * 2024 and an index level is not a capitalization, so this is the numerator for
+ * every market-cap ratio (see valuation-reference.md).
  */
-const WILSHIRE_5000: SeriesDef = {
-  key: "W5000",
-  unavailableReason: "^W5000 provides index points; dollar market capitalization is unavailable.",
-  scaleToBillions: 1,
-  source: {
-    kind: "market-history",
-    symbol: "^W5000",
-    exchange: "INDEX",
-    startDate: "1970-01-01",
-  },
+const US_CORPORATE_EQUITIES: SeriesDef = {
+  key: "Z1_CORPORATE_EQUITIES",
+  scaleToBillions: MILLIONS_TO_BILLIONS,
+  source: { kind: "fred-sum", seriesIds: ["NCBEILQ027S", "FBCELLQ027S"], limit: 400 },
 };
 
 const NOMINAL_GDP: SeriesDef = {
@@ -59,28 +54,31 @@ export const BUFFETT_INDICATOR: IndicatorDef = {
   id: "buffett",
   label: "Buffett Indicator",
   shortLabel: "Buffett",
-  description: "Market capitalization / nominal GDP (annual rate), %.",
+  description: "Z.1 corporate equities / nominal GDP (annual rate), %; quarterly.",
   input: {
     kind: "ratio",
-    numerator: WILSHIRE_5000,
+    numerator: US_CORPORATE_EQUITIES,
     denominator: NOMINAL_GDP,
     levels: { numeratorLabel: "Mkt cap", denominatorLabel: "GDP" },
   },
   ratioScale: 100,
   formatValue: percent,
   axisUnit: "%",
+  // The Z.1 universe runs well above an index-based reading (it values closely
+  // held equity too), so the bands sit on its own 1947-2026 distribution:
+  // p25 59%, median 85%, p75 139%, p90 194%.
   zones: [
-    { max: 75, id: "significantly-undervalued", label: "Significantly Undervalued" },
-    { max: 90, id: "modestly-undervalued", label: "Modestly Undervalued" },
-    { max: 115, id: "fair", label: "Fair Valued" },
-    { max: 135, id: "modestly-overvalued", label: "Modestly Overvalued" },
+    { max: 60, id: "significantly-undervalued", label: "Significantly Undervalued" },
+    { max: 75, id: "modestly-undervalued", label: "Modestly Undervalued" },
+    { max: 110, id: "fair", label: "Fair Valued" },
+    { max: 140, id: "modestly-overvalued", label: "Modestly Overvalued" },
     { max: null, id: "significantly-overvalued", label: "Significantly Overvalued" },
   ],
-  zoneScale: { min: 0, max: 250, edges: [0, 75, 90, 115, 135, 250], ticks: [0, 75, 100, 135, 250] },
+  zoneScale: { min: 0, max: 350, edges: [0, 60, 75, 110, 140, 350], ticks: [0, 60, 100, 140, 350] },
   reference: { value: 100, label: "parity" },
   chartGridStep: 150,
   trendModel: "log",
-  staleAfterMs: DAILY_STALE_MS,
+  staleAfterMs: QUARTERLY_STALE_MS,
   link: {
     url: "https://en.wikipedia.org/wiki/Buffett_indicator",
     label: "Buffett indicator, Wikipedia",
@@ -253,29 +251,31 @@ export const MARKET_CAP_TO_M2: IndicatorDef = {
   id: "market-cap-m2",
   label: "Market Cap to M2",
   shortLabel: "Cap / M2",
-  description: "Market capitalization / M2 money stock, %.",
+  description: "Z.1 corporate equities / M2 money stock, %; quarterly.",
   input: {
     kind: "ratio",
-    numerator: WILSHIRE_5000,
+    numerator: US_CORPORATE_EQUITIES,
     denominator: M2,
     levels: { numeratorLabel: "Mkt cap", denominatorLabel: "M2" },
   },
   ratioScale: 100,
   formatValue: percent,
   axisUnit: "%",
-  // Bands anchored on the 1989-2026 distribution: p25 142%, median 180%, p75 206%.
+  // Bands anchored on the Z.1 numerator's 1989-2026 distribution: p25 205%,
+  // median 255%, p75 293%. Earlier decades sit far lower and would put the
+  // whole modern era in one band.
   zones: [
-    { max: 130, id: "significantly-undervalued", label: "Significantly Undervalued" },
-    { max: 160, id: "modestly-undervalued", label: "Modestly Undervalued" },
-    { max: 210, id: "fair", label: "Fair Valued" },
-    { max: 260, id: "modestly-overvalued", label: "Modestly Overvalued" },
+    { max: 200, id: "significantly-undervalued", label: "Significantly Undervalued" },
+    { max: 230, id: "modestly-undervalued", label: "Modestly Undervalued" },
+    { max: 270, id: "fair", label: "Fair Valued" },
+    { max: 300, id: "modestly-overvalued", label: "Modestly Overvalued" },
     { max: null, id: "significantly-overvalued", label: "Significantly Overvalued" },
   ],
-  zoneScale: { min: 0, max: 350, edges: [0, 130, 160, 210, 260, 350], ticks: [0, 130, 210, 260, 350] },
-  reference: { value: 180, label: "median" },
+  zoneScale: { min: 0, max: 500, edges: [0, 200, 230, 270, 300, 500], ticks: [0, 200, 255, 300, 500] },
+  reference: { value: 255, label: "median" },
   chartGridStep: 100,
   trendModel: "log",
-  staleAfterMs: DAILY_STALE_MS,
+  staleAfterMs: QUARTERLY_STALE_MS,
   link: { url: "https://fred.stlouisfed.org/series/M2SL", label: "M2 money stock, FRED" },
 };
 
@@ -320,10 +320,10 @@ export const MARKET_CAP_TO_PROFITS: IndicatorDef = {
   id: "market-cap-profits",
   label: "Market Cap to Corporate Profits",
   shortLabel: "Cap / profits",
-  description: "Market capitalization / corporate profits (IVA/CCAdj, annual rate).",
+  description: "Z.1 corporate equities / corporate profits (IVA/CCAdj, annual rate); quarterly.",
   input: {
     kind: "ratio",
-    numerator: WILSHIRE_5000,
+    numerator: US_CORPORATE_EQUITIES,
     denominator: {
       key: "CPROFIT",
       scaleToBillions: 1,
@@ -334,19 +334,20 @@ export const MARKET_CAP_TO_PROFITS: IndicatorDef = {
   ratioScale: 1,
   formatValue: (value) => formatNumber(value, 1),
   axisUnit: "",
-  // Bands anchored on the 1989-2026 distribution: p25 7.9, median 9.1, p75 12.3.
+  // Bands anchored on the Z.1 numerator's 1989-2026 distribution: p25 10.6,
+  // median 13.1, p75 17.0.
   zones: [
-    { max: 8, id: "significantly-undervalued", label: "Significantly Undervalued" },
-    { max: 9, id: "modestly-undervalued", label: "Modestly Undervalued" },
-    { max: 12, id: "fair", label: "Fair Valued" },
-    { max: 15, id: "modestly-overvalued", label: "Modestly Overvalued" },
+    { max: 10.5, id: "significantly-undervalued", label: "Significantly Undervalued" },
+    { max: 12, id: "modestly-undervalued", label: "Modestly Undervalued" },
+    { max: 15, id: "fair", label: "Fair Valued" },
+    { max: 17, id: "modestly-overvalued", label: "Modestly Overvalued" },
     { max: null, id: "significantly-overvalued", label: "Significantly Overvalued" },
   ],
-  zoneScale: { min: 0, max: 20, edges: [0, 8, 9, 12, 15, 20], ticks: [0, 9, 12, 15, 20] },
-  reference: { value: 9.1, label: "median" },
+  zoneScale: { min: 0, max: 25, edges: [0, 10.5, 12, 15, 17, 25], ticks: [0, 12, 15, 17, 25] },
+  reference: { value: 13.1, label: "median" },
   chartGridStep: 5,
   trendModel: "log",
-  staleAfterMs: DAILY_STALE_MS,
+  staleAfterMs: QUARTERLY_STALE_MS,
   link: {
     url: "https://fred.stlouisfed.org/series/CPROFIT",
     label: "Corporate profits (IVA/CCAdj), FRED",

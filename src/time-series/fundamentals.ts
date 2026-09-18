@@ -3,7 +3,10 @@ import type {
   TickerFinancials,
 } from "../types/financials";
 import { areNearbyFinancialPeriodEnds, completeAvailability, statementFieldAvailability } from "../utils/financial-statements";
+import { copyIncomeField, incomeFieldKnowledgeDate, incomeFieldOwner, isIncomeStatementField } from "../utils/income-statement";
+import { hasStatementWithdrawals, isWithdrawnStatementValue, mergeStatementWithdrawals, redactWithdrawnStatement } from "../utils/statement-observations";
 import { canonicalTimeSeriesFieldId, getTimeSeriesField } from "./field-catalog";
+import { forwardPeHistory, realizedNtmPeHistory } from "./forward-valuation";
 import { reportingCurrencySeries } from "./reporting-currency";
 import { createValuationCurrencyContext, type ValuationCurrencyContext } from "./valuation-currency";
 import { valuationPriceAtOrBefore, valuationQuoteIssue, type ValuationPriceIssue } from "./valuation-price";
@@ -14,6 +17,7 @@ type NumericStatementField =
   | "grossProfit"
   | "operatingIncome"
   | "netIncome"
+  | "netIncomeIncludingNoncontrollingInterests"
   | "netIncomeCommonStockholders"
   | "ebitda"
   | "operatingCashFlow"
@@ -34,6 +38,7 @@ type InternalStatement = FinancialStatement & {
   __timeSeriesDerivedFields?: NumericStatementField[];
   __timeSeriesTtm?: boolean;
   __timeSeriesIncompleteCommonIncome?: boolean;
+  __timeSeriesIncompleteAverageShares?: boolean;
 };
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
@@ -43,12 +48,11 @@ export const QUARTERLY_FLOW_FIELDS: readonly NumericStatementField[] = [
   "grossProfit",
   "operatingIncome",
   "netIncome",
-  "netIncomeCommonStockholders",
+  "netIncomeIncludingNoncontrollingInterests",
   "ebitda",
   "operatingCashFlow",
   "capitalExpenditure",
   "freeCashFlow",
-  "eps",
 ];
 
 export const QUARTERLY_SNAPSHOT_FIELDS: readonly NumericStatementField[] = [
@@ -62,11 +66,16 @@ export const QUARTERLY_SNAPSHOT_FIELDS: readonly NumericStatementField[] = [
 ];
 
 const QUARTERLY_AVERAGE_FIELDS: readonly NumericStatementField[] = ["basicShares", "dilutedShares"];
+// Reported common-income allocations and EPS may be summed for TTM, but
+// independently determined annual values cannot establish a missing quarter.
+const TTM_SUM_FIELDS: readonly NumericStatementField[] = [...QUARTERLY_FLOW_FIELDS, "netIncomeCommonStockholders", "eps"];
 
 const NUMERIC_STATEMENT_FIELDS: readonly NumericStatementField[] = [
   ...QUARTERLY_FLOW_FIELDS,
   ...QUARTERLY_SNAPSHOT_FIELDS,
   ...QUARTERLY_AVERAGE_FIELDS,
+  "netIncomeCommonStockholders",
+  "eps",
 ];
 
 const FUNDAMENTAL_IDS = new Set([
@@ -89,6 +98,7 @@ const FUNDAMENTAL_IDS = new Set([
 const VALUATION_IDS = new Set([
   "trailingPE",
   "forwardPE",
+  "realizedNtmPE",
   "pegRatio",
   "priceSales",
   "evSales",
@@ -96,12 +106,20 @@ const VALUATION_IDS = new Set([
   "priceFcf",
 ]);
 
+/** Statement-based multiples whose latest point is the live quote over the latest period. */
 const QUOTE_DERIVED_VALUATION_IDS = new Set([
   "trailingPE",
   "priceSales",
   "evSales",
   "evEbitda",
   "priceFcf",
+]);
+
+/** Multiples priced from history at each observation date; forward P/E also ends on the live quote. */
+const PRICE_HISTORY_VALUATION_IDS = new Set([
+  ...QUOTE_DERIVED_VALUATION_IDS,
+  "forwardPE",
+  "realizedNtmPE",
 ]);
 
 function finiteNumber(value: unknown): value is number {
@@ -207,14 +225,28 @@ function mergeStatementPeriodGroup(statements: readonly InternalStatement[]): In
   const dateSource = periodDateSource(statements);
   const merged: InternalStatement = { date: dateSource.date, currency: dateSource.currency };
   const compatibleStatements = statements.filter((statement) => statement.currency === dateSource.currency);
+  mergeStatementWithdrawals(merged, compatibleStatements);
   const derivedFields: NumericStatementField[] = [];
   const fieldAvailability: Record<string, string> = {};
   const record = merged as unknown as Record<string, unknown>;
 
   for (const field of NUMERIC_STATEMENT_FIELDS) {
+    if (isIncomeStatementField(field)) {
+      const qualified = compatibleStatements.filter(statement => statement.date === dateSource.date && incomeFieldOwner(field, statement));
+      if (qualified.length) {
+        const owner = [...qualified].sort((left, right) => incomeFieldKnowledgeDate(right, field).localeCompare(incomeFieldKnowledgeDate(left, field)))[0]!;
+        copyIncomeField(merged, owner, field);
+        const availability = statementFieldAvailability(owner, field);
+        if (typeof merged[field] === "number" && availability) fieldAvailability[field] = availability;
+        continue;
+      }
+    }
     const candidates = compatibleStatements.flatMap((statement): StatementFieldCandidate[] => {
+      if (isIncomeStatementField(field) && statement.date !== dateSource.date
+        && incomeFieldOwner(field, statement)) return [];
       const value = statementNumber(statement, field);
       if (value === null) return [];
+      if (isWithdrawnStatementValue({ ...merged, fieldSources: statement.fieldSources }, field, value)) return [];
       return [{
         statement,
         value,
@@ -244,7 +276,7 @@ function mergeStatementPeriodGroup(statements: readonly InternalStatement[]): In
     merged.availableAt = completeAvailability([dateSource.availableAt]);
   }
   if (derivedFields.length > 0) merged.__timeSeriesDerivedFields = derivedFields;
-  return merged;
+  return redactWithdrawnStatement(merged);
 }
 
 function mergeStatementsByPeriod(
@@ -254,7 +286,8 @@ function mergeStatementsByPeriod(
   const sorted = [...statements].sort((left, right) => left.date.localeCompare(right.date));
   for (const statement of sorted) {
     const lastGroup = groups.at(-1);
-    if (lastGroup && areNearbyFinancialPeriodEnds(lastGroup[0]!.date, statement.date)) {
+    if (lastGroup && areNearbyFinancialPeriodEnds(lastGroup[0]!.date, statement.date)
+      && (lastGroup[0]!.date === statement.date || (!hasStatementWithdrawals(statement) && !lastGroup.some(hasStatementWithdrawals)))) {
       lastGroup.push(statement as InternalStatement);
     } else groups.push([statement as InternalStatement]);
   }
@@ -306,8 +339,9 @@ function precedingQuarterInputs(
 }
 
 /**
- * Completes missing fiscal Q4 rows from the annual total and the three reported
- * quarters. Snapshot fields are copied from the annual balance sheet. Derived
+ * Completes additive fiscal Q4 flows from the annual total and three reported
+ * quarters. EPS and weighted-average shares require reported quarter values;
+ * neither is an additive flow. Snapshots come from the annual balance sheet. Derived
  * values become available only after the annual total and every quarterly
  * input used in the derivation are public.
  */
@@ -321,11 +355,10 @@ export function deriveQuarterlyStatements(
   for (const annualStatement of mergeStatementsByPeriod(annualStatements)) {
     let target: InternalStatement = byDate.get(annualStatement.date) ?? { date: annualStatement.date, currency: annualStatement.currency };
     if (target.currency !== annualStatement.currency) continue;
-    if (annualStatement.epsBasis?.status === "unresolved" && target.eps === undefined) target.epsBasis = annualStatement.epsBasis;
     let changed = false;
 
-    for (const field of [...QUARTERLY_FLOW_FIELDS, ...QUARTERLY_AVERAGE_FIELDS]) {
-      if (field === "eps" && target.epsBasis?.status === "unresolved") continue;
+    for (const field of QUARTERLY_FLOW_FIELDS) {
+      if (isIncomeStatementField(field) && target.unavailableFields?.includes(field)) continue;
       if (statementNumber(target, field) !== null) continue;
       const annualValue = statementNumber(annualStatement, field);
       if (annualValue === null) continue;
@@ -333,9 +366,9 @@ export function deriveQuarterlyStatements(
       if (previousInputs.length !== 3) continue;
       const inputTimes = [...previousInputs.map((input) => input.time), statementTime(annualStatement)];
       if (inputTimes.some((time, index) => index > 0 && (time - inputTimes[index - 1]! < 60 * DAY_MS || time - inputTimes[index - 1]! > 120 * DAY_MS))) continue;
-      const annualTotal = annualValue * (QUARTERLY_AVERAGE_FIELDS.includes(field) ? 4 : 1);
-      const derived = annualTotal - previousInputs.reduce((sum, input) => sum + input.value, 0);
+      const derived = annualValue - previousInputs.reduce((sum, input) => sum + input.value, 0);
       if (!Number.isFinite(derived)) continue;
+      if (isWithdrawnStatementValue(target, field, derived)) continue;
       const availableAt = completeAvailability([
         statementFieldAvailability(annualStatement, field),
         ...previousInputs.map((input) => input.availableAt),
@@ -390,11 +423,23 @@ function buildTtmStatements(statements: readonly FinancialStatement[]): Internal
     const commonIncomeCount = window.filter((statement) => finiteNumber(statement.netIncomeCommonStockholders)).length;
     // Known common claims in some quarters cannot be ignored by substituting
     // aggregate income for the entire window or only its missing quarters.
-    if (commonIncomeCount > 0 && commonIncomeCount < window.length) ttm.__timeSeriesIncompleteCommonIncome = true;
+    if ((commonIncomeCount > 0 && commonIncomeCount < window.length)
+      || window.some(statement => statement.unavailableFields?.includes("netIncomeCommonStockholders"))) ttm.__timeSeriesIncompleteCommonIncome = true;
+    const hasAverageShareInputs = window.some(statement => QUARTERLY_AVERAGE_FIELDS
+      .some(field => statementNumber(statement, field) !== null));
+    const hasCompleteAverageShares = QUARTERLY_AVERAGE_FIELDS.some(field => window.every(statement => {
+      const value = statementNumber(statement, field);
+      return value !== null && value > 0;
+    }));
+    // A missing quarter cannot replace a known weighted-period denominator
+    // with a year-end ordinary/issued-share snapshot. Capitalization may still
+    // use the snapshot; this guard is specific to the fallback earnings ratio.
+    if (hasAverageShareInputs && !hasCompleteAverageShares) ttm.__timeSeriesIncompleteAverageShares = true;
 
-    for (const field of [...QUARTERLY_FLOW_FIELDS, ...QUARTERLY_AVERAGE_FIELDS]) {
+    for (const field of [...TTM_SUM_FIELDS, ...QUARTERLY_AVERAGE_FIELDS]) {
       const values = window.map((statement) => statementNumber(statement, field));
       if (!values.every((value): value is number => value !== null)) continue;
+      if (QUARTERLY_AVERAGE_FIELDS.includes(field) && !values.every(value => value > 0)) continue;
       (ttm as unknown as Record<string, unknown>)[field] = values.reduce((sum, value) => sum + value, 0)
         / (QUARTERLY_AVERAGE_FIELDS.includes(field) ? 4 : 1);
       ttm.__timeSeriesDerivedFields!.push(field);
@@ -501,7 +546,8 @@ function selectedEps(
   if (finiteNumber(statement.eps)) {
     return { value: statement.eps, dependencies: ["eps"] };
   }
-  if (statement.__timeSeriesIncompleteCommonIncome) return null;
+  if (statement.__timeSeriesIncompleteCommonIncome || statement.__timeSeriesIncompleteAverageShares
+    || statement.unavailableFields?.includes("netIncomeCommonStockholders")) return null;
   const shares = selectedShares(statement);
   const income = selectStatementField(statement, ["netIncomeCommonStockholders", "netIncome"]);
   if (!shares || !income) return null;
@@ -646,6 +692,7 @@ function hasValuationInputs(statement: InternalStatement, metric: string): boole
   if (metric === "trailingPE") {
     return statement.epsBasis?.status === "unresolved"
       || statement.__timeSeriesIncompleteCommonIncome === true
+      || statement.__timeSeriesIncompleteAverageShares === true
       || selectedEps(statement) !== null;
   }
   if (!selectedShares(statement)) return false;
@@ -752,7 +799,13 @@ function currentDerivedValuationPoint(
 /** Whether a valuation field derives a current point from the latest quote. */
 export function valuationSeriesUsesLiveQuote(fieldId: string): boolean {
   const [namespace, metric = ""] = canonicalTimeSeriesFieldId(fieldId).split(".");
-  return namespace === "valuation" && QUOTE_DERIVED_VALUATION_IDS.has(metric);
+  return namespace === "valuation" && (QUOTE_DERIVED_VALUATION_IDS.has(metric) || metric === "forwardPE");
+}
+
+/** Whether a valuation field needs the full price history to date its observations. */
+export function valuationSeriesUsesPriceHistory(fieldId: string): boolean {
+  const [namespace, metric = ""] = canonicalTimeSeriesFieldId(fieldId).split(".");
+  return namespace === "valuation" && PRICE_HISTORY_VALUATION_IDS.has(metric);
 }
 
 function preferredPeriodPoint(
@@ -842,7 +895,17 @@ export function extractFundamentalSeries(
   }
 
   if (namespace !== "valuation" || !VALUATION_IDS.has(metric)) return [];
-  if (metric === "forwardPE" || metric === "pegRatio") {
+  if (metric === "forwardPE") {
+    const points = forwardPeHistory(financials, createValuationCurrencyContext(financials));
+    if (points.length > 0) return points;
+    // Without an estimate history the provider's own figure is all there is.
+    const current = providerCurrentValuationPoint(financials, metric);
+    return current ? [current] : [];
+  }
+  if (metric === "realizedNtmPE") {
+    return realizedNtmPeHistory(financials, createValuationCurrencyContext(financials));
+  }
+  if (metric === "pegRatio") {
     const current = providerCurrentValuationPoint(financials, metric);
     return current ? [current] : [];
   }

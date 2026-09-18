@@ -1,4 +1,5 @@
 import {
+  type Forms13FReadOptions,
   listThirteenFFormHoldings,
   listThirteenFFormHoldingsPage,
   listThirteenFForms,
@@ -34,7 +35,7 @@ const FORM_ENRICHMENT_LIMIT = 35;
 
 async function loadReportsForFunds(
   funds: ThirteenFFund[],
-  options: { from: string; to: string; signal?: AbortSignal; forceRefresh?: boolean; periods?: Map<string, string> },
+  options: Forms13FReadOptions & { from: string; to: string; signal?: AbortSignal; periods?: Map<string, string> },
 ): Promise<{ reports: Map<string, ThirteenFPeriodReport>; warning?: string }> {
   const reports = new Map<string, ThirteenFPeriodReport>();
   const failures: string[] = [];
@@ -73,6 +74,17 @@ export async function loadBrowserRows(
   signal?: AbortSignal,
   options: { forceRefresh?: boolean; offset?: number; limit?: number } = {},
 ): Promise<BrowserLoadResult> {
+  const warnings: string[] = [];
+  const result = await loadBrowserPage(tab, query, signal, { ...options, onWarning: warning => warnings.push(warning) });
+  return { ...result, warning: [...new Set([result.warning, ...warnings].filter(Boolean))].join(" ") || undefined };
+}
+
+async function loadBrowserPage(
+  tab: ThirteenFBrowserTab,
+  query: string,
+  signal?: AbortSignal,
+  options: Forms13FReadOptions & { offset?: number; limit?: number } = {},
+): Promise<BrowserLoadResult> {
   const now = new Date();
   const from = dateYearsAgo(2, now);
   const to = todayIso(now);
@@ -80,14 +92,14 @@ export async function loadBrowserRows(
   const offset = Math.max(0, options.offset ?? 0);
   const browserLimit = Math.max(1, options.limit ?? BROWSER_PAGE_LIMIT);
   const latestLimit = Math.max(1, options.limit ?? LATEST_FILINGS_PAGE_LIMIT);
-  const apiOptions = { forceRefresh: options.forceRefresh };
-  const pageApiOptions = { forceRefresh: options.forceRefresh, offset };
+  const apiOptions = { forceRefresh: options.forceRefresh, onWarning: options.onWarning };
+  const pageApiOptions = { ...apiOptions, offset };
 
   if (tab === "performance") {
     const topFunds = await listTopThirteenFFunds(quarter, browserLimit, signal, pageApiOptions);
     const funds: ThirteenFFund[] = topFunds.map((fund) => ({ cik: fund.cik, name: fund.name }));
     const { reports, warning } = await loadReportsForFunds(funds.slice(0, Math.min(browserLimit, FORM_ENRICHMENT_LIMIT)), {
-      from, to, signal, forceRefresh: options.forceRefresh,
+      from, to, signal, ...apiOptions,
       periods: new Map(topFunds.map((fund) => [fund.cik, fund.periodOfReport])),
     });
     return {
@@ -104,7 +116,7 @@ export async function loadBrowserRows(
     const filings = await listThirteenFFilings(recentIso(21, now), to, latestLimit, signal, pageApiOptions);
     const selected = dedupeLatestForms(filings);
     const { reports, warning } = await loadReportsForFunds(selected.map((form) => ({ cik: form.cik, name: form.companyName })), {
-      from, to, signal, forceRefresh: options.forceRefresh,
+      from, to, signal, ...apiOptions,
       periods: new Map(selected.map((form) => [form.cik, form.periodOfReport])),
     });
     return {
@@ -136,7 +148,7 @@ export async function loadBrowserRows(
       const holders = await lookupThirteenFHoldersByCusip(cusip, periodOfReport, signal, apiOptions);
       const pageCiks = holders.ciks.slice(offset, offset + browserLimit);
       const { reports, warning } = await loadReportsForFunds(pageCiks.map((cik) => ({ cik, name: cik })), {
-        from, to, signal, forceRefresh: options.forceRefresh,
+        from, to, signal, ...apiOptions,
         periods: new Map(pageCiks.map((cik) => [cik, holders.periodOfReport])),
       });
       const funds = pageCiks.map((cik) => ({ cik, name: reports.get(cik)?.filings.at(-1)?.companyName || cik }));
@@ -175,8 +187,8 @@ export async function loadBrowserRows(
   }
   const funds = await searchThirteenFFunds(trimmed, browserLimit, signal, pageApiOptions);
   const [{ reports, warning }, topFunds] = await Promise.all([
-    loadReportsForFunds(funds.slice(0, Math.min(browserLimit, FORM_ENRICHMENT_LIMIT)), { from, to, signal, forceRefresh: options.forceRefresh }),
-    listTopThirteenFFunds(quarter, browserLimit, signal, { forceRefresh: options.forceRefresh }).catch(() => []),
+    loadReportsForFunds(funds.slice(0, Math.min(browserLimit, FORM_ENRICHMENT_LIMIT)), { from, to, signal, ...apiOptions }),
+    listTopThirteenFFunds(quarter, browserLimit, signal, apiOptions).catch(() => []),
   ]);
   const topByCik = new Map(topFunds.map((fund) => [fund.cik, fund]));
   const matchedTopFunds = funds
@@ -203,7 +215,8 @@ export async function loadFundDetail(
   options: { forceRefresh?: boolean } = {},
 ): Promise<FundDetailData> {
   const now = new Date();
-  const apiOptions = { forceRefresh: options.forceRefresh };
+  const warnings: string[] = [];
+  const apiOptions = { forceRefresh: options.forceRefresh, onWarning: (warning: string) => warnings.push(warning) };
 
   const forms = await listThirteenFForms(
     cik,
@@ -218,7 +231,6 @@ export async function loadFundDetail(
   const previousReport = reports[1];
   const latestForm = latestReport?.filings.at(-1) ?? null;
   const previousForm = previousReport?.filings.at(-1) ?? null;
-  const warnings: string[] = [];
   async function loadReport(report: ThirteenFPeriodReport | undefined): Promise<ThirteenFHoldingRecord[]> {
     if (!report) return [];
     const holdings: ThirteenFHoldingRecord[] = [];
@@ -263,8 +275,12 @@ export async function loadFilingPositions(
   accessionNumber: string,
   signal?: AbortSignal,
   options: { forceRefresh?: boolean; offset?: number; limit?: number } = {},
-): Promise<{ rows: ThirteenFHoldingRecord[]; hasMore: boolean }> {
-  return listThirteenFFormHoldingsPage(cik, accessionNumber, signal, options);
+): Promise<{ rows: ThirteenFHoldingRecord[]; hasMore: boolean; warnings: string[] }> {
+  const warnings: string[] = [];
+  const result = await listThirteenFFormHoldingsPage(cik, accessionNumber, signal, {
+    ...options, onWarning: warning => warnings.push(warning),
+  });
+  return { ...result, warnings };
 }
 
 function quarterToPeriod(quarter: string): string {

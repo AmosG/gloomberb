@@ -66,6 +66,8 @@ function buildStatementMetrics(statement: FinancialStatement, currency?: string)
     ["Gross Profit", money(statement.grossProfit)],
     ["Operating Income", money(statement.operatingIncome)],
     ["Net Income", money(statement.netIncome)],
+    ["Income incl. NCI", money(statement.netIncomeIncludingNoncontrollingInterests)],
+    ["Income Common", money(statement.netIncomeCommonStockholders)],
     ["EBITDA", money(statement.ebitda)],
     ["Operating Cash Flow", money(statement.operatingCashFlow)],
     ["Free Cash Flow", money(statement.freeCashFlow)],

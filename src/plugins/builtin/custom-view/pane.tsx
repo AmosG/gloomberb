@@ -14,7 +14,7 @@ import type { DataTableColumn } from "../../../components/ui/data-table/types";
 import { EmptyState, PaneStatusBody, usePaneFooter } from "../../../components";
 import { useAsyncResource } from "../../../react/async-resource";
 import { useShortcut } from "../../../react/input";
-import { useAppSelector, usePaneInstance } from "../../../state/app/context";
+import { usePaneInstance, usePaneAppConfig } from "../../../state/app/context";
 import { colors } from "../../../theme/colors";
 import type { PaneProps } from "../../../types/plugin";
 import { Box, Text } from "../../../ui";
@@ -60,7 +60,7 @@ function columnsFor(spec: ViewSpec, loaded: LoadedView | null): Column[] {
 
 export function CustomViewPane({ focused, width, height }: PaneProps) {
   const instance = usePaneInstance();
-  const config = useAppSelector((state) => state.config);
+  const config = usePaneAppConfig();
   const { selectTicker } = usePluginPaneActions();
   const { notify } = usePluginAppActions();
   const dialog = useDialog();
@@ -99,6 +99,14 @@ export function CustomViewPane({ focused, width, height }: PaneProps) {
   }, [columns, rows]);
   const symbolKey = spec?.presentation.symbolKey ?? (columns.some((column) => column.key === "symbol") ? "symbol" : null);
   const activeSort = sort === undefined ? spec?.projection.sort ?? null : sort;
+  // Memoized so the table's row memo holds while the selection moves.
+  const rowKey = useCallback((row: ViewRow, index: number) => (
+    `${symbolKey && typeof row[symbolKey] === "string" ? row[symbolKey] : ""}:${index}`
+  ), [symbolKey]);
+  const renderRowCell = useCallback((row: ViewRow, column: Column) => ({
+    text: formatViewValue(row[column.key], column.transform, baseByColumn.get(column.key)),
+    color: column.key === symbolKey ? colors.textBright : undefined,
+  }), [baseByColumn, symbolKey]);
 
   /**
    * Publishes this view to a team. An inline view becomes a new team view
@@ -288,11 +296,8 @@ export function CustomViewPane({ focused, width, height }: PaneProps) {
           ? { by: id, direction: active.direction === "desc" ? "asc" : "desc" }
           : { by: id, direction: "desc" };
       })}
-      getItemKey={(row, index) => `${symbolKey && typeof row[symbolKey] === "string" ? row[symbolKey] : ""}:${index}`}
-      renderCell={(row, column) => ({
-        text: formatViewValue(row[column.key], column.transform, baseByColumn.get(column.key)),
-        color: column.key === symbolKey ? colors.textBright : undefined,
-      })}
+      getItemKey={rowKey}
+      renderCell={renderRowCell}
       onActivate={(row) => {
         const symbol = symbolKey ? row[symbolKey] : null;
         if (typeof symbol === "string" && symbol) selectTicker(symbol);

@@ -174,6 +174,72 @@ describe("layout marketplace payloads", () => {
     expect(pane.paneState.p1).toEqual({ sort: { columnId: "time", direction: "desc" } });
   });
 
+  test("drops an oversized plugin-state key without taking the pane's open item with it", () => {
+    const pane = publishableMarketplacePane({
+      instanceId: "news-top:main",
+      paneId: "prediction-markets",
+      binding: { kind: "none" },
+    }, {
+      pluginState: {
+        news: {
+          "news-top:openArticleId": "article-7",
+          "news-top:articles": Array.from({ length: 400 }, (_, index) => ({
+            id: `article-${index}`,
+            title: "x".repeat(200),
+            publishedAt: "2026-08-26T00:00:00.000Z",
+          })),
+        },
+      },
+    }, panes);
+
+    expect(pane.paneState.p1).toEqual({
+      pluginState: { news: { "news-top:openArticleId": "article-7" } },
+    });
+  });
+
+  test("pins a fixed binding to its public listing key and leaves the broker contract behind", () => {
+    const listed = publishableMarketplacePane({
+      instanceId: "chart:1",
+      paneId: "twitter-feed",
+      binding: { kind: "fixed", symbol: "SHEL", listing: { exchange: "LSE", name: "Shell", currency: "GBp", type: "Common Stock" } },
+    }, {}, panes);
+    expect(listed.layout.instances[0]?.binding).toEqual({ kind: "fixed", symbol: "SHEL:XLON" });
+
+    const brokered = publishableMarketplacePane({
+      instanceId: "chart:2",
+      paneId: "twitter-feed",
+      binding: {
+        kind: "fixed",
+        symbol: "aapl",
+        instrument: { brokerId: "ibkr", brokerInstanceId: "ibkr:1", conId: 265598, symbol: "AAPL", exchange: "SMART" } as never,
+      },
+    }, {}, panes);
+    expect(brokered.layout.instances[0]?.binding).toEqual({ kind: "fixed", symbol: "AAPL" });
+    expect(JSON.stringify(brokered)).not.toContain("265598");
+  });
+
+  test("lets a pane pin what it resolved locally before it leaves the device", () => {
+    const prepared = publishableMarketplacePane({
+      instanceId: "chart:1",
+      paneId: "pinning",
+      settings: { symbol: "SHEL" },
+    }, {}, new Map([["pinning", {
+      id: "pinning",
+      name: "Pinning",
+      component,
+      defaultPosition: "right",
+      portableShare: {
+        prepare: (pane, { tickers }) => ({
+          ...pane,
+          settings: { ...pane.settings, exchange: tickers.get(String(pane.settings?.symbol))?.metadata.exchange },
+        }),
+      },
+    }]]), null, {
+      tickers: new Map([["SHEL", { metadata: { ticker: "SHEL", exchange: "LSE" } } as never]]),
+    });
+    expect(prepared.layout.instances[0]?.settings).toEqual({ symbol: "SHEL", exchange: "LSE" });
+  });
+
   test("shares portable pane setup and state while redacting private data", () => {
     const fixture = portableFixture();
     const payload = publishableMarketplaceLayout(fixture.layout, fixture.paneState, panes);

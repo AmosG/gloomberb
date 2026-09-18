@@ -10,6 +10,7 @@ import {
   EmptyState,
   InputSearchBar, PaneStatusBody, Spinner,
   usePaneFooter,
+  useTableLoadMore,
   type DataTableCell,
   type DataTableKeyEvent,
   type DataTableRootKeyContext,
@@ -118,6 +119,8 @@ const TICKER_PATTERN = /^[A-Z]{1,5}(?:[.-][A-Z]{1,2})?$/;
 const PRODUCE_POLL_MS = 15_000;
 /** How often to ask again while the server is still finding a company's calls. */
 const LOOKUP_POLL_MS = 20_000;
+/** Rows per list request. Scrolling to the end of the shelf asks for the next page. */
+const CALL_PAGE_SIZE = 50;
 
 interface TickerLookup {
   ticker: string;
@@ -128,6 +131,16 @@ interface TickerLookup {
   stale?: boolean;
   refreshError?: string;
   refreshRequest?: number;
+}
+
+/** A page can overlap the rows already held when the shelf reorders mid-scroll. */
+function appendNewCalls(
+  current: CloudEarningsCallPayload[],
+  incoming: CloudEarningsCallPayload[],
+): CloudEarningsCallPayload[] {
+  const known = new Set(current.map((call) => call.id));
+  const added = incoming.filter((call) => !known.has(call.id));
+  return added.length > 0 ? [...current, ...added] : current;
 }
 
 function sortValue(call: CloudEarningsCallPayload, columnId: string): string | number {
@@ -170,6 +183,12 @@ export function EarningsCallsPane({ focused, width, height }: EarningsCallsViewP
   const [listFetchedAt, setListFetchedAt] = useState(0);
   const listRequestVersion = useRef(0);
   const [listCompletedRequest, setListCompletedRequest] = useState(0);
+  // The shelf is paged: the server answers a page at a time and reports no
+  // total, so a full page means there is probably another one behind it.
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextOffset, setNextOffset] = useState(0);
+  const tableScrollRef = useRef<ScrollBoxRenderable | null>(null);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -211,10 +230,13 @@ export function EarningsCallsPane({ focused, width, height }: EarningsCallsViewP
       if (!access.emailVerified || !access.hasProAccess) return;
       const request = ++listRequestVersion.current;
       setListStatus((current) => (current === "loaded" ? current : "loading"));
-      loadEarningsCalls(ticker, { force })
+      setLoadingMore(false);
+      loadEarningsCalls(ticker, { force, limit: CALL_PAGE_SIZE })
         .then((result) => {
           if (request !== listRequestVersion.current) return;
           setCalls(result.calls);
+          setNextOffset(result.calls.length);
+          setHasMore(result.sourceLimitReached === true);
           setStale(result.stale);
           setListFetchedAt(result.fetchedAt);
           setListPending(result.pending === true && result.calls.length === 0);
@@ -227,6 +249,8 @@ export function EarningsCallsPane({ focused, width, height }: EarningsCallsViewP
         .catch((error: unknown) => {
           if (request !== listRequestVersion.current) return;
           setListPending(false);
+          setHasMore(false);
+          setNextOffset(0);
           setListError({
             message: error instanceof Error ? error.message : String(error),
             status: statusOf(error),
@@ -237,8 +261,44 @@ export function EarningsCallsPane({ focused, width, height }: EarningsCallsViewP
     [ticker, access.emailVerified, access.hasProAccess],
   );
 
+  // Scrolling to the end of the shelf asks the server for the next page. A
+  // page belongs to the list request that was current when it was asked for:
+  // a refresh or a binding change abandons whatever was in flight.
+  const loadMoreCalls = useCallback(() => {
+    if (!access.emailVerified || !access.hasProAccess) return;
+    const request = listRequestVersion.current;
+    setLoadingMore(true);
+    loadEarningsCalls(ticker, { limit: CALL_PAGE_SIZE, offset: nextOffset })
+      .then((result) => {
+        if (request !== listRequestVersion.current) return;
+        setCalls((current) => appendNewCalls(current, result.calls));
+        setNextOffset(nextOffset + result.calls.length);
+        setHasMore(result.sourceLimitReached === true);
+        setLoadingMore(false);
+      })
+      .catch((error: unknown) => {
+        if (request !== listRequestVersion.current) return;
+        // The rows already loaded stay: only the next page failed.
+        setHasMore(false);
+        setLoadingMore(false);
+        setListError({
+          message: error instanceof Error ? error.message : String(error),
+          status: statusOf(error),
+        });
+      });
+  }, [ticker, nextOffset, access.emailVerified, access.hasProAccess]);
+
+  const loadMoreFromScroll = useTableLoadMore(
+    tableScrollRef,
+    hasMore && !loadingMore && !detailOpen && listStatus === "loaded",
+    loadMoreCalls,
+  );
+
   useEffect(() => {
     setCalls([]);
+    setHasMore(false);
+    setLoadingMore(false);
+    setNextOffset(0);
     setListStatus("idle");
     setListPending(false);
     setStale(false);
@@ -384,6 +444,15 @@ export function EarningsCallsPane({ focused, width, height }: EarningsCallsViewP
     setCalls(update);
     setLookup((current) => (current ? { ...current, calls: update(current.calls) } : current));
   }, []);
+
+  // Warms a published transcript while the cursor rests on its row, so
+  // opening it does not wait. Only calls that already have one: the same
+  // request on a call without a transcript asks the server to produce it,
+  // which is a deliberate act reserved for Enter.
+  const prefetchTranscript = useCallback((call: CloudEarningsCallPayload) => {
+    if (!call.hasTranscript || !access.emailVerified || !access.hasProAccess) return;
+    void loadTranscript(call.id).catch(() => {});
+  }, [access.emailVerified, access.hasProAccess]);
 
   // A published transcript is immutable, so it loads once per call. Opening
   // a call that has none asks the server to produce it, then checks back
@@ -563,6 +632,8 @@ export function EarningsCallsPane({ focused, width, height }: EarningsCallsViewP
       const info: PaneFooterSegment[] = [];
       if (listStatus === "loading") {
         info.push({ id: "loading", parts: [{ text: "loading", tone: "muted" }] });
+      } else if (loadingMore) {
+        info.push({ id: "loading-more", parts: [{ text: "loading more calls", tone: "muted" }] });
       }
       if (producing) {
         info.push({ id: "producing", parts: [{ text: "producing transcript", tone: "muted" }] });
@@ -617,6 +688,7 @@ export function EarningsCallsPane({ focused, width, height }: EarningsCallsViewP
     },
     [
       listStatus,
+      loadingMore,
       transcriptLoading,
       producing,
       listPending,
@@ -770,6 +842,8 @@ export function EarningsCallsPane({ focused, width, height }: EarningsCallsViewP
       }
       onRootKeyDown={handleRootKey}
       onDetailKeyDown={handleDetailKey}
+      scrollRef={tableScrollRef}
+      onBodyScrollActivity={loadMoreFromScroll}
       selection={{
         kind: "id",
         selectedId,
@@ -783,6 +857,7 @@ export function EarningsCallsPane({ focused, width, height }: EarningsCallsViewP
         setTranscriptError(null);
         setDetailOpen(true);
       }}
+      prefetchDetail={prefetchTranscript}
       rootWidth={width}
       // The search bar sits inside the frame, so the frame takes the full height.
       rootHeight={Math.max(2, height)}

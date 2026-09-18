@@ -81,6 +81,12 @@ export interface PanePortableShareDef {
     settings?: PaneSharePrivateFields;
     state?: PaneSharePrivateFields;
   };
+  /**
+   * Rewrites the instance before it leaves the device. The receiver has none
+   * of the sender's local ticker records, so anything resolved through them
+   * (a listing's venue, for example) must be pinned into the instance here.
+   */
+  prepare?(pane: PaneInstanceConfig, context: { tickers: ReadonlyMap<string, TickerRecord> }): PaneInstanceConfig;
 }
 
 export interface PaneDef {
@@ -696,6 +702,8 @@ export interface GloomPluginContext {
   pinTicker(symbol: string, options?: PinTickerOptions): void;
   navigateTicker(symbol: string, options?: { sourcePaneId?: string | null }): void;
   openPaneSettings(paneId?: string): void;
+  /** Copies a live share link for a pane instance (the focused pane when omitted). */
+  sharePane(paneId?: string): void;
 
   on<K extends keyof PluginEvents>(event: K, handler: (payload: PluginEvents[K]) => void): () => void;
   emit<K extends keyof PluginEvents>(event: K, payload: PluginEvents[K]): void;
@@ -737,6 +745,15 @@ export interface PluginConfigField {
 
 export interface GloomPlugin {
   id: string;
+  /**
+   * Where this plugin's saved state lives: its `pluginConfig` entry, its resume
+   * state, and the per-pane state its panes write. Defaults to `id`.
+   *
+   * Set it when a plugin is renamed, or moves out of this repository under a
+   * new id, so the threads, tabs, and defaults a user already has stay theirs.
+   * Everything else (the toggle, the marketplace, seeding) keys off `id`.
+   */
+  stateId?: string;
   name: string;
   version: string;
   description?: string;

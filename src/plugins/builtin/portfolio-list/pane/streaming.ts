@@ -49,10 +49,17 @@ export function usePortfolioPaneStreaming({
   const mountedRef = useRef(true);
   const warmupInFlightRef = useRef(new Set<string>());
   const warmupAttemptRef = useRef(new Map<string, number>());
+  // The scheduled warmup batch, keyed by what it will fetch. Quote ticks and
+  // prefetches replace the financials map many times a second; a batch that
+  // still fetches the same rows keeps its timer instead of restarting it, or
+  // it would never fire while the tape is busy.
+  const pendingWarmupRef = useRef<{ key: string; timeoutId: ReturnType<typeof setTimeout> } | null>(null);
 
   useEffect(() => {
     return () => {
       mountedRef.current = false;
+      if (pendingWarmupRef.current) clearTimeout(pendingWarmupRef.current.timeoutId);
+      pendingWarmupRef.current = null;
     };
   }, []);
 
@@ -161,9 +168,18 @@ export function usePortfolioPaneStreaming({
     }
     const limitedQuoteSnapshotQueue = quoteSnapshotQueue.slice(0, SORT_QUOTE_WARMUP_BATCH_LIMIT);
     const limitedSnapshotQueue = snapshotQueue.slice(0, VISIBLE_SNAPSHOT_WARMUP_BATCH_LIMIT);
-    if (quoteQueue.length === 0 && limitedQuoteSnapshotQueue.length === 0 && limitedSnapshotQueue.length === 0) return;
+    if (quoteQueue.length === 0 && limitedQuoteSnapshotQueue.length === 0 && limitedSnapshotQueue.length === 0) {
+      if (pendingWarmupRef.current) clearTimeout(pendingWarmupRef.current.timeoutId);
+      pendingWarmupRef.current = null;
+      return;
+    }
+    const batchKey = [
+      ...quoteQueue.map((ticker) => `q:${ticker.metadata.ticker}`),
+      ...limitedQuoteSnapshotQueue.map((ticker) => `f:${ticker.metadata.ticker}`),
+      ...limitedSnapshotQueue.map((ticker) => `s:${ticker.metadata.ticker}`),
+    ].join("|");
+    if (pendingWarmupRef.current?.key === batchKey) return;
 
-    let cancelled = false;
     const runBatch = async (): Promise<void> => {
       const quoteEntries = quoteQueue.flatMap((ticker) => {
         const instrument = instrumentFromTicker(ticker, ticker.metadata.ticker, instrumentOptions);
@@ -211,14 +227,12 @@ export function usePortfolioPaneStreaming({
       }
     };
 
+    if (pendingWarmupRef.current) clearTimeout(pendingWarmupRef.current.timeoutId);
     const timeoutId = setTimeout(() => {
-      if (!cancelled && mountedRef.current) void runBatch();
+      pendingWarmupRef.current = null;
+      if (mountedRef.current) void runBatch();
     }, VISIBLE_FINANCIAL_WARMUP_DELAY_MS);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timeoutId);
-    };
+    pendingWarmupRef.current = { key: batchKey, timeoutId };
   }, [activeSort, appActive, financialsMap, instrumentOptions, liveStreaming, sharedCoordinator, sortedTickers, streamWindow, visibleFinancialTickers, visibleWarmupRequirements]);
 
   useEffect(() => {

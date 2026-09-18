@@ -18,6 +18,7 @@ import {
   getCollectionCommandVerb,
 } from "../helpers";
 import type { CommandBarRoute } from "../workflow/types";
+import { AmbiguousCollectionTickerError, resolveCollectionTicker } from "../workflow/collection-ticker";
 
 export type CollectionCommandId =
   | "add-watchlist"
@@ -46,7 +47,7 @@ export async function executeCollectionCommandAction(options: {
   const kind = getCollectionCommandKind(options.commandId);
   const action = getCollectionCommandAction(options.commandId);
   const deps = options.buildWorkflowDeps();
-  const resolvedTicker = options.selectedTicker
+  const resolvedInput = options.selectedTicker
     ? { symbol: options.selectedTicker.metadata.ticker, ticker: options.selectedTicker }
     : await resolveTickerInput(
       options.rawInput,
@@ -55,13 +56,27 @@ export async function executeCollectionCommandAction(options: {
       deps,
     );
 
-  if (!resolvedTicker) {
+  if (!resolvedInput) {
     options.openModeRoute("ticker-search", options.rawInput?.trim() || "", {
       action: "collection-command",
       commandId: options.commandId,
     });
     return;
   }
+
+  let resolvedTicker = resolvedInput;
+  const selectSavedOwner = (collectionId?: string | null): boolean => {
+    try {
+      const ticker = resolveCollectionTicker(resolvedTicker.ticker, options.getState().tickers, kind, collectionId);
+      resolvedTicker = { ...resolvedTicker, symbol: ticker.metadata.ticker, ticker };
+      return true;
+    } catch (error) {
+      if (!(error instanceof AmbiguousCollectionTickerError)) throw error;
+      options.notify(error.message, { type: "error" });
+      return false;
+    }
+  };
+  if (!selectSavedOwner(options.explicitTargetId ?? options.activeCollectionId)) return;
 
   if (kind === "portfolio" && action === "add") {
     const manualPortfolios = stateForCommand.config.portfolios.filter(isManualPortfolio);
@@ -107,6 +122,7 @@ export async function executeCollectionCommandAction(options: {
       return;
     }
 
+    if (!selectSavedOwner(preferredTargetId)) return;
     options.openAddToPortfolioWorkflow(resolvedTicker.ticker, preferredTargetId);
     return;
   }
@@ -171,6 +187,7 @@ export async function executeCollectionCommandAction(options: {
   }
 
   let changed = false;
+  if (!selectSavedOwner(targetId)) return;
   if (kind === "watchlist") {
     ({ changed } = await applyCollectionMembershipChange(
       resolvedTicker.ticker,

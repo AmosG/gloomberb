@@ -66,3 +66,33 @@ test("stale peer remains inspectable with contextual failure, excluded quote val
   expect(recovered).toContain("MISSING: source unavailable");
   if (process.env.RV_AUDIT_EVIDENCE) await Bun.write(`${process.env.RV_AUDIT_EVIDENCE}/recovered-ui.txt`, recovered);
 });
+
+test("stale fundamentals retain their disclosure and export provenance with a fresh quote, then clear on refresh", async () => {
+  let stale = true;
+  setSharedMarketDataCoordinator(new MarketDataCoordinator(createTestDataProvider({ getTickerFinancials: async (symbol) => ({
+    annualStatements: [], quarterlyStatements: [], priceHistory: [],
+    quote: { symbol, price: 135.75, change: 1, changePercent: 1, currency: "USD", lastUpdated: 1789567200000, stale: false, marketCap: 131e9 },
+    fundamentals: { trailingPE: 30.2, financialCurrency: "USD", source: "yahoo", fetchedAt: "2026-09-11T23:52:16.139Z", stale: symbol === "PLD" && stale },
+  }) })));
+  setup = await testRender(<Harness width={120} />, { width: 120, height: 16 });
+  await settle();
+  expect(setup.captureCharFrame()).toContain("$135.75");
+  expect(setup.captureCharFrame()).not.toContain("Fundamentals stale");
+  await act(async () => setup!.mockInput.pressKey("!"));
+  await settle();
+  expect(setup.captureCharFrame()).toContain("PLD: Fundamentals stale");
+  await act(async () => setup!.mockInput.pressKey("escape"));
+  await settle();
+  await exportPaneTable(paneId, "rv-stale-fundamentals.csv");
+  const csv = takeSavedTextFile()!.text;
+  expect(csv).toContain("PLD,Fundamentals source,yahoo,Retrieved,2026-09-11T23:52:16.139Z,Stale,true");
+  expect(csv).toContain("PLD,Fundamentals stale");
+  stale = false;
+  await act(async () => setup!.mockInput.pressKey("r"));
+  await settle();
+  await act(async () => setup!.mockInput.pressKey("!"));
+  await settle();
+  expect(setup.captureCharFrame()).not.toContain("Fundamentals stale");
+  await exportPaneTable(paneId, "rv-fresh-fundamentals.csv");
+  expect(takeSavedTextFile()!.text).toContain("PLD,Fundamentals source,yahoo,Retrieved,2026-09-11T23:52:16.139Z,Stale,false");
+});

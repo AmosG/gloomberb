@@ -80,6 +80,14 @@ function rowKey(row: MarketplaceRow): string {
   return row.type === "header" ? `header:${row.section}` : row.entry.id;
 }
 
+const isEntryRow = (row: MarketplaceRow) => row.type === "entry";
+
+function renderRowSectionHeader(row: MarketplaceRow) {
+  return row.type === "header"
+    ? { text: `${SECTION_LABELS[row.section]} (${row.count})` }
+    : null;
+}
+
 function renderCell(
   row: MarketplaceRow,
   column: Column,
@@ -209,6 +217,13 @@ export function PluginMarketplacePane({ focused, width, height }: PaneProps) {
   const [localRevision, setLocalRevision] = useState(0);
   const [busy, setBusy] = useState<Busy>(null);
   const [lastError, setLastError] = useState<string | null>(null);
+  const busyId = busy?.id ?? null;
+  const renderRow = useCallback((
+    row: MarketplaceRow,
+    column: Column,
+    _index: number,
+    rowState: { selected: boolean },
+  ) => renderCell(row, column, rowState, busyId), [busyId]);
 
   const refresh = useCallback((force: boolean) => {
     setStatus((current) => (current === "ready" ? current : "loading"));
@@ -574,7 +589,7 @@ export function PluginMarketplacePane({ focused, width, height }: PaneProps) {
             if (row.type === "entry") setSelectedId(row.entry.id);
           },
         }}
-        isNavigable={(row) => row.type === "entry"}
+        isNavigable={isEntryRow}
         onRootKeyDown={handleRootKeyDown}
         onDetailKeyDown={handleRootKeyDown}
         onActivate={(row) => {
@@ -588,10 +603,8 @@ export function PluginMarketplacePane({ focused, width, height }: PaneProps) {
         sortColumnId={null}
         sortDirection="asc"
         onHeaderClick={() => {}}
-        renderSectionHeader={(row) => row.type === "header"
-          ? { text: `${SECTION_LABELS[row.section]} (${row.count})` }
-          : null}
-        renderCell={(row, column, _index, rowState) => renderCell(row, column, rowState, busy?.id ?? null)}
+        renderSectionHeader={renderRowSectionHeader}
+        renderCell={renderRow}
         emptyStateTitle={status === "error" ? "Plugin catalog unavailable." : query || category ? "No plugins match." : "Nothing installed yet."}
         emptyStateHint={status === "error" ? "Press r to retry." : !query && !category ? "Press b to see built-in modules." : undefined}
       />

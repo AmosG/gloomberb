@@ -275,7 +275,22 @@ export interface CompanyProfile {
   industry?: string;
 }
 
+export type IncomeStatementField = "netIncome" | "netIncomeIncludingNoncontrollingInterests" | "netIncomeCommonStockholders";
+
+export interface IncomeStatementSource {
+  source: "sec";
+  concept: string;
+  accessionNumber?: string;
+  filed?: string;
+  startDate?: string;
+  endDate: string;
+  unit: string;
+  basis: "parent" | "consolidated" | "common";
+}
+
 export interface FinancialStatement {
+  /** Unresolved, source-attested observation withdrawals; identifiers are validated on read. */
+  withdrawnObservations?: string[];
   /** SEC EPS share basis; raw source values remain available in the evidence. */
   epsBasis?: import("../utils/sec-eps-basis").SecEpsBasis;
   date: string;
@@ -295,6 +310,10 @@ export interface FinancialStatement {
   availableAt?: string;
   /** Per-field publication dates used by point-in-time charts and calculations. */
   fieldAvailability?: Record<string, string>;
+  /** Income attribution belongs to each field, not to the row's date evidence. */
+  fieldSources?: Partial<Record<IncomeStatementField, IncomeStatementSource>>;
+  /** Explicit source coverage gaps must not be filled by another income basis. */
+  unavailableFields?: IncomeStatementField[];
   // Income Statement
   totalRevenue?: number;
   costOfRevenue?: number;
@@ -316,6 +335,7 @@ export interface FinancialStatement {
   interestExpense?: number;
   taxProvision?: number;
   netIncome?: number;
+  netIncomeIncludingNoncontrollingInterests?: number;
   ebitda?: number;
   basicEps?: number;
   eps?: number; // diluted
@@ -466,6 +486,49 @@ export interface StatementHistoryAttempt {
   reason?: string;
 }
 
+/** Consensus EPS for one reported quarter as it stood at the report. */
+export interface ReportedEpsEstimate {
+  /** Announcement date. A row without an actual is an upcoming report. */
+  date: string;
+  epsEstimate?: number;
+  epsActual?: number;
+}
+
+export type ConsensusPeriod = "current quarter" | "next quarter" | "current year" | "next year";
+
+/** Today's consensus for a period still open. */
+export interface ConsensusEpsEstimate {
+  period: ConsensusPeriod | string;
+  /** Fiscal period end. */
+  date: string;
+  average?: number;
+  analysts?: number;
+  currency?: string;
+}
+
+/** One day's observation of the consensus for a period, recorded by the cloud. */
+export interface ConsensusEpsSnapshot {
+  observedOn: string;
+  period: ConsensusPeriod | string;
+  periodEnd?: string;
+  epsAverage?: number;
+  analysts?: number;
+  source: string;
+}
+
+/**
+ * The inputs behind a forward multiple history. Providers only serve today's
+ * consensus, so the past is the pre-report consensus per quarter plus whatever
+ * the cloud has recorded day by day since it started observing the listing.
+ */
+export interface EpsEstimateHistory {
+  fetchedAt?: string;
+  currency?: string;
+  reported: ReportedEpsEstimate[];
+  consensus: ConsensusEpsEstimate[];
+  snapshots: ConsensusEpsSnapshot[];
+}
+
 export interface TickerFinancials {
   statementHistory?: StatementHistoryAttempt;
   financialCurrency?: string;
@@ -477,6 +540,8 @@ export interface TickerFinancials {
   annualStatements: FinancialStatement[];
   quarterlyStatements: FinancialStatement[];
   priceHistory: PricePoint[];
+  /** Present on extended statement history from the cloud. */
+  epsEstimates?: EpsEstimateHistory;
 }
 
 export interface OptionContract {

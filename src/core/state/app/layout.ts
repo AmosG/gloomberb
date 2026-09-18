@@ -67,10 +67,113 @@ function cloneRuntimeValue<T>(value: T): T {
   return value;
 }
 
+// The saved-layout mirror is rebuilt on every pane-state update, and pane
+// state is replaced, never edited, when it changes: a patch spreads the
+// top-level object and leaves untouched values (a cached article list, say)
+// with their identity. Cloning each object once per identity, at every
+// level, keeps the mirror a real copy while making the rebuild cost
+// proportional to what changed rather than to every pane in every layout.
+const runtimeValueClones = new WeakMap<object, unknown>();
+/** Clone to the object it was copied from, so a saved copy can be traced to live state. */
+const paneStateOrigins = new WeakMap<object, object>();
+
+function cloneRuntimeValueShared<T>(value: T): T {
+  if (!value || typeof value !== "object") return value;
+  const cached = runtimeValueClones.get(value);
+  if (cached !== undefined) return cached as T;
+  const clone = Array.isArray(value)
+    ? value.map((entry) => cloneRuntimeValueShared(entry))
+    : Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, entry]) => [key, cloneRuntimeValueShared(entry)]),
+    );
+  runtimeValueClones.set(value, clone);
+  return clone as T;
+}
+
+function clonePaneState(paneState: Record<string, unknown>): PaneRuntimeState {
+  const cached = runtimeValueClones.get(paneState);
+  if (cached !== undefined) return cached as PaneRuntimeState;
+  const clone = cloneRuntimeValueShared(paneState) as PaneRuntimeState;
+  paneStateOrigins.set(clone, paneState);
+  return clone;
+}
+
+function descendsFrom(candidate: object, ancestor: object): boolean {
+  let current: object | undefined = candidate;
+  for (let depth = 0; current && depth < 4; depth += 1) {
+    if (current === ancestor) return true;
+    current = paneStateOrigins.get(current);
+  }
+  return false;
+}
+
+/**
+ * The pane state a config carries for its active layout, ready to merge over
+ * the live map. A saved entry that is a copy of the live entry (the usual case
+ * when a caller spreads the current config to change one field) yields the
+ * live object itself, so the merge does not hand every pane a new identity.
+ */
+export function restoreSavedPaneState(
+  config: AppConfig,
+  livePaneState: Record<string, PaneRuntimeState>,
+): Record<string, PaneRuntimeState> | null {
+  const saved = config.layouts[config.activeLayoutIndex]?.paneState;
+  if (!saved) return null;
+  return Object.fromEntries(Object.entries(saved).map(([paneId, entry]) => {
+    const live = livePaneState[paneId];
+    return [paneId, live && descendsFrom(entry, live) ? live : clonePaneState(entry)];
+  }));
+}
+
 export function clonePaneStateMap(previous: Record<string, Record<string, unknown>>): Record<string, PaneRuntimeState> {
   return Object.fromEntries(
-    Object.entries(previous).map(([paneId, paneState]) => [paneId, cloneRuntimeValue(paneState) as PaneRuntimeState]),
+    Object.entries(previous).map(([paneId, paneState]) => [paneId, clonePaneState(paneState)]),
   );
+}
+
+function shallowEqualRecords(left: Record<string, unknown>, right: Record<string, unknown>): boolean {
+  const leftKeys = Object.keys(left);
+  if (leftKeys.length !== Object.keys(right).length) return false;
+  return leftKeys.every((key) => Object.is(left[key], right[key]));
+}
+
+// Reconciling runs on every pane-state update for every pane in the layout.
+// A pane whose state object and defaults are unchanged gets the object it
+// got last time, so the clone behind it is paid once per state change.
+const reconciledPaneStates = new WeakMap<object, { defaults: PaneRuntimeState; result: PaneRuntimeState }>();
+const EMPTY_PANE_STATE: PaneRuntimeState = {};
+
+function reconcilePaneStateEntry(
+  config: AppConfig,
+  instance: LayoutConfig["instances"][number],
+  source: PaneRuntimeState,
+): PaneRuntimeState {
+  const defaults = defaultPaneStateForInstance(config, instance);
+  const cached = reconciledPaneStates.get(source);
+  const collectionId = (source.collectionId ?? defaults.collectionId) as string | undefined;
+  const resolvedCollectionId = instance.paneId === "portfolio-list"
+    && !isKnownCollection(config, collectionId)
+    && !shouldPreserveUnknownCollectionId(collectionId)
+    ? defaults.collectionId
+    : collectionId;
+  if (
+    cached
+    && shallowEqualRecords(cached.defaults, defaults)
+    && Object.is(cached.result.collectionId, resolvedCollectionId)
+  ) {
+    return cached.result;
+  }
+  // Nothing to add or fix: the live object is already the reconciled state.
+  // Handing it back keeps its identity, and with it every memo keyed on it.
+  const unchanged = Object.keys(defaults).every((key) => Object.prototype.hasOwnProperty.call(source, key))
+    && (instance.paneId !== "portfolio-list" || Object.is(source.collectionId, resolvedCollectionId));
+  if (unchanged) return source;
+  const result: PaneRuntimeState = { ...defaults, ...cloneRuntimeValue(source) };
+  if (instance.paneId === "portfolio-list") result.collectionId = resolvedCollectionId;
+  // Panes without state share one empty source; caching it would thrash
+  // between their different defaults for no saving.
+  if (source !== EMPTY_PANE_STATE) reconciledPaneStates.set(source, { defaults, result });
+  return result;
 }
 
 export function reconcilePaneState(
@@ -80,16 +183,7 @@ export function reconcilePaneState(
 ): Record<string, PaneRuntimeState> {
   const next: Record<string, PaneRuntimeState> = {};
   for (const instance of layout.instances) {
-    const defaults = defaultPaneStateForInstance(config, instance);
-    const paneState = { ...defaults, ...cloneRuntimeValue(previous[instance.instanceId] ?? {}) };
-    if (
-      instance.paneId === "portfolio-list"
-      && !isKnownCollection(config, paneState.collectionId as string | undefined)
-      && !shouldPreserveUnknownCollectionId(paneState.collectionId as string | undefined)
-    ) {
-      paneState.collectionId = defaults.collectionId;
-    }
-    next[instance.instanceId] = paneState;
+    next[instance.instanceId] = reconcilePaneStateEntry(config, instance, previous[instance.instanceId] ?? EMPTY_PANE_STATE);
   }
   return next;
 }
@@ -186,12 +280,27 @@ export function nextRecentTickers(current: string[], symbol: string | null): str
   return next;
 }
 
+const savedLayoutClones = new WeakMap<SavedLayout, SavedLayout>();
+const layoutClones = new WeakMap<LayoutConfig, LayoutConfig>();
+
+function cloneLayoutOnce(layout: LayoutConfig): LayoutConfig {
+  const cached = layoutClones.get(layout);
+  if (cached) return cached;
+  const clone = cloneLayout(layout);
+  layoutClones.set(layout, clone);
+  return clone;
+}
+
 export function cloneSavedLayout(entry: SavedLayout): SavedLayout {
-  return {
+  const cached = savedLayoutClones.get(entry);
+  if (cached) return cached;
+  const clone = {
     ...entry,
-    layout: cloneLayout(entry.layout),
+    layout: cloneLayoutOnce(entry.layout),
     paneState: entry.paneState ? clonePaneStateMap(entry.paneState) : entry.paneState,
   };
+  savedLayoutClones.set(entry, clone);
+  return clone;
 }
 
 function buildSavedLayoutSnapshot(
@@ -203,11 +312,37 @@ function buildSavedLayoutSnapshot(
 ): SavedLayout {
   return {
     ...(entry ?? { name: "Default" }),
-    layout: cloneLayout(layout),
+    layout: cloneLayoutOnce(layout),
     paneState: clonePaneStateMap(paneState),
     focusedPaneId,
     activePanel,
   };
+}
+
+const SAVED_LAYOUT_MIRROR_KEYS = new Set<keyof SavedLayout>(["paneState", "focusedPaneId", "activePanel"]);
+
+/**
+ * True when two saved-layout lists differ only in what the active layout
+ * mirrors from live state (pane state, focus). Structural edits, renames, or
+ * reordering make this false.
+ */
+export function savedLayoutsDifferOnlyInMirror(
+  previous: readonly SavedLayout[],
+  next: readonly SavedLayout[],
+): boolean {
+  if (previous.length !== next.length) return false;
+  for (let index = 0; index < next.length; index += 1) {
+    const before = previous[index]!;
+    const after = next[index]!;
+    if (before === after) continue;
+    const beforeKeys = Object.keys(before) as Array<keyof SavedLayout>;
+    if (beforeKeys.length !== Object.keys(after).length) return false;
+    for (const key of beforeKeys) {
+      if (SAVED_LAYOUT_MIRROR_KEYS.has(key)) continue;
+      if (!Object.is(before[key], after[key])) return false;
+    }
+  }
+  return true;
 }
 
 export function syncConfigActiveLayoutState(
@@ -231,11 +366,6 @@ export function syncConfigActiveLayoutState(
     layouts,
     activeLayoutIndex,
   };
-}
-
-export function getActiveSavedPaneState(config: AppConfig): Record<string, PaneRuntimeState> | null {
-  const paneState = config.layouts[config.activeLayoutIndex]?.paneState;
-  return paneState ? clonePaneStateMap(paneState) : null;
 }
 
 const PANEL_RESOLUTION_BOUNDS = { x: 0, y: 0, width: 120, height: 40 };

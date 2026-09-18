@@ -1,5 +1,7 @@
 # Research data conventions
 
+Historical-price table CSVs retain the selected listing, requested range, UTC date convention, loading or refresh-failure status, and active integrity warnings. Their numeric values use the provider history units. This table's history contract does not supply general currency or price-basis metadata; the export does not borrow those units from a current quote or a saved holding. Use a chart report when independently sourced listing metadata is needed.
+
 [User guide](usage.md) · [Price comparisons](price-comparisons.md) · [Economic statistics](economics-reference.md) · [Market valuation](valuation-reference.md)
 
 This reference describes how the terminal calculates and labels research data. Pane bodies show data, units, source dates and blocking failures; recurring methodology belongs here. Active data limitations appear as an amber warning indicator in the existing pane footer. Click it or press `!` in the focused pane to read the details; Escape or Close returns to the research view. The indicator disappears when its warnings clear. Headless reports and shared chart metadata retain source details and limitations.
@@ -30,9 +32,9 @@ Fund overview does not currently model expense ratios, NAV premiums or discounts
 
 Daily, weekly, and monthly comparisons use shared calendar dates, with each market retaining its source timestamps. Intraday comparisons require exact shared timestamps. Exchange closing times may differ; weekly and monthly bars can cover a partial period. See [comparison alignment and baselines](price-comparisons.md).
 
-Correlation and relationship views calculate close-to-close returns between shared observations. Missing dates are not filled to manufacture a sample. Returns use local prices without currency conversion; different exchanges can close at different times. Correlation requires enough shared returns and nonzero variance.
+Correlation and relationship views calculate close-to-close returns between shared observations. They request daily bars regardless of chart preset resolution and clip buffered history to the selected range. Missing dates are not filled to manufacture a sample. Returns use local prices without cash distributions or currency conversion; different exchanges can close at different times. Correlation requires enough shared returns and nonzero variance.
 
-Relationship graph controls stay in the footer: `t` cycles the time range, `p` cycles the rolling observation window, `c` toggles correlation, and `f` toggles the fit line. Each action is clickable and shows its current state. In narrow panes, `+` means enabled and `−` means disabled.
+Relationship graph controls stay in the footer: `t` cycles the time range, `p` cycles the rolling observation window, `c` toggles correlation, and `f` toggles the fit line. Each action is clickable and shows its current state. In both correlation views, `r` refreshes the selected histories. A failed refresh retains the last complete result with its original retrieval time behind the existing warning indicator; a new relationship pair or range cannot inherit that result. A rolling correlation requires the entire selected observation window and nonzero variance in that window; an older valid correlation does not replace a missing latest value. Headless results retain these limitations and the price-return basis. In narrow panes, `+` means enabled and `−` means disabled.
 
 Dated missing closing prices remain gaps through history caching and chart extraction, including responses with no usable prices. An alternate source can recover a gap at the same reported timestamp; unresolved dates remain gaps. Missing prices do not establish usable coverage or advance price freshness. An explicit finite zero or negative source price is retained as reported; individual calculations apply their own eligibility rules.
 
@@ -43,6 +45,14 @@ Chart controls: select ranges and intervals above the plot; click a legend entry
 ## Financial statements and valuation
 
 Statements are the latest available source snapshots and may include restatements. Historical as-of values are not reconstructed. A period end identifies the reporting period, not necessarily when every metric became public.
+
+Extended SEC history includes filed basic and diluted weighted-average share counts, distinct from shares outstanding at a point in time. Quarterly counts use reported quarters, not year-to-date averages. Counts requiring an unresolved or converted split basis are withheld from the SEC projection, as are issuer-wide denominators for ambiguous share-class listings; they are not inferred from EPS or multiplied by a split ratio.
+
+The SEC projection also carries cash, cash plus short-term investments, depreciation and amortization, long-term and current debt, and short-term borrowings. EBITDA is operating income plus D&A, not a normalized figure. Total debt adds the current leg to the noncurrent one, except when a filer only tags the bare `LongTermDebt` concept, which already includes current maturities; commercial paper is added only beside the narrower current-maturities concept, never beside `DebtCurrent`. Cash-flow style concepts (operating cash flow, capital expenditure, D&A) are filed year-to-date in 10-Qs, so consecutive spans sharing a fiscal-year start are differenced into discrete quarters: Q2 is six months minus Q1, Q4 is the full year minus nine months. A directly tagged quarter always wins, a differenced quarter becomes available with the later of its two filings, and a restatement between those filings lands in the residual quarter. Income statement fields are not differenced.
+
+Financial charts do not reconstruct missing Q4 EPS or weighted-average shares from annual and earlier-quarter values. Annual EPS is calculated independently, and weighted share counts depend on period lengths, share changes and dilution rules. Subtracting reported quarterly EPS or treating four quarters as equal weights can disagree with the issuer's Q4 disclosure. Reported Q4 values retain their own amounts and dates; missing per-share fields remain unavailable while other eligible flow and closing-balance fields can still be shown.
+
+Common-stockholder income is also kept as reported: annual participating-security allocations can differ from the sum of quarterly allocations, so annual-minus-quarter subtraction cannot establish a missing Q4 common-income amount. TTM sums four reported common-income amounts; it does not force that sum to equal the separately reported annual figure. Incomplete common-income coverage keeps the earnings-per-share fallback unavailable even when parent income is complete.
 
 Financial table headers retain reporting currencies and date-source markers: **P** means a provider period date, which may be approximate; **S** means a SEC-corroborated fiscal date. Filing evidence identifies the period without establishing a publication date for every metric. Mixed or missing reporting currencies are not silently converted.
 
@@ -64,15 +74,35 @@ Financial charts retain known reporting periods as gaps when a metric is missing
 
 SEC EPS uses corroborated split-adjusted share bases. Unverified bases are unavailable. Nonpositive P/E values display as **N/M** and are excluded from meaningful P/E rankings.
 
+### Forward P/E history
+
+No source serves the consensus as it stood on an arbitrary past day. The `forwardPE` chart field assembles its history from three legs, each named in the point's period label. At each earnings report date, the price is divided by the sum of the next four quarters' pre-report consensus (the estimate each quarter carried at its own report). This is a final-vintage next-twelve-months figure: later revisions are already in it, so it is not what analysts expected on that day. Once the cloud has observed a listing, its daily consensus observations continue the series: the current and next fiscal-year EPS blended by the fraction of the current year still ahead. Today's consensus, blended the same way against the live quote, is the Current point. The provider's own forward P/E is shown only when no estimate history exists. PEG remains a single provider snapshot.
+
+`realizedNtmPE` divides the same report-date prices by the EPS actually reported in the following four quarters. It ends four quarters before the latest report and is hindsight, kept apart from the forward series. Both fields require the estimate and price currencies to match, and an NTM sum at or below zero leaves a gap.
+
 Chart-derived P/E preserves finite reported diluted EPS, including zero. When it is absent or unusable, the fallback divides reported common-shareholder income by the first positive share count available: diluted average shares, basic average shares, ordinary shares, then issued shares. Aggregate net income is used only when common income is unavailable. This is a derived income-per-selected-share estimate, not reconstructed reported diluted EPS: the source may omit convertible-claim numerator adjustments or a compatible depositary-receipt basis. The app does not guess those adjustments or deduct preferred/minority claims a second time. Reported EPS and the financial-statement rows remain unchanged.
 
-TTM fallback income requires four complete quarters of one numerator field; partial common-income coverage withholds the fallback even if aggregate income is complete. Complete reported EPS still takes precedence. TTM average shares use the arithmetic mean of four reported quarterly averages, an approximation rather than a reconstructed daily weighted annual denominator; balance-sheet share counts remain period-end values. Availability follows the selected income and share fields, including every quarterly input used in a derived value.
+TTM fallback income requires four complete quarters of one numerator field; partial common-income coverage withholds the fallback even if aggregate income is complete. When quarters report weighted-average share counts, the fallback also needs one such share field across all four quarters: a missing Q4 denominator cannot become a year-end ordinary or issued-share snapshot. Those snapshots remain available for capitalization estimates. Complete reported EPS still takes precedence. TTM EPS sums four reported quarterly values, while TTM average shares use the arithmetic mean of four reported quarterly averages; these approximations do not reconstruct independently calculated annual EPS or a daily weighted annual denominator. Availability follows the selected income and share fields, including every quarterly input used in a derived value.
 
 Market capitalization can come from a financial snapshot when a current quote does not supply it. Its retrieval time is not its valuation date. Source and freshness details remain attached to the affected value; market-cap comparisons require a valid currency conversion.
 
 Relative Valuation excludes explicitly stale quote prices, changes, and quote market caps from comparisons. Its exports retain the original quote, source timestamp and stale status, and identify incomplete output. Separately reported fundamentals and fallback market caps retain their own source and retrieval time; these are not dated by the rejected quote.
 
 Bank capital metrics and REIT FFO/AFFO depend on source coverage. Operating cash flow is not a substitute for FFO/AFFO. Missing measures are available through the financial view’s warning indicator.
+
+Relative valuation retains stale fundamentals for inspection and marks them through the existing warning indicator, independently of quote freshness. Its CSV export includes quote observation time and fundamentals source, retrieval time, and stale status. Structured reports preserve the same provenance and report incomplete freshness until the source recovers. Retrieval time does not establish a ratio's valuation date.
+
+The current overview and peer table do not provide P/B, P/tangible book, CET1, or FFO/AFFO multiples. Financial-statement common equity and ordinary shares are dated balance-sheet inputs; weighted-average EPS shares belong to an earnings period and cannot replace period-end shares in a book-value calculation. A provider's tangible-book amount may differ from the bank's reported tangible common equity because of its adjustment policy. Compare issuer definitions and periods before combining these values. REIT GAAP P/E and generic cash-flow yield do not establish FFO/AFFO valuation or distribution coverage.
+
+Confirmed quarterly observations that conflict with issuer filings are withdrawn through caches, statement merges and chart completion. Structured reports retain the withdrawal identifiers; a corrected observation can restore the field. See [the source comparison and limits](data-quality/quarterly-statement-revisions.md).
+
+### SEC income attribution
+
+SEC `NetIncomeLoss` supplies parent-attributable net income. `ProfitLoss` is shown separately as **Income incl. NCI**, and `NetIncomeLossAvailableToCommonStockholdersBasic` supplies **Income Common**. These measures are not interchangeable. A period with SEC income coverage retains its concept, unit, accession, start/end dates and filing date per field in structured financial exports.
+
+Missing income concepts in those periods remain unavailable through provider/cache merges and derived fourth quarters. Consolidated income is not substituted for parent income. When common income is explicitly unavailable, parent income is not used to estimate earnings per common share or P/E; independently reported EPS remains usable. Income revisions use their own filing evidence, separately from other fields on the same row. Undated or generic vendor income does not establish an SEC attribution basis.
+
+This separation does not resolve cross-filing accounting revisions or justify annual-minus-quarter arithmetic for other fields. Latest source data can include restatements; historical publication-time vintages are not reconstructed.
 
 ## Insider filings
 
@@ -105,6 +135,8 @@ Use the existing Date footer action (`d`) to enter an as-of date, then Enter or 
 ## Portfolio analytics
 
 P&L for manual portfolios covers current holdings. Manual portfolios have no cash-flow performance history; reconcile corporate actions through **PF → Set position**. Distributions are not automatically credited.
+
+Enter the current quantity in **Shares** and the cost per share in **Avg Cost**, using the position's currency. Update quantity and cost yourself after splits or other corporate actions; these values are not automatically adjusted. **AP** can add a ticker to a portfolio without recording a position: leave Shares blank. **Set Portfolio Position** requires a quantity and cost.
 
 Broker contracts without a canonical contract ID use their supplied definition, including local symbol, security type, currency, venue, expiry, right, strike, multiplier and trading class. Changing that definition requires its own quotes and history; an older symbol-only cache cannot establish their identity. Broker resync preserves the supplied definition for each position. Older positions without that identity retain a broker route only when their stored declarations match uniquely; resync establishes missing ownership. Independent issuer fields can still use public-symbol enrichment.
 
@@ -162,6 +194,8 @@ Each series keeps its own observation date. A shared date appears in the footer 
 
 Responses must identify the requested FRED series and daily percentage OAS metadata. An incompatible refresh leaves a usable prior observation in place with its original date and the current failure status; it does not replace the series with another index or erase valid cached history.
 
+Credit charts check declared FRED coverage against the returned observations. If usable observations fall outside those dates, the coverage notice withholds the contradictory dates while preserving the observations and any source-declared retention limit. The first and last returned rows do not establish replacement coverage bounds because the request may include a limited window or calculation buffer.
+
 ## Single-name CDS
 
 CDS displays reported trade activity, with coupon and spread in basis points. Spread notation code 3 is decimal and code 4 is already basis points; explicit percentage notation is converted once. Unlabelled values are assumed decimal for compatibility with the legacy feed. Monetary notation (code 1) and unknown explicit units leave the bp spread unavailable. Trade-level headless rows retain the source spread and notation. Coupon and upfront amounts never establish an unreported spread.
@@ -192,6 +226,8 @@ Consensus estimates are forecasts for the stated fiscal period. The provider's p
 
 Split-feed factors may include spinoff price adjustments. Merger terms, spinoff distributions, and security conversions are not covered. Source failures and unavailable event data remain visible rather than appearing as an empty event calendar.
 
+IPO offering prices are distinct from exchange trades. The Cloud CRCL US history captured on September 16, 2026 inserted the [June 4, 2025 $31 offering](https://www.circle.com/pressroom/circle-announces-pricing-of-upsized-initial-public-offering) before NYSE trading began June 5, carried that open/low into its inception aggregates, and inserted the offer into the first trading day’s intraday bars before the opening auction. Requests containing that exact source defect use another available history provider or remain unavailable; the app does not remove the first bar and silently shorten the window or invent replacement OHLC. A corrected source response is accepted. Valid zero-volume observations, other listings, and partial inception buckets with traded prices remain unchanged. Older embedded financial snapshots lose the affected price history while their statements and quotes remain available. Their fixed-horizon returns become unavailable; that snapshot contract does not retain a separate history-rejection reason. Direct history/chart requests retain the source failure when no valid fallback is available. This targeted check does not establish complete IPO or corporate-action coverage.
+
 ## Earnings estimate comparisons
 
 ERN groups and displays announcement dates on the same UTC calendar day. Exact call times, when supplied without a market-session label, use your local time. EPS 30D is the current estimate minus the estimate from thirty days earlier; a seven-day observation cannot fill a missing thirty-day value. REV 30D shows upward/downward revision counts over that same thirty-day window. An unknown count remains unavailable rather than becoming zero, and a directional color requires both counts. The CLI retains separately named seven-day and thirty-day source fields.
@@ -202,7 +238,7 @@ Calendar fallback values keep their own unknown currency and fiscal period. Tren
 
 ## AI research context
 
-Ask AI and ticker attachments in the AI workspace use the available quote, summary fundamentals, and latest annual statement. Monetary amounts retain their original values and explicit source currency, including minor units such as GBp. The configured base currency is a preference; these inputs are not converted. Listing, summary, and statement currencies remain independent, and unknown units remain unknown. Zero values and numeric precision are preserved; margins, yields, and returns from fundamentals are identified as fractions.
+Ask AI and ticker attachments in the AI workspace come from the [BYOK AI plugin](https://github.com/gloom-sh/gloom-byok-ai) and use the available quote, summary fundamentals, and latest annual statement. Monetary amounts retain their original values and explicit source currency, including minor units such as GBp. The configured base currency is a preference; these inputs are not converted. Listing, summary, and statement currencies remain independent, and unknown units remain unknown. Zero values and numeric precision are preserved; margins, yields, and returns from fundamentals are identified as fractions.
 
 The context includes available source, observation, retrieval, stale-state, and statement-history failure information. Retrieval time does not establish a valuation date. Annual period identity, whole-row availability, and individual field availability remain distinct. This attachment is a snapshot of those inputs, not a complete filing or a guarantee that a provider's data is current.
 
@@ -236,7 +272,7 @@ Analyst price targets retain their declared denomination. A missing denomination
 
 The analyst recommendation summary selects an explicitly current-month row when provided, otherwise preserving the source's first row and period label. A complete analyst count requires all five reported nonnegative integer buckets. Missing categories and unavailable totals remain unknown, while reported zero counts remain zero. The combined sell count requires both sell buckets. Relative periods remain relative; the app does not invent a dated consensus snapshot. Headless analyst research resolves the same remembered venue as ticker-bound research before loading a symbol.
 
-Yahoo keeps an explicitly dated but unavailable metric in its reporting period. A null, omitted, or nonfinite value does not promote an older observation to the latest period, and does not become zero. Malformed or impossible calendar dates are excluded from dated Yahoo statements and latest-metric selection. Values in different source metric series are selected independently; this does not establish common publication dates or a complete current filing.
+Yahoo keeps an explicitly dated but unavailable metric in its reporting period. A null, omitted, or nonfinite value does not promote an older observation to the latest period, and does not become zero. Malformed or impossible calendar dates are excluded from dated Yahoo statements and latest-metric selection. Annual summary values and margins use one latest annual reporting row, including when an individual metric wholly omits that period. Older values remain in their dated history. Trailing provider measures retain their own source observations; this does not establish common publication dates or a complete current filing.
 
 ## Financial growth display
 
@@ -247,3 +283,5 @@ Financial tables abbreviate large growth percentages (for example, `+163k%`) so 
 `EXEC` reads compensation from covered annual DEF 14A proxy statements. The year selector identifies the proxy filing year; the statement separately identifies the fiscal year of compensation. Stock and option awards use the filing’s grant-date valuation, which is not the amount eventually realized. Open the source filing through the existing footer action (`o`). No covered proxy means this view has no compensation data for that company; it does not establish that the company pays no executives.
 
 Refresh (`r`) reloads the covered years and selected statement. A temporary failure retains available data; the footer warning gives the failed request and original retrieval time. Missing or denied statements are cleared. A successful refresh removes the warning without changing the filing’s reported dates.
+
+13F research rechecks stale source responses when opened. If both hosted and public reads fail, retained cached rows carry the original retrieval time in the existing warning disclosure; filing and reporting dates are unchanged. A failed refresh is retried on reopening, even inside the normal cache lifetime. Filing reports preserve these warnings in their structured output.

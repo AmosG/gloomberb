@@ -197,13 +197,20 @@ export function financialStatementLimitations(financials: TickerFinancials | nul
     const value = (record as Record<string, unknown> | undefined)?.[key];
     return typeof value === "number" && Number.isFinite(value);
   }));
+  const limitations: string[] = [];
+  if ([...(financials?.annualStatements ?? []), ...(financials?.quarterlyStatements ?? [])].some(row => row.withdrawnObservations?.length)) {
+    limitations.push("Some quarterly values conflict with issuer filings and are unavailable.");
+  }
+  if ([...(financials?.annualStatements ?? []), ...(financials?.quarterlyStatements ?? [])].some(row => row.unavailableFields?.includes("netIncome"))) {
+    limitations.push("Parent net income is unavailable for some reported periods.");
+  }
   if (/\breit\b/i.test(industry) && !hasMetric(["fundsFromOperations", "adjustedFundsFromOperations", "ffo", "affo"])) {
-    return ["FFO/AFFO are unavailable."];
+    limitations.push("FFO/AFFO are unavailable.");
   }
   if (/\bbanks?\b/i.test(industry) && !hasMetric(["commonEquityTier1Ratio", "cet1Ratio", "riskWeightedAssets"])) {
-    return ["Bank capital measures, including CET1 and risk-weighted assets, are unavailable."];
+    limitations.push("Bank capital measures, including CET1 and risk-weighted assets, are unavailable.");
   }
-  return [];
+  return limitations;
 }
 
 export function resolveFinancialPeriod(

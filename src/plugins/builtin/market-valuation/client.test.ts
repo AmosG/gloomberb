@@ -6,14 +6,14 @@ import { BUFFETT_INDICATOR, INDICATORS, EXCESS_CAPE_YIELD, SHILLER_CAPE, TOBINS_
 import type { DatedObservation, DatedSeries } from "./series";
 import { buildValuationSeries } from "./align";
 import { resolveValuationSeries } from "./chart-series";
-import { createCloudSourceDeps, createSourceLoader, shillerObservations } from "./sources";
+import { createCloudSourceDeps, createSourceLoader, shillerObservations, sumFredSeries } from "./sources";
 
 function obs(values: Array<[string, number]>): DatedObservation[] {
   return values.map(([date, value]) => ({ date, value }));
 }
 
 const LEGS: Record<string, DatedObservation[]> = {
-  W5000: obs([["2024-01-02", 40_000], ["2025-01-02", 45_000]]),
+  Z1_CORPORATE_EQUITIES: obs([["2024-01-01", 40_000_000], ["2025-01-01", 45_500_000]]),
   GDP: obs([["2024-01-01", 25_000], ["2025-01-01", 26_000]]),
   M2SL: obs([["2024-01-01", 20_000], ["2025-01-01", 21_000]]),
   NCBEILQ027S: obs([["2024-01-01", 60_000_000], ["2025-01-01", 64_000_000]]),
@@ -43,29 +43,27 @@ describe("requiredSeries", () => {
   test("fetches a leg shared by two indicators only once", () => {
     const keys = requiredSeries([TOBINS_Q, TOBINS_Q, BUFFETT_INDICATOR]).map((def) => def.key);
     expect(keys.filter((key) => key === "NCBEILQ027S")).toHaveLength(1);
-    expect(keys).not.toContain("W5000");
+    expect(keys).toContain("Z1_CORPORATE_EQUITIES");
     expect(new Set(keys).size).toBe(keys.length);
   });
 });
 
 describe("loadValuationBundle", () => {
-  test("does not fetch or compute unsupported monetary inputs, leaving six independent measures", async () => {
+  test("builds every indicator, with the three market-cap ratios sharing the Z.1 equities numerator", async () => {
     const requested: string[] = [];
     const bundle = await loadValuationBundle({ loader: async (def) => {
       requested.push(def.key);
       return everyLeg(def);
     } });
-    expect(requested).not.toContain("W5000");
-    expect(requested).not.toContain("CPROFIT");
-    expect(requested).not.toContain("M2SL");
-    expect(bundle.builds.map((build) => build.indicator.id)).toEqual([
-      "shiller-cape", "excess-cape-yield", "tobins-q", "household-equity-allocation",
-      "sp500-dividend-yield", "margin-debt-gdp",
-    ]);
+    expect(requested.filter((key) => key === "Z1_CORPORATE_EQUITIES")).toHaveLength(1);
+    expect(bundle.builds.map((build) => build.indicator.id)).toEqual(INDICATORS.map((indicator) => indicator.id));
     expect(bundle.builds.find((build) => build.indicator.id === "shiller-cape")!.series.points.at(-1)!.ratio).toBe(38.1);
     expect(bundle.builds.find((build) => build.indicator.id === "tobins-q")!.series.points.at(-1)!.ratio).toBeCloseTo(64 / 41);
-    expect(bundle.errors).toHaveLength(3);
-    expect(bundle.errors.every((error) => error.includes("index points"))).toBe(true);
+    // 45.5T of equities against 26.0T of GDP, both in billions after scaling.
+    expect(bundle.builds.find((build) => build.indicator.id === "buffett")!.series.points.at(-1)).toMatchObject({
+      ratio: 175, numeratorBillions: 45_500, denominatorBillions: 26_000,
+    });
+    expect(bundle.errors).toHaveLength(0);
   });
 
   test("one broken leg only drops the indicators that need it", async () => {
@@ -114,19 +112,32 @@ describe("createSourceLoader", () => {
     expect(loaded.every((entry) => entry.observations.length === 1)).toBe(true);
   });
 
-  test("routes each source kind to its own transport", async () => {
+  test("routes each source kind to its own transport and sums the Z.1 legs on shared dates", async () => {
     const seen: string[] = [];
     const loader = createSourceLoader({
-      loadFred: async (seriesId) => { seen.push(`fred:${seriesId}`); return obs([["2024-01-01", 1]]); },
+      loadFred: async (seriesId) => {
+        seen.push(`fred:${seriesId}`);
+        return seriesId === "FBCELLQ027S"
+          ? { observations: obs([["2024-01-01", 10], ["2025-01-01", 12]]), provider: { fetchedAt: "2026-09-10T00:00:00Z", stale: true } }
+          : { observations: obs([["2024-01-01", 30], ["2025-01-01", 32], ["2025-04-01", 33]]), provider: { fetchedAt: "2026-09-12T00:00:00Z", stale: false } };
+      },
       loadMarketHistory: async (symbol) => { seen.push(`history:${symbol}`); return obs([["2024-01-01", 1]]); },
       loadShiller: async () => { throw new Error("not needed"); },
     });
     if (BUFFETT_INDICATOR.input.kind !== "ratio") throw new Error("expected a ratio");
-    await loader(BUFFETT_INDICATOR.input.numerator);
+    const equities = await loader(BUFFETT_INDICATOR.input.numerator);
     await loader(BUFFETT_INDICATOR.input.denominator);
     if (TOBINS_Q.input.kind !== "ratio") throw new Error("expected a ratio");
     await loader(TOBINS_Q.input.numerator);
-    expect(seen).toEqual(["history:^W5000", "fred:GDP", "fred:NCBEILQ027S"]);
+    expect(seen).toEqual(["fred:NCBEILQ027S", "fred:FBCELLQ027S", "fred:GDP", "fred:NCBEILQ027S"]);
+    // The quarter only one leg has released is not an observation of the sum.
+    expect(equities.observations).toEqual(obs([["2024-01-01", 40], ["2025-01-01", 44]]));
+    expect(equities.provider).toEqual({ fetchedAt: "2026-09-10T00:00:00Z", stale: true });
+    expect(equities.provenance).toBe("fred");
+  });
+
+  test("a sum with no shared dates is an error, not an empty series", () => {
+    expect(() => sumFredSeries([obs([["2024-01-01", 1]]), obs([["2025-01-01", 1]])])).toThrow("share no observation dates");
   });
 });
 
@@ -156,27 +167,20 @@ describe("shillerObservations", () => {
 
 
 describe("market-capitalization source basis", () => {
-  test("legacy persisted index closes cannot revive any of the three monetary ratios", async () => {
+  test("a legacy persisted index-points cache cannot feed the monetary ratios; the Z.1 sum does", async () => {
+    await loadCachedSeries("W5000", async () => obs([["2024-01-02", 40_000], ["2025-01-02", 45_000]]));
     await Promise.all(Object.entries(LEGS).map(([key, observations]) => loadCachedSeries(key, async () => observations)));
     const cached = getCachedValuationBundle()!;
-    expect(cached.builds).toHaveLength(6);
-    expect(cached.errors).toHaveLength(3);
+    expect(cached.builds).toHaveLength(INDICATORS.length);
+    expect(cached.errors).toHaveLength(0);
+    expect(cached.sources.W5000).toBeUndefined();
     const legs = new Map(Object.entries(LEGS).map(([seriesId, observations]) => [seriesId, { seriesId, observations, provenance: "fred" as const }]));
     for (const id of ["buffett", "market-cap-profits", "market-cap-m2"]) {
       const indicator = INDICATORS.find((entry) => entry.id === id)!;
-      expect(() => buildValuationSeries(indicator, legs)).toThrow("index points");
-      await expect(loadValuationBundle({ loader: everyLeg, indicators: [indicator] })).rejects.toThrow("dollar market capitalization");
-      let calls = 0;
-      await expect(resolveValuationSeries(id, async (def) => { calls += 1; return everyLeg(def); })).rejects.toThrow("index points");
-      expect(calls).toBe(0);
+      expect(buildValuationSeries(indicator, legs).points.at(-1)!.numeratorBillions).toBe(45_500);
+      const chart = await resolveValuationSeries(id, everyLeg);
+      expect(chart.points.at(-1)!.value).toBeGreaterThan(0);
     }
-    const loader = createValuationSeriesLoader({
-      loadFred: async () => { throw new Error("unexpected transport"); },
-      loadMarketHistory: async () => { throw new Error("unexpected transport"); },
-      loadShiller: async () => { throw new Error("unexpected transport"); },
-    });
-    if (BUFFETT_INDICATOR.input.kind !== "ratio") throw new Error("ratio expected");
-    await expect(loader(BUFFETT_INDICATOR.input.numerator)).rejects.toThrow("index points");
     const cape = await resolveValuationSeries("shiller-cape", everyLeg);
     expect(cape.points.at(-1)!.value).toBe(38.1);
     const allocation = await resolveValuationSeries("household-equity-allocation", everyLeg);

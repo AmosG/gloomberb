@@ -46,6 +46,12 @@ export interface TickerListTableViewProps {
   tickers: TickerRecord[];
   cursorSymbol: string | null;
   setCursorSymbol: (symbol: string) => void;
+  /**
+   * Fires on every cursor move, before the debounced selection commit. Use it
+   * for work that should track the cursor rather than the selection, such as
+   * warming the rows the cursor is about to land on.
+   */
+  onCursorChange?: (ticker: TickerRecord, index: number) => void;
   resolveCell: ResolveTickerTableCell;
   financialsMap: Map<string, TickerFinancials>;
   focused?: boolean;
@@ -128,6 +134,7 @@ export function TickerListTableView({
   tickers,
   cursorSymbol,
   setCursorSymbol,
+  onCursorChange,
   resolveCell,
   financialsMap,
   flashSymbols,
@@ -259,6 +266,7 @@ export function TickerListTableView({
           setCursorSymbol(symbol);
         },
       }}
+      onCursorChange={onCursorChange}
       onActivate={(ticker) => {
         onRowActivate?.(ticker);
       }}

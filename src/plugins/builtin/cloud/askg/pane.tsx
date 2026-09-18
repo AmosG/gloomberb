@@ -33,6 +33,7 @@ import { useShortcut } from "../../../../react/input";
 import {
   useAppDispatch,
   useAppSelector,
+  usePaneAppConfig,
 } from "../../../../state/app/context";
 import { useInlineTickers } from "../../../../state/hooks/inline-tickers";
 import { useRemoteControlHandler } from "../../../../remote/app-host";
@@ -408,7 +409,7 @@ export function ASKGPane({ paneId, focused, width, height }: PaneProps) {
   const dispatch = useAppDispatch();
   const planAccess = usePlanAccess();
   const remoteHandler = useRemoteControlHandler();
-  const config = useAppSelector((state) => state.config);
+  const config = usePaneAppConfig();
   const activeSymbol = useAppSelector((state) => state.recentTickers[0] ?? null);
   const { pinTicker } = usePluginTickerActions();
   const { createPaneFromTemplate, showPane, openCommandBar } = usePluginAppActions();

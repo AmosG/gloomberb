@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { PaneStatusBody, usePaneFooter } from "../../../../components";
+import { PaneStatusBody, usePaneFooter, usePaneNoticeFooter } from "../../../../components";
 import { resolveChartPalette } from "../../../../components/chart/core/palette";
 import { StaticMultiLineChartSurface, StaticScatterChartSurface } from "../../../../components/chart/static";
 import { useShortcut, type KeyEventLike } from "../../../../react/input";
@@ -41,11 +41,11 @@ export {
   buildRelationshipGraphSettingsDef
 } from "./model";
 
-type RelationshipGraphShortcut = "range" | "window" | "correlation" | "regression";
+type RelationshipGraphShortcut = "range" | "window" | "correlation" | "regression" | "refresh";
 
 /**
  * Keys are the first letter of their hint label: [t]ime range, [p]eriod, [c]orr,
- * [f]it line. `r` stays reserved for the app-wide refresh.
+ * [f]it line. `r` refreshes this pair's history.
  */
 export function resolveRelationshipGraphShortcut(
   event: Pick<KeyEventLike, "name" | "key" | "ctrl" | "shift" | "alt" | "meta" | "super">,
@@ -53,6 +53,8 @@ export function resolveRelationshipGraphShortcut(
   if (event.ctrl || event.shift || event.alt || event.meta || event.super) return null;
 
   switch ((event.name ?? event.key ?? "").toLowerCase()) {
+    case "r":
+      return "refresh";
     case "t":
       return "range";
     case "p":
@@ -78,7 +80,7 @@ export function RelationshipGraphPane({ focused, width, height }: PaneProps) {
   const [showCorrelation, setShowCorrelation] = usePluginPaneState<boolean>("showCorrelation", true);
   const [showRegression, setShowRegression] = usePluginPaneState<boolean>("showRegression", true);
   const [cursorDateMs, setCursorDateMs] = useState<number | null>(null);
-  const { data, loading, error } = useRelationshipHistories(pair, range, exchange);
+  const { data, loading, error, reload, updatedAt } = useRelationshipHistories(pair, range, exchange);
   const left = data?.[0] ?? null;
   const right = data?.[1] ?? null;
   const analysis = useMemo(() => (
@@ -194,6 +196,11 @@ export function RelationshipGraphPane({ focused, width, height }: PaneProps) {
   useShortcut((event) => {
     if (!focused) return;
     switch (resolveRelationshipGraphShortcut(event)) {
+      case "refresh":
+        event.preventDefault();
+        event.stopPropagation();
+        void reload();
+        return;
       case "range":
         event.preventDefault();
         event.stopPropagation();
@@ -217,19 +224,25 @@ export function RelationshipGraphPane({ focused, width, height }: PaneProps) {
     }
   });
 
+  usePaneNoticeFooter({
+    registrationId: "relationship-warnings", focused,
+    notices: [
+      ...(error ? [`${error}${data && updatedAt ? ` Retained history retrieved ${new Date(updatedAt).toISOString()}.` : ""}`] : []),
+      ...(analysis?.unavailableReason ? [analysis.unavailableReason] : []),
+      ...(analysis?.correlationUnavailableReason ? [analysis.correlationUnavailableReason] : []),
+    ],
+  });
+
   usePaneFooter("relationship-graph", () => ({
-    info: error
-      ? [{ id: "error", parts: [{ text: error, tone: "warning" as const }] }]
-      : loading
+    info: loading
         ? [{ id: "loading", parts: [{ text: "loading", tone: "muted" as const }] }]
-        : analysis && !analysis.unavailableReason && analysis.returns.length < correlationWindow
-          ? [{ id: "correlation-history", parts: [{ text: `Correlation needs ${correlationWindow} shared returns; ${analysis.returns.length} available`, tone: "warning" as const }] }]
-          : [{ id: "summary", parts: [{ text: footerSummary, tone: "muted" as const }] }],
+        : [{ id: "summary", parts: [{ text: footerSummary, tone: "muted" as const }] }],
     hints: [
       { id: "range", key: "t", label: width < 80 ? range : `ime ${range}`, onPress: cycleRange },
       { id: "window", key: "p", label: width < 80 ? `${correlationWindow}obs` : `eriod ${correlationWindow} obs`, onPress: cycleWindow },
       { id: "correlation", key: "c", label: width < 60 ? `orr${showCorrelation ? "+" : "−"}` : `orr ${showCorrelation ? "on" : "off"}`, onPress: toggleCorrelation },
       { id: "regression", key: "f", label: width < 60 ? `it${showRegression ? "+" : "−"}` : `it ${showRegression ? "on" : "off"}`, onPress: toggleRegression },
+      { id: "refresh", key: "r", label: "efresh", onPress: () => { void reload(); } },
     ],
   }), [
     cycleRange,
@@ -245,6 +258,7 @@ export function RelationshipGraphPane({ focused, width, height }: PaneProps) {
     width,
     toggleCorrelation,
     toggleRegression,
+    reload,
   ]);
 
   if (!pair) {

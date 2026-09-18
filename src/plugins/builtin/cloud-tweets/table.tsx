@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Box, ScrollBox, Text, TextAttributes } from "../../../ui";
+import { Box, ScrollBox, Text, TextAttributes, type ScrollBoxRenderable } from "../../../ui";
 import {
   DataTableStackView,
   PaneStatusBody,
   TickerBadgeList,
+  useTableLoadMore,
   type DataTableCell,
   type DataTableKeyEvent,
   type DataTableRootKeyContext,
@@ -18,6 +19,7 @@ import { colors } from "../../../theme/colors";
 import { SignInWall } from "../cloud/auth-actions";
 import { isPlainArrowUp, stopSearchFocusNavigation } from "../../../utils/search-focus-navigation";
 import {
+  appendNewTweets,
   buildTweetColumns,
   formatMetric,
   formatRelativeShort,
@@ -44,14 +46,14 @@ function isAuthError(error: string | null): boolean {
 // identical search. Cached per request key for the life of the process; `r`
 // still forces a fresh search.
 // ponytail: in-memory only, move to plugin state if results must survive restarts
-const TWEET_RESULT_CACHE = new Map<string, { data: CloudTweetSearchResponse; fetchedAt: number }>();
+const TWEET_RESULT_CACHE = new Map<string, { data: CloudTweetSearchResponse; fetchedAt: number; hasMore: boolean }>();
 const TWEET_CACHE_TTL_MS = 5 * 60 * 1000;
 // Every edited query is its own key, so the map is capped instead of growing
 // with each keystroke-sized search.
 const TWEET_CACHE_MAX_ENTRIES = 20;
 
-function cacheTweetResult(requestKey: string, data: CloudTweetSearchResponse): void {
-  TWEET_RESULT_CACHE.set(requestKey, { data, fetchedAt: Date.now() });
+function cacheTweetResult(requestKey: string, data: CloudTweetSearchResponse, hasMore: boolean): void {
+  TWEET_RESULT_CACHE.set(requestKey, { data, fetchedAt: Date.now(), hasMore });
   while (TWEET_RESULT_CACHE.size > TWEET_CACHE_MAX_ENTRIES) {
     const oldest = TWEET_RESULT_CACHE.keys().next().value;
     if (oldest === undefined) break;
@@ -59,7 +61,7 @@ function cacheTweetResult(requestKey: string, data: CloudTweetSearchResponse): v
   }
 }
 
-function cachedTweetResult(requestKey: string): { data: CloudTweetSearchResponse; fetchedAt: number } | undefined {
+function cachedTweetResult(requestKey: string) {
   return TWEET_RESULT_CACHE.get(requestKey);
 }
 
@@ -116,7 +118,7 @@ function TweetDetail({
 
 function useTweetSearchData(
   requestKey: string,
-  load: () => Promise<CloudTweetSearchResponse>,
+  load: (offset: number) => Promise<CloudTweetSearchResponse>,
   onResult?: (result: CloudTweetSearchResponse) => void,
   onError?: (message: string) => void,
   enabled = true,
@@ -129,9 +131,13 @@ function useTweetSearchData(
       data: cached?.data ?? null,
       loading: enabled && !cached,
       error: null,
+      loadingMore: false,
+      hasMore: cached?.hasMore ?? false,
     };
   });
   const fetchGenRef = useRef(0);
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const onResultRef = useRef(onResult);
   const onErrorRef = useRef(onError);
   onResultRef.current = onResult;
@@ -142,7 +148,7 @@ function useTweetSearchData(
       fetchGenRef.current += 1;
       setState((current) => (
         current.data || current.loading || current.error
-          ? { data: null, loading: false, error: null }
+          ? { data: null, loading: false, error: null, loadingMore: false, hasMore: false }
           : current
       ));
       return;
@@ -152,23 +158,60 @@ function useTweetSearchData(
     const gen = fetchGenRef.current;
     const cached = force ? undefined : cachedTweetResult(requestKey);
     const fresh = cached && Date.now() - cached.fetchedAt < TWEET_CACHE_TTL_MS;
-    if (cached) setState({ data: cached.data, loading: !fresh, error: null });
+    if (cached) {
+      setState({ data: cached.data, loading: !fresh, error: null, loadingMore: false, hasMore: cached.hasMore });
+    }
     if (fresh) return;
     // A forced reload keeps the rows on screen; a new request key must not show
     // the previous feed's tweets while its own search runs.
-    if (!cached) setState((current) => ({ data: force ? current.data : null, loading: true, error: null }));
-    load()
+    if (!cached) {
+      setState((current) => ({
+        data: force ? current.data : null, loading: true, error: null, loadingMore: false, hasMore: false,
+      }));
+    }
+    load(0)
       .then((data) => {
-        cacheTweetResult(requestKey, data);
+        const hasMore = data.hasMore === true;
+        cacheTweetResult(requestKey, data, hasMore);
         if (fetchGenRef.current !== gen) return;
-        setState({ data, loading: false, error: null });
+        setState({ data, loading: false, error: null, loadingMore: false, hasMore });
         onResultRef.current?.(data);
       })
       .catch((error) => {
         if (fetchGenRef.current !== gen) return;
         const message = error instanceof Error ? error.message : String(error);
-        setState({ data: null, loading: false, error: message });
+        setState({ data: null, loading: false, error: message, loadingMore: false, hasMore: false });
         onErrorRef.current?.(message);
+      });
+  }, [enabled, load, requestKey]);
+
+  // Reading to the end of a feed asks for the tweets below it. The window the
+  // server keeps is deeper than one page, and older ones are fetched on demand.
+  const loadMore = useCallback(() => {
+    const current = stateRef.current;
+    if (!enabled || current.loading || current.loadingMore || !current.hasMore || !current.data) return;
+    const gen = fetchGenRef.current;
+    const offset = current.data.tweets.length;
+    setState((value) => ({ ...value, loadingMore: true }));
+    load(offset)
+      .then((page) => {
+        if (fetchGenRef.current !== gen) return;
+        setState((value) => {
+          if (!value.data) return { ...value, loadingMore: false };
+          const tweets = appendNewTweets(value.data.tweets, page.tweets);
+          // A server without paging answers the same page again. Repeating it
+          // is the end of the feed, not a reason to keep asking.
+          const hasMore = page.hasMore === true && tweets.length > value.data.tweets.length;
+          const data = { ...value.data, tweets };
+          cacheTweetResult(requestKey, data, hasMore);
+          return { ...value, data, loadingMore: false, hasMore };
+        });
+      })
+      .catch(() => {
+        if (fetchGenRef.current !== gen) return;
+        // The tweets already on screen are still the answer; a failed page just
+        // ends the feed rather than replacing it with an error.
+        setState((value) => ({ ...value, loadingMore: false, hasMore: false }));
       });
   }, [enabled, load, requestKey]);
 
@@ -176,7 +219,7 @@ function useTweetSearchData(
     reload();
   }, [reload, requestKey]);
 
-  return { ...state, reload };
+  return { ...state, reload, loadMore };
 }
 
 export function TweetSearchTable({
@@ -201,7 +244,7 @@ export function TweetSearchTable({
   footerId: string;
   rootBefore?: ReactNode;
   enabled?: boolean;
-  load: () => Promise<CloudTweetSearchResponse>;
+  load: (offset: number) => Promise<CloudTweetSearchResponse>;
   onResult?: (result: CloudTweetSearchResponse) => void;
   onError?: (message: string) => void;
   onFocusSearch?: () => void;
@@ -209,7 +252,9 @@ export function TweetSearchTable({
   emptyStateHint?: string;
 }) {
   const { createPaneFromTemplate } = usePluginAppActions();
-  const { data, loading, error, reload } = useTweetSearchData(requestKey, load, onResult, onError, enabled);
+  const { data, loading, error, loadingMore, hasMore, reload, loadMore } = useTweetSearchData(requestKey, load, onResult, onError, enabled);
+  const scrollRef = useRef<ScrollBoxRenderable | null>(null);
+  const onBodyScrollActivity = useTableLoadMore(scrollRef, hasMore && !loadingMore, loadMore);
   const [selectedTweetId, setSelectedTweetId] = useState<string | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [sort, setSort] = useState<{ columnId: TweetSortColumnId; direction: TweetSortDirection }>({
@@ -228,7 +273,7 @@ export function TweetSearchTable({
     source: detailOpen && selectedTweet
       ? `@${selectedTweet.author.userName || selectedTweet.author.name}`
       : null,
-    loading,
+    loading: loading || loadingMore,
     error,
   });
 
@@ -316,7 +361,6 @@ export function TweetSearchTable({
               symbols={tickers}
               width={column.width}
               fallbackColor={selectedColor ?? colors.positive}
-              liveQuote={false}
             />
           ),
           color: selectedColor ?? colors.positive,
@@ -363,6 +407,8 @@ export function TweetSearchTable({
       }}
       onRootKeyDown={handleRootKeyDown}
       onDetailKeyDown={handleDetailKeyDown}
+      scrollRef={scrollRef}
+      onBodyScrollActivity={onBodyScrollActivity}
       rootBefore={rootBefore}
       rootWidth={width}
       rootHeight={height}

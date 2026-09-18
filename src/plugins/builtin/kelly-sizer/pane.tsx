@@ -20,6 +20,7 @@ import {
   useAppSelector,
   usePaneInstance,
   usePaneStateValue,
+  usePaneAppConfig,
 } from "../../../state/app/context";
 import { selectCommandBarOpen } from "../../../state/selectors-ui";
 import { usePortfolioAccountState } from "../portfolio-list/header";
@@ -68,7 +69,7 @@ import { useKellyCommonAssumptions } from "./state";
 export function KellySizerPane({ focused, width, height }: PaneProps) {
   const paneInstance = usePaneInstance();
   const dispatch = useAppDispatch();
-  const config = useAppSelector((state) => state.config);
+  const config = usePaneAppConfig();
   const activeCollectionId = useAppSelector((state) => getFocusedCollectionId(state));
   const focusedSymbol = useAppSelector((state) => getFocusedTickerSymbol(state));
   const [symbolOverride, setSymbolOverride] = usePaneStateValue<string | null>("symbol", null);

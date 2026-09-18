@@ -5,6 +5,31 @@ import { canonicalExchange, resolveExchangeTimeZone } from "../../utils/exchange
 
 const dateFormatters = new Map<string, Intl.DateTimeFormat>();
 
+// Intl.DateTimeFormat.format costs about 15us and every quote merge asks for
+// the incoming and the retained quote's date, so the retained one repeats on
+// each tick. Keyed by minute: a session boundary falls on a whole minute, and
+// the cache stays small across a day of streaming.
+const ZONE_DATE_CACHE_LIMIT = 4096;
+const zoneDateCache = new Map<string, string>();
+
+function zoneDate(zone: string, timestamp: number): string | null {
+  const minute = Math.floor(timestamp / 60_000);
+  const key = `${zone}:${minute}`;
+  const cached = zoneDateCache.get(key);
+  if (cached !== undefined) return cached;
+  const observedAt = new Date(minute * 60_000);
+  if (!Number.isFinite(observedAt.getTime())) return null;
+  let formatter = dateFormatters.get(zone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" });
+    dateFormatters.set(zone, formatter);
+  }
+  const date = formatter.format(observedAt);
+  if (zoneDateCache.size >= ZONE_DATE_CACHE_LIMIT) zoneDateCache.clear();
+  zoneDateCache.set(key, date);
+  return date;
+}
+
 function sessionDate(quote: Quote): string | null {
   const declared = quote.changeSessionDate;
   const declaredTime = typeof declared === "string" && /^\d{4}-\d{2}-\d{2}$/.test(declared)
@@ -15,14 +40,8 @@ function sessionDate(quote: Quote): string | null {
   const zone = resolveExchangeTimeZone(quote.listingExchangeName ?? quote.exchangeName);
   if (!zone) return declaredDate;
   if (!Number.isFinite(quote.lastUpdated) || quote.lastUpdated <= 0) return null;
-  const observedAt = new Date(quote.lastUpdated);
-  if (!Number.isFinite(observedAt.getTime())) return null;
-  let formatter = dateFormatters.get(zone);
-  if (!formatter) {
-    formatter = new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" });
-    dateFormatters.set(zone, formatter);
-  }
-  const observedDate = formatter.format(observedAt);
+  const observedDate = zoneDate(zone, quote.lastUpdated);
+  if (observedDate === null) return null;
   return declaredDate && declaredDate !== observedDate ? null : observedDate;
 }
 

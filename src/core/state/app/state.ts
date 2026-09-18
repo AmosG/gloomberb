@@ -5,7 +5,7 @@ import {
   clearTickerBindings,
   clonePaneStateMap,
   focusPaneState,
-  getActiveSavedPaneState,
+  restoreSavedPaneState,
   getEffectiveThemeId,
   getFocusedCollectionId,
   getFocusedTickerSymbol,
@@ -47,7 +47,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         {
           paneState: {
             ...state.paneState,
-            ...(getActiveSavedPaneState(action.config) ?? {}),
+            ...(restoreSavedPaneState(action.config, state.paneState) ?? {}),
           },
         },
       );

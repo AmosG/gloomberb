@@ -23,6 +23,7 @@ import {
   resolveTickerInputOrThrow,
   resolveTickerListInput,
   type SharedWorkflowDeps,
+  type ResolvedTickerInput,
 } from "./tickers";
 
 export {
@@ -170,7 +171,7 @@ async function resolvePaneTemplateOptions(
     const requested = resolvedOptions?.symbol ?? resolvedOptions?.arg;
     const activeTicker = baseContext.activeTicker && baseContext.activeInstrument !== undefined
       && (!requested || requested === baseContext.activeTicker) ? state.tickers.get(baseContext.activeTicker) : undefined;
-    const resolvedTicker = resolvedOptions?.ticker && resolvedOptions.ticker.metadata.ticker === resolvedOptions.symbol
+    const resolvedTicker: Pick<ResolvedTickerInput, "symbol" | "ticker" | "instrument" | "listing"> = resolvedOptions?.ticker && resolvedOptions.ticker.metadata.ticker === resolvedOptions.symbol
       ? { symbol: resolvedOptions.symbol, ticker: resolvedOptions.ticker }
       : activeTicker ? { symbol: activeTicker.metadata.ticker, ticker: activeTicker }
       : await resolveTickerInputOrThrow(
@@ -178,6 +179,7 @@ async function resolvePaneTemplateOptions(
       baseContext.activeTicker,
       baseContext.activeCollectionId,
       deps,
+      { preserveListingKey: true },
     );
     resolvedOptions = {
       ...resolvedOptions,
@@ -186,9 +188,11 @@ async function resolvePaneTemplateOptions(
       searchResult: null,
       instrument: resolvedOptions?.instrument !== undefined ? resolvedOptions.instrument
         : resolvedOptions?.searchResult ? tickerSelectionFromSearchResult(resolvedOptions.searchResult).instrument
+        : resolvedTicker.instrument !== undefined ? resolvedTicker.instrument
         : resolvedTicker.symbol === baseContext.activeTicker && baseContext.activeInstrument !== undefined ? baseContext.activeInstrument
         : instrumentFromTicker(resolvedTicker.ticker)?.instrument,
       listing: resolvedOptions?.listing ?? tickerSelectionFromSearchResult(resolvedOptions?.searchResult ?? undefined).listing
+        ?? resolvedTicker.listing
         ?? (resolvedTicker.symbol === baseContext.activeTicker ? baseContext.activeListing : undefined),
     };
   } else if (template.shortcut?.argPlaceholder === "tickers") {

@@ -132,6 +132,21 @@ Only independently owned, registered product areas implement `GloomPlugin`. Larg
 
 Plugin IDs must not reuse current or retired built-in IDs. Retired module IDs remain reserved so saved configuration can be migrated safely to their current owning plugin.
 
+A plugin that changes its id keeps the state its users already have by declaring the old one as `stateId`:
+
+```typescript
+export default {
+  id: "byok-ai",
+  // Config values, resume state, and per-pane state stay where they were
+  // written while this shipped as the built-in `ai` plugin.
+  stateId: "ai",
+  name: "BYOK AI",
+  version: "1.0.0",
+} satisfies GloomPlugin;
+```
+
+`stateId` moves nothing: it is the namespace the plugin's `configState`, `resume` state, persistence, and `usePluginPaneState` keys are read and written under, and it defaults to `id`. Everything else (the toggle, seeding, the marketplace) keys off `id`.
+
 For external plugins, create a directory in `~/.gloomberb/plugins/`:
 
 ```
@@ -164,6 +179,30 @@ The browser entry exports the same plugin identity, and the same broker
 `configSchema` and form conversions, but leaves out anything native. Nothing is
 lost on the desktop: the broker's network calls are executed by the Bun process
 and reach the view over RPC, so the renderer only needs the metadata and the UI.
+
+A plugin whose native half is a service rather than a broker registers a
+capability from the Bun entry's `setup()` and calls it from the browser entry.
+Request/response goes through `useCapabilityInvoker()`; an operation that emits
+as it works goes through `getCapabilityStreamClient()` from
+`gloomberb/capabilities`, which the desktop view installs at startup and which
+is absent everywhere the two halves are the same process:
+
+```typescript
+const client = getCapabilityStreamClient();
+if (!client) throw new Error("This service needs the desktop app's native host.");
+const unsubscribe = client.subscribe({
+  capabilityId: "my-plugin.service",
+  operationId: "run",
+  payload: { prompt },
+  onEvent: (event) => { /* one chunk at a time */ },
+  onError: (error) => { /* the subscription failed to start */ },
+});
+```
+
+Use `gloomberb/utils`'s `getCurrentPluginTarget()` to tell the halves apart:
+the terminal reports `tui` and owns its panes in the same process, while the
+Bun process behind the desktop view reports `cli` and only answers capability
+calls.
 
 `index.browser.ts` is picked up automatically if the `browser` field is absent.
 A plugin with no browser entry falls back to `main`, which is correct for the
@@ -1070,6 +1109,38 @@ const liveRows = useMemo(() => overlayScreenerQuoteEntries(rows, entries), [rows
 
 Declare `LIVE_STREAMING_QUICK_SETTING` in the pane's `quickSettings` so the toggle sits in the header on the same persisted key as every other screener. The module is shared with the host and never bundled into a plugin: the subscriptions are host state.
 
+### Saving tickers a pane resolved
+
+A pane that turns symbols into saved tickers uses `gloomberb/tickers` rather than writing the repository itself, so a ticker it adds is identical to one added from the command bar and the rest of the app hears about it:
+
+```typescript
+import { emitTickerAdded, getTickerRepository, upsertTickerFromSearchResult } from "gloomberb/tickers";
+
+const repository = getTickerRepository();
+if (!repository) throw new Error("The ticker repository is not available here.");
+const { ticker, created } = await upsertTickerFromSearchResult(repository, searchResult);
+if (created) emitTickerAdded(ticker);
+```
+
+### Translation
+
+Plugin labels sit next to built-in ones, so run user-facing strings through `t` from `gloomberb/i18n` and subscribe to the preference with `useAppLanguage()` when a pane caches formatted text. An untranslated string falls back to its English source.
+
+### Driving the running app
+
+`gloomberb/remote` sends a request to the app's own remote-control endpoint, which is how a plugin gives an agent or an external process the same read and control protocol the CLI uses, with the same token:
+
+```typescript
+import { sendRemoteControlRequest } from "gloomberb/remote";
+
+const response = await sendRemoteControlRequest(
+  { type: "get", resource: "app://panes" },
+  { dataDir, appKind: "tui" },
+);
+```
+
+It reads the endpoint file from the data directory, so it is native only: a renderer bundle that imports it fails to compile, which is the correct answer for a browser context.
+
 ### Network access
 
 List every third-party host a plugin fetches from in its `hosts` field, as bare domains. The terminal and desktop reach anything, so there it is documentation and what the plugin directory shows. On the web, the browser cannot call a host without CORS headers, and the hosted app proxies exactly the hosts that bundled plugins declare. A host left out works on the desktop and fails on the web.
@@ -1097,6 +1168,7 @@ import {
   useAssetData,
   useMarketData,
   usePluginPaneState,
+  usePrunePluginPaneState,
   usePluginState,
   usePluginConfigState,
   usePluginTickerActions,
@@ -1110,6 +1182,15 @@ const { openCommandBar, showPane, hidePane, notify } = usePluginAppActions();
 
 // Per-pane layout state (scoped to the current pane instance)
 const [expanded, setExpanded] = usePluginPaneState("expanded", false);
+
+// Pane state is mirrored into the saved layout and written to disk, so a
+// value keyed per symbol (`articles:${symbol}`) grows with every ticker the
+// pane visits and every update copies all of it. Drop the keys the pane no
+// longer shows.
+const prunePaneState = usePrunePluginPaneState();
+useEffect(() => {
+  prunePaneState((key) => key.startsWith("articles:") && key !== `articles:${symbol}`);
+}, [prunePaneState, symbol]);
 
 // Persistent plugin state (survives restarts)
 const [cache, setCache] = usePluginState("cache", null, { schemaVersion: 1 });

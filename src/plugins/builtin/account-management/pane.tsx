@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Button, ConfirmDialog, Tabs } from "../../../components";
-import { useAppSelector } from "../../../state/app/context";
+import { useAppSelector, usePaneAppConfig } from "../../../state/app/context";
 import { useChartQueries, useFxRatesMap, useTickerFinancialsMap } from "../../../market-data/hooks";
 import { buildPortfolioFinancialsMap } from "../../../market-data/portfolio-financials";
 import { selectEffectiveExchangeRates } from "../../../utils/exchange-rate-map";
@@ -354,7 +354,7 @@ export function AccountManagementPane({ focused, width, height }: PaneProps) {
   const dialog = useDialog();
   const renderer = useRendererHost();
   const isDesktop = useUiHost().kind === "desktop-web";
-  const config = useAppSelector((state) => state.config);
+  const config = usePaneAppConfig();
   const portfolios = config.portfolios;
   const baseCurrency = config.baseCurrency;
   const tickers = useAppSelector((state) => state.tickers);

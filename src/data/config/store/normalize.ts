@@ -180,24 +180,34 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
+// Pane state is sanitized on every config write, and most of it is the same
+// objects as last time: the store replaces what changed and keeps the rest.
+// The result depends on nothing but the input, so it is kept per identity.
+const sanitizedValues = new WeakMap<object, unknown>();
+
 function sanitizeSerializableValue(value: unknown): unknown {
   if (value == null) return value;
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
     return value;
   }
+  if (typeof value !== "object") return undefined;
+  if (sanitizedValues.has(value)) return sanitizedValues.get(value);
+  let sanitized: unknown;
   if (Array.isArray(value)) {
-    return value
+    sanitized = value
       .map((entry) => sanitizeSerializableValue(entry))
       .filter((entry) => entry !== undefined);
-  }
-  if (isPlainRecord(value)) {
-    return Object.fromEntries(
+  } else if (isPlainRecord(value)) {
+    sanitized = Object.fromEntries(
       Object.entries(value)
         .map(([key, entry]) => [key, sanitizeSerializableValue(entry)])
         .filter(([, entry]) => entry !== undefined),
     );
+  } else {
+    sanitized = undefined;
   }
-  return undefined;
+  sanitizedValues.set(value, sanitized);
+  return sanitized;
 }
 
 function sanitizeSavedPaneState(
@@ -316,6 +326,31 @@ function sanitizeLayoutOrigin(value: unknown): LayoutOrigin | undefined {
   };
 }
 
+// Saved layouts are sanitized on every config write. A layout object that
+// has not been replaced since the last write sanitizes to the same result.
+const sanitizedLayouts = new WeakMap<object, LayoutConfig>();
+const sanitizedPaneStates = new WeakMap<object, { layout: LayoutConfig; result: ReturnType<typeof sanitizeSavedPaneState> }>();
+
+function sanitizeSavedLayoutOnce(value: unknown, fallbackLayout: LayoutConfig): LayoutConfig {
+  // An invalid value sanitizes to a copy of the fallback, which is not a
+  // function of the value alone.
+  if (!isLayoutConfig(value)) return sanitizeLayout(value, fallbackLayout);
+  const cached = sanitizedLayouts.get(value);
+  if (cached) return cached;
+  const layout = sanitizeLayout(value, fallbackLayout);
+  sanitizedLayouts.set(value, layout);
+  return layout;
+}
+
+function sanitizeSavedPaneStateOnce(value: unknown, layout: LayoutConfig): ReturnType<typeof sanitizeSavedPaneState> {
+  if (!value || typeof value !== "object") return sanitizeSavedPaneState(value, layout);
+  const cached = sanitizedPaneStates.get(value);
+  if (cached && cached.layout === layout) return cached.result;
+  const result = sanitizeSavedPaneState(value, layout);
+  sanitizedPaneStates.set(value, { layout, result });
+  return result;
+}
+
 function sanitizeSavedLayouts(
   value: unknown,
   fallbackLayout: LayoutConfig,
@@ -331,9 +366,9 @@ function sanitizeSavedLayouts(
       && typeof (entry as SavedLayout).name === "string",
     )
     .map((entry) => {
-      const layout = sanitizeLayout(entry.layout, fallbackLayout);
+      const layout = sanitizeSavedLayoutOnce(entry.layout, fallbackLayout);
       const placedPaneIds = new Set(getPlacedPaneInstanceIds(layout));
-      const paneState = sanitizeSavedPaneState((entry as { paneState?: unknown }).paneState, layout);
+      const paneState = sanitizeSavedPaneStateOnce((entry as { paneState?: unknown }).paneState, layout);
       return {
         id: typeof entry.id === "string" ? entry.id : undefined,
         name: entry.name,

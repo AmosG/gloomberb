@@ -11,6 +11,81 @@ import { attachTestRegistry, brokerInstance, cleanupProviderRouterTestFiles, cre
 
 afterEach(cleanupProviderRouterTestFiles);
 
+const sapObservation = makeFinancials({
+  quote: makeQuote({ symbol: "SAP", listingExchangeName: "NYSE", currency: "USD", providerId: "gloomberb-cloud" }),
+  fundamentals: { source: "twelvedata", enterpriseValue: 4_095_338_359_014, enterpriseToRevenue: 92.879,
+    sharesOutstanding: 1_154_204_232, revenue: 44_093_047_102, trailingPE: 28.056555, marketCapCurrency: "USD" },
+});
+
+test("old Cloud SAP response is withdrawn before consumers and cannot return through sparse merges", () => {
+  const mapped = mapCloudFinancials(roundTrip(sapObservation));
+  expect(mapped.fundamentals?.unavailableFields).toEqual(fields);
+  expect(mapped.fundamentals?.enterpriseValue).toBeUndefined();
+  expect(mapped.fundamentals?.enterpriseToRevenue).toBeUndefined();
+  expect(mapped.fundamentals?.revenue).toBe(44_093_047_102);
+  expect(mapped.fundamentals?.trailingPE).toBe(28.056555);
+  expect(sapObservation.fundamentals?.enterpriseValue).toBe(4_095_338_359_014);
+  const merged = mergeFinancials(makeFinancials({ profile: { description: "SAP" } }), roundTrip(mapped))!;
+  expect(merged.fundamentals?.enterpriseValue).toBeUndefined();
+  expect(buildOverviewStats({ quote: merged.quote, fundamentals: merged.fundamentals,
+    quoteCurrency: "USD", baseCurrency: "USD", toBase: (value) => value }).find((row) => row.label === "EV")?.value).toBe("—");
+  // Field-level source repair is not lost because its companion is still bad.
+  for (const enterpriseValue of [250e9, 0, -1]) {
+    const repaired = mapCloudFinancials({ ...sapObservation, fundamentals: { ...sapObservation.fundamentals, enterpriseValue } });
+    const result = mergeFinancials(repaired, merged)!;
+    expect(result.fundamentals?.enterpriseValue).toBe(enterpriseValue);
+    expect(result.fundamentals?.unavailableFields).toEqual(["enterpriseToRevenue"]);
+  }
+});
+
+test("SAP mapped fingerprint requires matching source, listing, currency and shares", () => {
+  for (const delta of [
+    { quote: { ...sapObservation.quote!, symbol: "ORCL" } },
+    { quote: { ...sapObservation.quote!, listingExchangeName: "XETRA" } },
+    { quote: { ...sapObservation.quote!, currency: "EUR" } },
+    { fundamentals: { ...sapObservation.fundamentals, source: "yahoo" } },
+    { fundamentals: { ...sapObservation.fundamentals, sharesOutstanding: 1_150_000_000 } },
+  ]) {
+    const result = mapCloudFinancials({ ...sapObservation, ...delta });
+    expect(result.fundamentals?.enterpriseValue).toBe(sapObservation.fundamentals!.enterpriseValue);
+    expect(result.fundamentals?.unavailableFields).toBeUndefined();
+  }
+  const metadataOnly = { ...sapObservation, quote: undefined, quoteMetadata: {
+    symbol: "SAP", listingExchangeName: "NYSE", currency: "USD", source: { providerId: "gloomberb-cloud" },
+  } };
+  const mapped = mapCloudFinancials(metadataOnly);
+  expect(mapped.quoteMetadata).toEqual(metadataOnly.quoteMetadata);
+  expect(mapped.fundamentals?.enterpriseValue).toBeUndefined();
+  // Explicit response metadata outranks the requested target.
+  expect(mapCloudFinancials({ ...metadataOnly, quoteMetadata: { ...metadataOnly.quoteMetadata,
+    listingExchangeName: "XETRA", currency: "EUR" } }, undefined, { symbol: "SAP", exchange: "NYSE" })
+    .fundamentals?.enterpriseValue).toBe(4_095_338_359_014);
+});
+
+test("new and legacy Cloud caches retract SAP before quote stripping while other source caches survive", () => {
+  const persistence = new AppPersistence(createTempDbPath("sap-observation-cache"));
+  const cachePolicy = { staleMs: 60_000, expireMs: 120_000 };
+  for (const schemaVersion of [3, 8]) {
+    for (const quote of [sapObservation.quote, undefined]) {
+      for (const sourceKey of ["provider:gloomberb-cloud", "provider:yahoo"]) {
+        const key = { namespace: "market", kind: "financials", entityKey: "SAP", variantKey: "exchange=NYSE", sourceKey };
+        persistence.resources.set(key, { ...sapObservation, quote }, { cachePolicy, schemaVersion });
+        const read = () => listCachedResources<typeof sapObservation>(persistence.resources, "financials", "SAP", [key.variantKey], [sourceKey], true)[0]!;
+        const result = read();
+        expect(result.value.fundamentals?.enterpriseValue).toBe(sourceKey === "provider:gloomberb-cloud" ? undefined : 4_095_338_359_014);
+        expect(result.stale).toBe(sourceKey === "provider:gloomberb-cloud");
+        if (sourceKey === "provider:gloomberb-cloud") {
+          cacheRouterResource(persistence.resources, "financials", "SAP", key.variantKey, sourceKey,
+            { ...sapObservation, fundamentals: { ...sapObservation.fundamentals, enterpriseValue: 250e9, enterpriseToRevenue: 6 } }, cachePolicy);
+          expect(read().value.fundamentals?.enterpriseValue).toBe(250e9);
+          expect(read().stale).toBe(false);
+        }
+      }
+    }
+  }
+  persistence.close();
+});
+
 const fields = ["enterpriseValue", "enterpriseToRevenue"] as const;
 const recorded = makeFinancials({
   quote: makeQuote({ symbol: "ASML", listingExchangeName: "NASDAQ", currency: "USD", providerId: "gloomberb-cloud" }),
@@ -110,7 +185,7 @@ test("legacy cloud ASML valuation is retired and recovers with a marker-bearing 
       expect(fundamentals.unavailableFields).toEqual(fields);
       const corrected = { ...value, fundamentals: { financialCurrency: "EUR", unavailableFields: [...fields] } };
       cacheRouterResource(persistence.resources, "financials", key.entityKey, key.variantKey, key.sourceKey, corrected, cachePolicy);
-      expect(read().schemaVersion).toBe(8);
+      expect(read().schemaVersion).toBe(9);
       expect(read().stale).toBe(false);
       expect(read().value).toEqual(corrected);
     }
