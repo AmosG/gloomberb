@@ -9,8 +9,10 @@ import {
   reviewDue,
   sortForBoard,
   symbolHealth,
+  parseSymbolList,
+  thesesInScope,
   thesisExposure,
-  untrackedSymbols,
+  untrackedRows,
 } from "./model";
 import type { TickerRecord } from "../../../../types/ticker";
 
@@ -137,15 +139,33 @@ describe("portfolio integration", () => {
     ]);
   });
 
-  test("untracked symbols are held positions no open thesis covers", () => {
-    const tickers = new Map([
-      ["NVDA", ticker("NVDA", 10)],
-      ["AMD", ticker("AMD", 5)],
-      ["TSM", ticker("TSM", 0)],
-    ]);
+  test("untracked rows are positions no open thesis holds, biggest first, with names", () => {
+    const tickers = [ticker("NVDA", 10), ticker("AMD", 5), ticker("TSM", 3), ticker("AAPL", 1)];
     const closedAmd = thesis({ id: "c", status: "closed", document: document({ instruments: [{ symbol: "AMD", side: "long", role: "core" }] }) });
-    expect(untrackedSymbols(tickers, [thesis(), closedAmd])).toEqual(["AMD"]);
+    const exposure = new Map([
+      ["AMD", { symbol: "AMD", value: 5_000, optionNotional: 0, hasOptions: false }],
+      ["TSM", { symbol: "TSM", value: 20_000, optionNotional: 0, hasOptions: false }],
+      ["AAPL", { symbol: "AAPL", value: Number.NaN, optionNotional: 0, hasOptions: false }],
+    ]);
+    const rows = untrackedRows(tickers, [thesis(), closedAmd], exposure, 100_000, (symbol) => (symbol === "TSM" ? "Taiwan Semiconductor" : null));
+    expect(rows.map((row) => [row.symbol, row.name, row.weight])).toEqual([
+      ["TSM", "Taiwan Semiconductor", 0.2],
+      ["AMD", null, 0.05],
+      ["AAPL", null, 0],
+    ]);
     expect(symbolHealth([thesis(), closedAmd], "AMD")).toBeNull();
     expect(symbolHealth([thesis()], "nvda")).toBe("intact");
+  });
+
+  test("a scope keeps the theses holding something in it", () => {
+    const amd = thesis({ id: "amd", document: document({ instruments: [{ symbol: "AMD", side: "long", role: "core" }] }) });
+    expect(thesesInScope([thesis(), amd], new Set(["AMD"])).map((entry) => entry.id)).toEqual(["amd"]);
+    expect(thesesInScope([thesis(), amd], null)).toHaveLength(2);
+  });
+
+  test("a typed ticker list splits on spaces and commas", () => {
+    expect(parseSymbolList("NVDA,AMD")).toEqual(["NVDA", "AMD"]);
+    expect(parseSymbolList(" nvda  amd; nvda ")).toEqual(["NVDA", "AMD"]);
+    expect(parseSymbolList("")).toEqual([]);
   });
 });
