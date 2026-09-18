@@ -28,7 +28,9 @@ const fakeExports = async (specifier: string) => (
       ? ["useState"]
       : specifier === "gloomberb/broker"
         ? ["PRESERVED_PASSWORD_HINT", "getBrokerRemoteClient"]
-        : []
+        : specifier === "gloomberb/types/config"
+          ? ["TICKER_RESEARCH_PANE_ID"]
+          : []
 );
 
 describe("buildSharedModuleSource", () => {
@@ -154,11 +156,11 @@ describe("bundleExternalPlugin", () => {
     }
   });
 
-  test("resolves a host module that is not shared without a linked node_modules", async () => {
-    // `gloomberb/types/config` is constants, so it is bundled in rather than
-    // shared. A plugin on disk finds it through the symlinked node_modules the
-    // installer writes; one compiled out of this repo's node_modules has no such
-    // link, and before the export map was read it failed to compile at all.
+  test("shares the type modules a plugin reads runtime values from", async () => {
+    // `gloomberb/types/config` used to be bundled in from the host's package
+    // directory. The packaged desktop app has no such directory, so a plugin
+    // that read `TICKER_RESEARCH_PANE_ID` from it failed to compile there. It
+    // is served from the host registry now, like `gloomberb/ui`.
     const dir = scratchPlugin(`
       import { TICKER_RESEARCH_PANE_ID } from "gloomberb/types/config";
       export default { id: "scratch", name: "Scratch", version: "1.0.0", pane: TICKER_RESEARCH_PANE_ID };
@@ -167,8 +169,29 @@ describe("bundleExternalPlugin", () => {
       const result = await bundleExternalPlugin(dir, join(dir, "out"), { exportNamesFor: fakeExports });
       const code = await Bun.file(result.outputPath).text();
 
+      expect(result.shared).toEqual(["gloomberb/types/config"]);
+      expect(code).toContain(PLUGIN_HOST_GLOBAL);
+      expect(code).not.toContain("ticker-research");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("resolves a host export that is not shared without a linked node_modules", async () => {
+    // `gloomberb/package.json` is data, so it is bundled in rather than shared.
+    // A plugin on disk finds it through the symlinked node_modules the
+    // installer writes; one compiled out of this repo's node_modules has no
+    // such link, and before the export map was read it failed to compile at all.
+    const dir = scratchPlugin(`
+      import pkg from "gloomberb/package.json";
+      export default { id: "scratch", name: "Scratch", version: "1.0.0", host: pkg.description };
+    `);
+    try {
+      const result = await bundleExternalPlugin(dir, join(dir, "out"), { exportNamesFor: fakeExports });
+      const code = await Bun.file(result.outputPath).text();
+
       expect(result.shared).toEqual([]);
-      expect(code).toContain("ticker-research");
+      expect(code).toContain("Market research and portfolio tracker for the terminal");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
