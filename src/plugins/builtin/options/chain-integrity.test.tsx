@@ -31,6 +31,9 @@ afterEach(async () => {
     setSharedMarketDataCoordinator(null);
     Date.now = realNow;
 });
+function strikeRowY(strike: number): number {
+    return setup!.captureCharFrame().split("\n").findIndex(line => new RegExp(`\\s${strike}\\s`).test(line));
+}
 async function settle() {
     for (let i = 0; i < 4; i++)
         await act(async () => {
@@ -163,7 +166,7 @@ test.each([48, 80, 120])("keeps the selected strike through insertion, removal a
 test("preserves call identity across partial chains, and permits an explicit put selection", async () => {
     const f = await fixture([100]);
     await act(async () => {
-        await setup!.mockMouse.click(8, 7);
+        await setup!.mockMouse.click(8, strikeRowY(100));
     });
     await settle();
     const picked = await f.capture("call-selected");
@@ -174,7 +177,7 @@ test("preserves call identity across partial chains, and permits an explicit put
     expect(removed.launch).toBeNull();
     expect(removed.frame).toContain("Selected 100 call unavailable");
     await act(async () => {
-        await setup!.mockMouse.click(69, 7);
+        await setup!.mockMouse.click(69, strikeRowY(100));
     });
     await settle();
     const put = await f.capture("put-selected");
@@ -234,7 +237,7 @@ test("preserves known zero activity and zero put/call ratios", async () => {
 test("a different source contract at the same strike cannot replace the selected quote reference", async () => {
     const f = await fixture([100]);
     await act(async () => {
-        await setup!.mockMouse.click(8, 7);
+        await setup!.mockMouse.click(8, strikeRowY(100));
     });
     await settle();
     const selected = await f.capture("symbol-selected");

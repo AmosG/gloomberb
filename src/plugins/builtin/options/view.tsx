@@ -48,7 +48,6 @@ import { useOptionsAccessFooter } from "./footer";
 import { useLiveStreamingSetting } from "../shared/live-streaming";
 import { signedPositionDirection } from "../portfolio-list/position-metrics";
 import { optionMarketReference } from "./market-reference";
-import { OptionQuoteContext, optionQuoteContextHeight } from "./quote-context";
 
 type SummaryMetric = { label: string; value: string };
 
@@ -110,7 +109,6 @@ export function OptionsView({ width, height, focused, onCapture = () => {} }: Op
   } | null>(null);
   const [interactive, setInteractive] = useState(false);
   const userSelectedStrikeRef = useRef(false);
-  const quoteContextRowsRef = useRef(3);
   const onCaptureRef = useRef(onCapture);
   const target = resolveOptionsTarget(ticker);
   const isOpt = target?.isOptionTicker ?? false;
@@ -402,6 +400,7 @@ export function OptionsView({ width, height, focused, onCapture = () => {} }: Op
     hints: footerHints,
     loading,
     quoteCoverage: optionQuoteCoverage,
+    reference: selectedReference,
   });
 
   useEffect(() => {
@@ -516,13 +515,10 @@ export function OptionsView({ width, height, focused, onCapture = () => {} }: Op
     : 0;
   const expirationTabsWidth = Math.max(width - 9 - (loading ? 2 : 0), 8);
   const summaryRowCount = height >= 10 ? 2 : height >= 7 ? 1 : 0;
-  // Keep the table's geometry stable through an empty cold-expiry response.
-  // Growing it during loading can turn a clamped scroll into apparent user navigation.
-  const maxContextHeight = Math.max(1, Math.floor(height / 3));
-  quoteContextRowsRef.current = Math.max(quoteContextRowsRef.current,
-    optionQuoteContextHeight(selectedReference, width - 2, maxContextHeight));
-  const quoteContextHeight = Math.min(maxContextHeight, quoteContextRowsRef.current);
-  const tableHeight = Math.max(1, height - 1 - summaryRowCount - (isOpt && parsed ? 1 : 0) - quoteContextHeight);
+  // No term here follows the selection or the load, so an empty cold-expiry
+  // response cannot resize the table: growing it during loading would turn a
+  // clamped scroll into apparent user navigation.
+  const tableHeight = Math.max(1, height - 1 - summaryRowCount - (isOpt && parsed ? 1 : 0));
   // The strip scrolls; without a marker a clipped last date reads as the last expiry.
   const expirationStripOverflows = expirationDates
     .reduce((total, ts) => total + formatExpDate(ts).length + 2, 0) > expirationTabsWidth;
@@ -561,10 +557,6 @@ export function OptionsView({ width, height, focused, onCapture = () => {} }: Op
           </Text>
         </Box>
       )}
-
-      <Box height={quoteContextHeight} flexShrink={0}>
-        {selectedReference && <OptionQuoteContext reference={selectedReference} width={width - 2} height={quoteContextHeight} />}
-      </Box>
 
       <DataTableView<OptionTableRow, OptionColumn>
         focused={focused}

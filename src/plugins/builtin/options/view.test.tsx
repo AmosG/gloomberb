@@ -197,7 +197,7 @@ test("defaults the table around the nearest strike to the current quote", async 
   expect(frame).not.toContain(" 50 ");
 });
 
-test("keeps table geometry steady while a cold expiry has no contract context", async () => {
+test("keeps table geometry and scroll steady while a cold expiry loads", async () => {
   const firstExpiry = 1_782_345_600;
   const nextExpiry = firstExpiry + 7 * 86400;
   const initial = makeChain(Array.from({ length: 100 }, (_, index) => 50 + index), 120, [firstExpiry, nextExpiry]);
@@ -218,7 +218,6 @@ test("keeps table geometry steady while a cold expiry has no contract context", 
   await act(async () => { testSetup!.mockInput.pressKey("l"); });
   await renderSettled();
   expect(testSetup!.captureCharFrame()).toContain("Loading strikes");
-  expect(testSetup!.captureCharFrame()).not.toContain("AAPL260619C");
   expect(tableHeight()).toBe(before);
   await act(async () => { finishNext({ ...initial,
     calls: initial.calls.map((c) => ({ ...c, expiration: nextExpiry, contractSymbol: c.contractSymbol.replace("260619", "260626") })),
@@ -226,7 +225,7 @@ test("keeps table geometry steady while a cold expiry has no contract context", 
   }); });
   await renderSettled();
   expect(tableHeight()).toBe(before);
-  expect(testSetup!.captureCharFrame()).toContain("AAPL260626C00120000");
+  expect(testSetup!.captureCharFrame()).not.toContain("Loading strikes");
   expect((testSetup!.renderer.root.findDescendantById("options-table-body-scroll") as ScrollBoxRenderable).scrollTop).toBeGreaterThan(0);
 });
 
@@ -643,4 +642,21 @@ test("rejected history disables HV and IV/HV without discarding healthy chain an
   expect(frame).toContain("IV/HV —");
   expect(frame).toContain("HV30 unavailable: inconsistent OHLC history");
   expect(frame).toContain("[c]alc");
+});
+
+test("reports the contract under the cursor in the status bar instead of above the chain", async () => {
+  const provider = createTestDataProvider({ getOptionsChain: async () => makeChain([100, 101], 101) });
+  setSharedMarketDataCoordinator(new MarketDataCoordinator(provider));
+  await act(async () => {
+    testSetup = await testRender(<OptionsHarness ticker={makeTicker("AAPL")} quotePrice={101} showFooter height={20} width={160} />, { width: 160, height: 20 });
+  });
+  await renderSettled();
+  const lines = testSetup!.captureCharFrame().split("\n");
+  const status = lines.find((line) => line.includes("[c]alc"))!;
+  expect(status).toContain("AAPL260619C00101000");
+  // The spread is the one quote fact no column carries.
+  expect(status).toContain("spread 0.1 (1.0% of mid)");
+  // Identity, bid, ask, last and the expiry all already exist above or in the
+  // chain, so the body must not spend rows repeating them.
+  expect(lines.filter((line) => line !== status).join("\n")).not.toContain("AAPL260619C00101000");
 });
