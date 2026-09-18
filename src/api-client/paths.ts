@@ -244,6 +244,36 @@ export function normalizeIssuerResearchTicker(ticker: string): string {
     ? parsed.symbol : normalizeSymbol(ticker);
 }
 
+export function cloudJobsPath(ticker: string, name?: string | null): string {
+  const search = new URLSearchParams();
+  if (name) search.set("name", name);
+  return appendQuery(`/cloud/jobs/${encodeURIComponent(normalizeIssuerResearchTicker(ticker))}`, search);
+}
+
+export interface CloudJobsPostingsParams {
+  function?: string;
+  q?: string;
+  limit?: number;
+  offset?: number;
+  includeClosed?: boolean;
+}
+
+export function cloudJobsPostingsPath(ticker: string, params: CloudJobsPostingsParams = {}): string {
+  const search = new URLSearchParams();
+  if (params.function) search.set("function", params.function);
+  if (params.q) search.set("q", params.q);
+  if (params.limit != null) search.set("limit", String(params.limit));
+  if (params.offset != null) search.set("offset", String(params.offset));
+  if (params.includeClosed) search.set("includeClosed", "true");
+  return appendQuery(`/cloud/jobs/${encodeURIComponent(normalizeIssuerResearchTicker(ticker))}/postings`, search);
+}
+
+export function cloudJobsMoversPath(limit?: number): string {
+  const search = new URLSearchParams();
+  if (limit != null) search.set("limit", String(limit));
+  return appendQuery("/cloud/jobs", search);
+}
+
 export function cloudEarningsCallsPath(
   params: CloudEarningsCallsParams = {},
 ): string {

@@ -12,6 +12,10 @@ import {
   cloudCongressHousePath,
   cloudEarningsCallsPath,
   cloudEarningsTranscriptPath,
+  cloudJobsMoversPath,
+  cloudJobsPath,
+  cloudJobsPostingsPath,
+  type CloudJobsPostingsParams,
   publicProxyStatementPath,
   publicFilingEventsPath,
   publicRiskReportPath,
@@ -57,6 +61,9 @@ import type {
   CloudCongressHousePayload,
   CloudEarningsCallListPayload,
   CloudEarningsTranscriptPayload,
+  CloudJobsMoversPayload,
+  CloudJobsPostingsPayload,
+  CloudJobsResponse,
   CloudProxyStatementListPayload,
   CloudProxyStatementPayload,
   CloudFilingEventPayload,
@@ -335,6 +342,21 @@ export class CloudDataApi {
     return this.request<CloudCongressHousePayload>(
       cloudCongressHousePath(params),
     );
+  }
+
+  async getCloudJobs(ticker: string, name?: string | null): Promise<CloudJobsResponse> {
+    return this.request<CloudJobsResponse>(cloudJobsPath(ticker, name));
+  }
+
+  async getCloudJobsPostings(
+    ticker: string,
+    params: CloudJobsPostingsParams = {},
+  ): Promise<CloudJobsPostingsPayload> {
+    return this.request<CloudJobsPostingsPayload>(cloudJobsPostingsPath(ticker, params));
+  }
+
+  async getCloudJobsMovers(limit?: number): Promise<CloudJobsMoversPayload> {
+    return this.request<CloudJobsMoversPayload>(cloudJobsMoversPath(limit));
   }
 
   async getCloudEarningsCalls(

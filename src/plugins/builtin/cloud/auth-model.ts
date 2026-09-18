@@ -9,14 +9,14 @@ import { identifyResearchUser } from "../../../api-client/research-activity";
 import { t } from "../../../i18n";
 import { chatController } from "../chat/controller";
 
-export type AccountSub = "choose" | "signup" | "login" | "qr" | "signed-in";
+/**
+ * `signup` is the one email form that serves new and returning accounts (a
+ * duplicate email falls through to login); `login` is that same form after the
+ * fall-through failed on the password.
+ */
+export type AccountSub = "signup" | "login" | "qr" | "signed-in";
 
 export type AccountMode = "signup" | "login";
-
-export type AccountChoiceId = AccountMode | "qr" | "skip";
-
-/** Order matches the chooser list, so the selected index maps straight onto an id. */
-export const ACCOUNT_CHOICE_IDS: AccountChoiceId[] = ["qr", "signup", "login", "skip"];
 
 export interface AccountOutcome {
   mode: AccountMode;

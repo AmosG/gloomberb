@@ -28,10 +28,11 @@ export const thesisModule: PluginModule = {
     label: "Theses",
     description: "Every thesis you and your teams hold, sorted by what needs a ruling",
     keywords: ["thesis", "theses", "conviction", "invalidation", "kill", "pillars", "journal"],
-    shortcut: { prefix: "THESIS", argPlaceholder: "ticker (optional)", argKind: "text" },
+    shortcut: { prefix: "THESIS", argPlaceholder: "tickers (optional)", argKind: "text" },
     createInstance: (_context, options) => {
-      const symbol = options?.arg?.trim().toUpperCase() || null;
-      if (symbol) requestThesisPane({ symbol });
+      // `THESIS NVDA` opens that thesis or starts one; `THESIS NVDA AMD` starts a pair.
+      const symbol = options?.arg?.trim() || null;
+      if (symbol) requestThesisPane({ symbol, start: true });
       return { placement: "floating", instanceId: "thesis-board" };
     },
   }],
@@ -44,6 +45,16 @@ export const thesisModule: PluginModule = {
       name: "Thesis",
       order: 55,
       component: ThesisTickerTab,
+    });
+    // Right-click on a portfolio or watchlist row, or the command bar with a
+    // ticker in focus: open its thesis, or start one from there.
+    ctx.registerTickerAction({
+      id: "thesis",
+      label: "Thesis",
+      keywords: ["thesis", "conviction", "kill condition", "why do I own this"],
+      execute: (ticker) => {
+        openThesisPane(ctx.createPaneFromTemplate, { symbol: ticker.metadata.ticker, start: true });
+      },
     });
   },
   dispose() {

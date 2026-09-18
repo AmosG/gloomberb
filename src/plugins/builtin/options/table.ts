@@ -2,9 +2,10 @@ import { TextAttributes } from "../../../ui";
 import type { DataTableCell } from "../../../components";
 import type { OptionContract, OptionsChain } from "../../../types/financials";
 import { blendHex, colors } from "../../../theme/colors";
-import { blendForContrast, contrastRatio } from "../../../theme/color-utils";
+import { blendForContrast, blendForSeparation, contrastRatio } from "../../../theme/color-utils";
 import { formatCompact } from "../../../utils/format";
 import { formatMarketPrice } from "../../../market-data/market/format";
+import { optionSpread } from "./market-reference";
 import type {
   OptionColumn,
   OptionFieldId,
@@ -23,10 +24,18 @@ type OptionFieldDef = {
 };
 
 const OPTION_TEXT_MIN_CONTRAST = 4.5;
+// How far the in-the-money band has to stand off the out-of-the-money one. The
+// two sit edge to edge across the strike column, so this is the step the eye
+// actually reads, and holding it fixed is what makes the banding land the same
+// way on every palette. The ceiling keeps the band a tint of the background
+// rather than a wall of the side colour.
+const MONEYNESS_MIN_SEPARATION = 1.45;
+const MONEYNESS_MAX_TINT = 0.42;
 
 export const OPTION_FIELD_DEFS: OptionFieldDef[] = [
   { id: "bid", label: "Bid", header: "BID", width: 7, description: "Best bid price." },
   { id: "ask", label: "Ask", header: "ASK", width: 7, description: "Best ask price." },
+  { id: "spread", label: "Spread", header: "SPRD", width: 6, description: "Bid/ask width as a share of the midpoint, the comparable liquidity read across strikes." },
   { id: "last", label: "Last", header: "LAST", width: 7, description: "Last traded price." },
   { id: "delta", label: "Delta", header: "Δ", width: 6, description: "Price sensitivity to a $1 move in the underlying." },
   { id: "gamma", label: "Gamma", header: "Γ", width: 7, description: "Delta sensitivity to a $1 move in the underlying." },
@@ -38,7 +47,7 @@ export const OPTION_FIELD_DEFS: OptionFieldDef[] = [
   { id: "openInterest", label: "Open interest", header: "OI", width: 6, description: "Outstanding open contracts." },
 ];
 
-export const DEFAULT_OPTION_FIELD_IDS: OptionFieldId[] = ["bid", "ask", "last", "delta", "gamma"];
+export const DEFAULT_OPTION_FIELD_IDS: OptionFieldId[] = ["bid", "ask", "spread", "last", "delta", "gamma"];
 
 const OPTION_FIELDS_BY_ID = new Map(OPTION_FIELD_DEFS.map((field) => [field.id, field]));
 
@@ -117,6 +126,18 @@ export function formatIv(value: number | undefined): string {
   return `${(value * 100).toFixed(1)}%`;
 }
 
+/**
+ * The width between the two quotes, as a share of their midpoint: the absolute
+ * spread is a subtraction away from the neighbouring columns, while the share
+ * is what makes one strike comparable to another. Bounded above by 200%, since
+ * a zero bid leaves no midpoint at all. Why a quote has none is the status
+ * bar's to say; the column has room only for the number.
+ */
+function formatSpreadPercent(contract: OptionContract): string {
+  const spread = optionSpread(contract);
+  return spread.kind === "two-sided" ? `${spread.percentOfMid.toFixed(1)}%` : "—";
+}
+
 function formatGreek(value: number | undefined): string {
   if (value == null || !Number.isFinite(value)) return "\u2014";
   return value.toFixed(3).replace(/^(-?)0\./, "$1.");
@@ -141,7 +162,7 @@ function optionColumnRole(column: Pick<OptionColumn, "field" | "side">): OptionC
   if (column.field === "strike") return "strike";
   if (column.field === "iv") return "iv";
   if (column.field === "volume" || column.field === "openInterest") return "activity";
-  if (column.field === "bid" || column.field === "ask") return "price";
+  if (column.field === "bid" || column.field === "ask" || column.field === "spread") return "price";
   return column.side ?? "strike";
 }
 
@@ -196,11 +217,16 @@ function optionMoneynessBackground(
   rowState: { selected: boolean },
 ): string | undefined {
   if (rowState.selected || !column.side) return undefined;
-  const inTheMoney = inferColumnMoneyness(row, contract, column.side);
+  const outOfTheMoney = blendHex(colors.bg, colors.neutral, 0.055);
+  if (!inferColumnMoneyness(row, contract, column.side)) return outOfTheMoney;
   const sideColor = column.side === "call" ? colors.positive : colors.negative;
-  return inTheMoney
-    ? blendHex(colors.bg, sideColor, 0.13)
-    : blendHex(colors.bg, colors.neutral, 0.055);
+  return blendForSeparation(
+    colors.bg,
+    sideColor,
+    outOfTheMoney,
+    MONEYNESS_MIN_SEPARATION,
+    MONEYNESS_MAX_TINT,
+  );
 }
 
 function inferColumnMoneyness(
@@ -229,6 +255,8 @@ function formatOptionContractCell(
       return formatMarketPrice(contract.bid, { assetCategory: "OPT", maxWidth: column.width });
     case "ask":
       return formatMarketPrice(contract.ask, { assetCategory: "OPT", maxWidth: column.width });
+    case "spread":
+      return formatSpreadPercent(contract);
     case "volume":
       return formatCompact(contract.volume);
     case "openInterest":

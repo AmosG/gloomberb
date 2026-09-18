@@ -17,6 +17,7 @@ function remember<T>(cache: Map<string, T>, key: string, compute: () => T): T {
 const blendCache = new Map<string, string>();
 const luminanceCache = new Map<string, number>();
 const contrastBlendCache = new Map<string, string>();
+const separationBlendCache = new Map<string, string>();
 
 function parseHex(hex: string): readonly [number, number, number] {
   const h = hex.replace("#", "");
@@ -55,6 +56,9 @@ export function contrastRatio(a: string, b: string): number {
 }
 
 const CONTRAST_BLEND_STEPS = [0, 0.08, 0.14, 0.2, 0.28, 0.36, 0.48, 0.62, 0.78, 1] as const;
+// Fine enough that a tint stops as soon as it is legible rather than
+// overshooting to the next coarse step and reading as a block of colour.
+const SEPARATION_BLEND_STEP = 0.02;
 
 export function blendForContrast(base: string, against: string, fallback: string, minContrast: number): string {
   return remember(contrastBlendCache, `${base}|${against}|${fallback}|${minContrast}`, () => {
@@ -68,6 +72,31 @@ export function blendForContrast(base: string, against: string, fallback: string
     }
 
     return candidate;
+  });
+}
+
+/**
+ * A surface tint that carries the same weight in every palette. A fixed blend
+ * ratio cannot: how far it moves the eye depends entirely on where the accent
+ * sits relative to the background, so the same code reads as a clear band in
+ * one theme and as nothing at all in another. This walks `base` toward `tint`
+ * only as far as it takes to separate from `against`, and never past
+ * `maxRatio`, so a palette whose accent shares the background's luminance
+ * ends up tinted rather than flooded.
+ */
+export function blendForSeparation(
+  base: string,
+  tint: string,
+  against: string,
+  minContrast: number,
+  maxRatio: number,
+): string {
+  return remember(separationBlendCache, `${base}|${tint}|${against}|${minContrast}|${maxRatio}`, () => {
+    for (let ratio = SEPARATION_BLEND_STEP; ratio < maxRatio; ratio += SEPARATION_BLEND_STEP) {
+      const candidate = blendHex(base, tint, ratio);
+      if (contrastRatio(candidate, against) >= minContrast) return candidate;
+    }
+    return blendHex(base, tint, maxRatio);
   });
 }
 

@@ -6,7 +6,10 @@
  */
 export interface ThesisPaneRequest {
   thesisId?: string | null;
+  /** One symbol, or several separated by spaces or commas. */
   symbol?: string | null;
+  /** Start a thesis right away when none covers the symbol. */
+  start?: boolean;
 }
 
 let pending: ThesisPaneRequest | null = null;

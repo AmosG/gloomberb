@@ -197,7 +197,7 @@ test("defaults the table around the nearest strike to the current quote", async 
   expect(frame).not.toContain(" 50 ");
 });
 
-test("keeps table geometry steady while a cold expiry has no contract context", async () => {
+test("keeps table geometry and scroll steady while a cold expiry loads", async () => {
   const firstExpiry = 1_782_345_600;
   const nextExpiry = firstExpiry + 7 * 86400;
   const initial = makeChain(Array.from({ length: 100 }, (_, index) => 50 + index), 120, [firstExpiry, nextExpiry]);
@@ -218,7 +218,6 @@ test("keeps table geometry steady while a cold expiry has no contract context", 
   await act(async () => { testSetup!.mockInput.pressKey("l"); });
   await renderSettled();
   expect(testSetup!.captureCharFrame()).toContain("Loading strikes");
-  expect(testSetup!.captureCharFrame()).not.toContain("AAPL260619C");
   expect(tableHeight()).toBe(before);
   await act(async () => { finishNext({ ...initial,
     calls: initial.calls.map((c) => ({ ...c, expiration: nextExpiry, contractSymbol: c.contractSymbol.replace("260619", "260626") })),
@@ -226,7 +225,7 @@ test("keeps table geometry steady while a cold expiry has no contract context", 
   }); });
   await renderSettled();
   expect(tableHeight()).toBe(before);
-  expect(testSetup!.captureCharFrame()).toContain("AAPL260626C00120000");
+  expect(testSetup!.captureCharFrame()).not.toContain("Loading strikes");
   expect((testSetup!.renderer.root.findDescendantById("options-table-body-scroll") as ScrollBoxRenderable).scrollTop).toBeGreaterThan(0);
 });
 
@@ -556,7 +555,7 @@ test("starts at a held contract's expiry and preserves a researcher-selected rol
   expect(testSetup!.captureCharFrame()).toContain("Loading options chain");
   await act(async () => { selectTicker(ticker); });
   await renderSettled();
-  expect(testSetup!.captureCharFrame()).toMatch(/34\.05\s+34\s+.*340/);
+  expect(testSetup!.captureCharFrame()).toMatch(/34\.05\s+0\.3%\s+34\s+.*340/);
 });
 
 test("keeps the selected chain visible when its refresh fails", async () => {
@@ -614,7 +613,7 @@ test("stale underlying preserves contract observations but cannot seed current G
   const deltaColumns = lines[0]!.flatMap((cell, i) => cell.includes("Δ") ? [i] : []);
   expect(deltaColumns).toHaveLength(2);
   for (const row of lines.slice(1)) for (const i of deltaColumns) expect(row[i]).toBe("—");
-  expect(saved).toContain("10.05,10.15,10.1");
+  expect(saved).toContain("10.05,10.15,1.0%,10.1");
   await act(async () => { setStale(false); });
   await renderSettled();
   const recovered = testSetup!.captureCharFrame();
@@ -643,4 +642,23 @@ test("rejected history disables HV and IV/HV without discarding healthy chain an
   expect(frame).toContain("IV/HV —");
   expect(frame).toContain("HV30 unavailable: inconsistent OHLC history");
   expect(frame).toContain("[c]alc");
+});
+
+test("reports the contract under the cursor in the status bar instead of above the chain", async () => {
+  const provider = createTestDataProvider({ getOptionsChain: async () => makeChain([100, 101], 101) });
+  setSharedMarketDataCoordinator(new MarketDataCoordinator(provider));
+  await act(async () => {
+    testSetup = await testRender(<OptionsHarness ticker={makeTicker("AAPL")} quotePrice={101} showFooter height={20} width={160} />, { width: 160, height: 20 });
+  });
+  await renderSettled();
+  const lines = testSetup!.captureCharFrame().split("\n");
+  const status = lines.find((line) => line.includes("[c]alc"))!;
+  const body = lines.filter((line) => line !== status).join("\n");
+  expect(status).toContain("AAPL260619C00101000");
+  // Identity, bid, ask, last and the expiry all already exist above or in the
+  // chain, so the body must not spend rows repeating them.
+  expect(body).not.toContain("AAPL260619C00101000");
+  // The spread reads per strike in its own column, so the status bar drops it.
+  expect(body).toContain("C SPRD");
+  expect(status).not.toContain("spread");
 });

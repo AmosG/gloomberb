@@ -50,7 +50,7 @@ export function useNewsArticleFooter({
     event.stopPropagation();
     shareArticle();
   });
-  const { access, segment } = useCloudAccessFooter({
+  const { access, hint: upgradeHint, segment } = useCloudAccessFooter({
     delayLabel: tf("{count}h", { count: CLOUD_NEWS_DELAY_HOURS }),
     focused,
     segmentId: "news-access",
@@ -71,9 +71,13 @@ export function useNewsArticleFooter({
     url: article?.url,
     source: article?.source,
     info: footerInfo,
-    hints: publicSharing && article?.title && paneInstanceId
-      ? [{ id: "share", key: "y", label: " share", onPress: shareArticle }]
-      : undefined,
+    // [o]pen is appended after these, so the story's own actions stay rightmost.
+    hints: [
+      ...(upgradeHint ? [upgradeHint] : []),
+      ...(publicSharing && article?.title && paneInstanceId
+        ? [{ id: "share", key: "y", label: " share", onPress: shareArticle }]
+        : []),
+    ],
     showOpenHint: true,
     loading,
     error,

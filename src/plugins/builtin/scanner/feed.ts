@@ -54,7 +54,7 @@ export function useScannerStatusFooter(
   state: ScannerFeedState<ScannerPayload>,
   focused: boolean,
 ): void {
-  const { segment } = useCloudAccessFooter({
+  const { hint: upgradeHint, segment } = useCloudAccessFooter({
     delayLabel: tf("{count}m", { count: state.payload?.delayMinutes || CLOUD_QUOTE_DELAY_MINUTES }),
     degraded: state.payload?.access === "delayed",
     focused,
@@ -90,5 +90,5 @@ export function useScannerStatusFooter(
     [segment, status],
   );
 
-  usePaneStatusFooter({ registrationId, info });
+  usePaneStatusFooter({ registrationId, info, hints: upgradeHint ? [upgradeHint] : undefined });
 }

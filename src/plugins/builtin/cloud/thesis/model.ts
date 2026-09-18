@@ -295,19 +295,70 @@ export function convictionRows(exposures: readonly ThesisExposure[]): Conviction
     .sort((a, b) => Math.abs(b.gap) - Math.abs(a.gap) || b.weight - a.weight);
 }
 
-/** Symbols with a position but no thesis holding them. */
-export function untrackedSymbols(
-  tickers: ReadonlyMap<string, TickerRecord>,
+export interface UntrackedRow {
+  symbol: string;
+  name: string | null;
+  /** Share of the book in scope; 0 when unpriced or a watchlist. */
+  weight: number;
+  held: boolean;
+}
+
+/**
+ * Symbols in scope that no open thesis holds, biggest position first so
+ * the untracked money is what you see, then alphabetical.
+ */
+export function untrackedRows(
+  tickers: readonly TickerRecord[],
   theses: readonly CloudThesis[],
-): string[] {
+  exposureBySymbol: ReadonlyMap<string, SymbolExposure>,
+  bookValue: number,
+  nameOf: (symbol: string) => string | null = () => null,
+): UntrackedRow[] {
   const covered = new Set(
     theses.filter((thesis) => thesis.status !== "closed").flatMap((thesis) => heldSymbols(thesis.document)),
   );
-  return [...tickers.values()]
-    .filter((ticker) => ticker.metadata.positions.some((position) => position.shares !== 0))
+  return tickers
     .map((ticker) => ticker.metadata.ticker)
     .filter((symbol) => !covered.has(symbol.toUpperCase()))
-    .sort();
+    .map((symbol): UntrackedRow => {
+      const exposure = exposureBySymbol.get(symbol.toUpperCase());
+      const value = exposure && Number.isFinite(exposure.value) ? Math.abs(exposure.value) : 0;
+      return {
+        symbol,
+        name: nameOf(symbol),
+        weight: bookValue > 0 ? value / bookValue : 0,
+        held: tickers.find((ticker) => ticker.metadata.ticker === symbol)?.metadata.positions.some((position) => position.shares !== 0) ?? false,
+      };
+    })
+    .sort((a, b) => b.weight - a.weight || a.symbol.localeCompare(b.symbol));
+}
+
+/** Theses that hold at least one of the symbols in scope. */
+export function thesesInScope(theses: readonly CloudThesis[], symbols: ReadonlySet<string> | null): CloudThesis[] {
+  if (!symbols) return [...theses];
+  return theses.filter((thesis) => heldSymbols(thesis.document).some((symbol) => symbols.has(symbol)));
+}
+
+/** "NVDA, AMD" or "nvda amd" into distinct upper-case symbols, in order. */
+export function parseSymbolList(input: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of input.split(/[\s,;]+/)) {
+    const symbol = raw.trim().toUpperCase();
+    if (!symbol || seen.has(symbol)) continue;
+    seen.add(symbol);
+    out.push(symbol);
+  }
+  return out;
+}
+
+/** The names of the core instruments, for a board row next to the title. */
+export function thesisNames(thesis: CloudThesis, nameOf: (symbol: string) => string | null): string {
+  const core = thesis.document.instruments.filter((entry) => entry.role === "core");
+  const named = (core.length ? core : thesis.document.instruments)
+    .map((entry) => nameOf(entry.symbol))
+    .filter((name): name is string => !!name);
+  return named.join(", ");
 }
 
 export function openSignals(signals: readonly ThesisSignal[]): ThesisSignal[] {
@@ -338,10 +389,15 @@ export function itemId(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 }
 
-export function emptyDocument(symbol: string, exchange?: string): ThesisDocument {
+export function emptyDocument(instruments: ReadonlyArray<{ symbol: string; exchange?: string; side?: "long" | "short" }>): ThesisDocument {
   return {
     summary: "",
-    instruments: [{ symbol: symbol.toUpperCase(), ...(exchange ? { exchange } : {}), side: "long", role: "core" }],
+    instruments: instruments.map((entry) => ({
+      symbol: entry.symbol.toUpperCase(),
+      ...(entry.exchange ? { exchange: entry.exchange } : {}),
+      side: entry.side ?? "long",
+      role: "core" as const,
+    })),
     evidence: { symbols: [], keywords: [] },
     pillars: [],
     killConditions: [],

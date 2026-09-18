@@ -65,8 +65,7 @@ export function ThesisTickerTab({ focused, width, height }: TickerResearchTabPro
         .then((full) => full?.content ?? null)
         .catch(() => null);
       const thesis = await flows.startThesis(ctx, {
-        symbol: ticker.metadata.ticker,
-        exchange: ticker.metadata.exchange,
+        instruments: [{ symbol: ticker.metadata.ticker, exchange: ticker.metadata.exchange }],
         scope,
         held,
         note,
