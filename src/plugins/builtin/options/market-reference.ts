@@ -35,14 +35,31 @@ function timestamp(milliseconds: number | undefined): string | null {
 
 const price = (value: number) => Number.isFinite(value) && value > 0 ? String(Number(value.toPrecision(12))) : "—";
 
+/**
+ * The spread is the one quote fact the chain table cannot show: its columns
+ * carry bid and ask separately, never the width between them. Callers format
+ * it at their own density, so the arithmetic lives here only once.
+ */
+export type OptionSpread =
+  | { kind: "two-sided"; spread: number; percentOfMid: number }
+  | { kind: "crossed" | "one-sided" | "unavailable" };
+
+export function optionSpread({ bid, ask }: Pick<OptionMarketReference, "bid" | "ask">): OptionSpread {
+  if (bid > 0 && ask >= bid) {
+    const spread = ask - bid;
+    return { kind: "two-sided", spread: Number(spread.toPrecision(12)), percentOfMid: spread / ((bid + ask) / 2) * 100 };
+  }
+  if (bid > ask && ask > 0) return { kind: "crossed" };
+  return { kind: bid > 0 || ask > 0 ? "one-sided" : "unavailable" };
+}
+
 export function optionMarketReferenceLines(reference: OptionMarketReference): string[] {
   const { bid, ask } = reference;
-  const twoSided = bid > 0 && ask >= bid;
-  const spread = twoSided ? ask - bid : null;
-  const market = twoSided
-    ? `spread ${Number(spread!.toPrecision(12))} (${(spread! / ((bid + ask) / 2) * 100).toFixed(2)}% of mid)`
-    : bid > ask && ask > 0 ? "crossed quote; no midpoint"
-      : bid > 0 || ask > 0 ? "one-sided quote; no midpoint" : "bid/ask unavailable";
+  const spread = optionSpread(reference);
+  const market = spread.kind === "two-sided"
+    ? `spread ${spread.spread} (${spread.percentOfMid.toFixed(2)}% of mid)`
+    : spread.kind === "crossed" ? "crossed quote; no midpoint"
+      : spread.kind === "one-sided" ? "one-sided quote; no midpoint" : "bid/ask unavailable";
   const quoteTime = timestamp(reference.lastUpdated);
   const tradeTime = timestamp(reference.lastTradeDate * 1000);
   return [
