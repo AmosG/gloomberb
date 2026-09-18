@@ -86,54 +86,88 @@ function saveDocument(ctx: FlowContext, thesis: CloudThesis, document: ThesisDoc
   return savePatch(ctx, thesis, { document, ...(note ? { note } : {}) });
 }
 
-/** The first question: why. Pro turns the answer into a draft, Free into a summary. */
-export async function startThesis(
-  ctx: FlowContext,
-  input: { symbol: string; exchange?: string; scope: CloudNoteScope; held: boolean; note?: string | null },
-): Promise<CloudThesis | undefined> {
-  const symbol = input.symbol.toUpperCase();
+export interface StartThesisInput {
+  instruments: ReadonlyArray<{ symbol: string; exchange?: string; side?: "long" | "short" }>;
+  scope: CloudNoteScope;
+  /** Whether any of the instruments is held; sets watching vs active. */
+  held: boolean;
+  note?: string | null;
+}
+
+function describeInstruments(instruments: StartThesisInput["instruments"]): string {
+  const symbols = instruments.map((entry) => entry.symbol.toUpperCase());
+  if (symbols.length <= 2) return symbols.join(" and ");
+  return `${symbols.slice(0, -1).join(", ")} and ${symbols[symbols.length - 1]}`;
+}
+
+function titleFor(instruments: StartThesisInput["instruments"]): string {
+  const symbols = instruments.map((entry) => entry.symbol.toUpperCase());
+  if (symbols.length === 1) return symbols[0]!;
+  if (symbols.length <= 3) return symbols.join(" / ");
+  return `${symbols[0]} +${symbols.length - 1}`;
+}
+
+/**
+ * The first question: why. The thesis exists the moment it is answered,
+ * with the answer as its summary, so it shows up at once. On Pro the draft
+ * (pillars, kill conditions, catalysts) runs behind it and lands as the
+ * next revision unless the person edited in the meantime.
+ */
+export async function startThesis(ctx: FlowContext, input: StartThesisInput): Promise<CloudThesis | undefined> {
+  const instruments = input.instruments.map((entry) => ({ ...entry, symbol: entry.symbol.toUpperCase() }));
+  if (instruments.length === 0) return undefined;
+  const who = describeInstruments(instruments);
   const reasoning = await promptTextarea(ctx.dialog, {
-    label: `Why ${input.held ? "do you own" : "would you buy"} ${symbol}?`,
+    label: `Why ${input.held ? "do you own" : "would you buy"} ${who}?`,
     body: ctx.hasProAccess
       ? ["One or two sentences. Pillars, kill conditions, and catalysts are drafted from it and the company data."]
       : ["One or two sentences. You add pillars and kill conditions next.", "Pro drafts them for you."],
     placeholder: "Data center demand keeps compounding and nobody else has the software moat...",
   });
   if (!reasoning) return undefined;
-  let document = emptyDocument(symbol, input.exchange);
-  let title = symbol;
-  let horizon: string | null = null;
-  document.summary = reasoning;
-  if (ctx.hasProAccess) {
-    ctx.notify({ body: `Drafting a thesis for ${symbol}…`, type: "info" });
-    try {
-      const draft = await thesisStore.draft({
-        instruments: [{ symbol, ...(input.exchange ? { exchange: input.exchange } : {}) }],
-        reasoning,
-        note: input.note ?? null,
-      });
-      const { title: draftTitle, horizon: draftHorizon, ...draftDocument } = draft;
-      document = draftDocument;
-      title = draftTitle || symbol;
-      horizon = draftHorizon;
-    } catch (error) {
-      ctx.notify({ body: `${errorText(error, "The draft failed.")} Starting from your summary instead.`, type: "info" });
-    }
-  }
+  const document = { ...emptyDocument(instruments), summary: reasoning };
+  let thesis: CloudThesis;
   try {
-    const thesis = await thesisStore.create({
+    thesis = await thesisStore.create({
       scope: input.scope,
-      title,
+      title: titleFor(instruments),
       status: input.held ? "active" : "watching",
       conviction: 5,
-      horizon,
+      horizon: null,
       document,
     });
-    ctx.notify({ body: `Thesis started for ${symbol}.`, type: "success" });
-    return thesis;
   } catch (error) {
     return failed(ctx, error, "Could not create the thesis.");
   }
+  if (!ctx.hasProAccess) {
+    ctx.notify({ body: `Thesis started for ${who}. Add what must stay true and what would make you sell.`, type: "success" });
+    return thesis;
+  }
+  ctx.notify({ body: `Thesis started for ${who}. Drafting pillars and kill conditions from the company data…`, type: "info" });
+  void thesisStore.draft({ instruments, reasoning, note: input.note ?? null })
+    .then(async (draft) => {
+      const current = thesisStore.get(thesis.id);
+      if (!current) return;
+      if (current.revision !== thesis.revision) {
+        ctx.notify({ body: `${thesis.title}: the draft is ready but you already edited, so it was not applied.`, type: "info" });
+        return;
+      }
+      const { title, horizon, ...drafted } = draft;
+      await thesisStore.save(thesis.id, {
+        title: title || thesis.title,
+        horizon,
+        document: { ...drafted, summary: drafted.summary || reasoning },
+        note: "Drafted from your reasoning and the company data.",
+      }, thesis.revision);
+      ctx.notify({
+        body: `${title || thesis.title}: ${drafted.pillars.length} pillars, ${drafted.killConditions.length} kill conditions drafted. Edit anything that is not yours.`,
+        type: "success",
+      });
+    })
+    .catch((error) => {
+      ctx.notify({ body: `${thesis.title}: ${errorText(error, "the draft failed")}. Your summary is kept; add pillars by hand.`, type: "error" });
+    });
+  return thesis;
 }
 
 export type MetaField = "title" | "status" | "conviction" | "horizon" | "cadence" | "summary" | "target";
