@@ -17,6 +17,7 @@ import {
   type PaneFooterSegment
 } from "../../../components";
 import { useShortcut } from "../../../react/input";
+import { usePaneSettingValue } from "../../../state/app/context";
 import { colors } from "../../../theme/colors";
 import {
   Box,
@@ -39,9 +40,14 @@ import {
   statusOf,
 } from "./data";
 import { callTitle, formatCallDate, formatDuration, formatPeriod, formatSentiment } from "./format";
-import { TranscriptView, type ReaderTab } from "./transcript-view";
+import { findCallForQuarter } from "./model";
+import { READER_TABS, TranscriptView, type ReaderTab } from "./transcript-view";
 
 export const EARNINGS_CALLS_PANE_ID = "earnings-calls";
+
+function isReaderTab(value: string): value is ReaderTab {
+  return READER_TABS.some((tab) => tab.value === value);
+}
 
 interface CallColumn {
   id: string;
@@ -202,6 +208,13 @@ export function EarningsCallsPane({ focused, width, height }: EarningsCallsViewP
     status?: number;
   } | null>(null);
   const [readerTab, setReaderTab] = useState<ReaderTab>("summary");
+  // A layout or `gloomberb shot ECT NVDA --quarter latest --reader summary`
+  // can land straight on a transcript instead of the shelf. `quarter` takes
+  // the same tokens as the headless option; only transcribed calls qualify,
+  // since opening a call without one asks the server to produce it.
+  const [openQuarter] = usePaneSettingValue<string>("quarter", "");
+  const [openReader] = usePaneSettingValue<string>("reader", "");
+  const openedQuarter = useRef<string | null>(null);
   const [sort, setSort] = useState<CallSort>(DEFAULT_SORT);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
@@ -426,6 +439,20 @@ export function EarningsCallsPane({ focused, width, height }: EarningsCallsViewP
     });
     return sorted;
   }, [allCalls, sort, searchQuery]);
+
+  useEffect(() => {
+    const quarter = openQuarter.trim();
+    if (!quarter || openedQuarter.current === quarter || listStatus !== "loaded") return;
+    const target = findCallForQuarter(
+      allCalls.filter((call) => call.hasTranscript),
+      quarter,
+    );
+    if (!target) return;
+    openedQuarter.current = quarter;
+    setSelectedId(target.id);
+    setReaderTab(isReaderTab(openReader) ? openReader : "summary");
+    setDetailOpen(true);
+  }, [openQuarter, openReader, listStatus, allCalls]);
 
   const selected = useMemo(
     () => allCalls.find((call) => call.id === selectedId) ?? null,
