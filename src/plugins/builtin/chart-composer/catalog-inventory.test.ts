@@ -6,7 +6,10 @@ import {
   filterCatalogRows,
   listStaticCatalogInventory,
   looksLikeCatalogTickerQuery,
+  resolveCatalogMarketSource,
 } from "./catalog-inventory";
+import { AssetDataRouter } from "../../../sources/provider-router";
+import { createTestDataProvider } from "../../../test-support/data-provider";
 
 const AAPL = { symbol: "AAPL", exchange: "NASDAQ", name: "Apple Inc." };
 const MSFT = { symbol: "MSFT", exchange: "NASDAQ", name: "Microsoft Corp." };
@@ -93,5 +96,19 @@ describe("data catalog inventory", () => {
       title: "No series",
       hint: "Press / to search.",
     });
+  });
+
+  test("the market source names the provider a request reaches, never the transport carrying it", async () => {
+    const cloud = createTestDataProvider({ id: "gloomberb-cloud", name: "Gloom Cloud", priority: 100 });
+    const yahoo = createTestDataProvider({ id: "yahoo", name: "Yahoo Fallback", priority: 1000 });
+    expect(await resolveCatalogMarketSource(new AssetDataRouter(null, [yahoo, cloud]))).toBe("Gloom Cloud");
+    expect(await resolveCatalogMarketSource(new AssetDataRouter(null, [yahoo]))).toBe("Yahoo Fallback");
+    expect(await resolveCatalogMarketSource(new AssetDataRouter(null, []))).toBe("Market data");
+    // The desktop renderer holds a bridge to the Bun process, which answers for its router.
+    const bridge = { ...createTestDataProvider(), id: "desktop-backend", name: "Gloomberb Backend",
+      primaryMarketSourceName: async () => "Gloom Cloud" };
+    expect(await resolveCatalogMarketSource(bridge)).toBe("Gloom Cloud");
+    const broken = { ...bridge, primaryMarketSourceName: async () => { throw new Error("offline"); } };
+    expect(await resolveCatalogMarketSource(broken)).toBe("Market data");
   });
 });

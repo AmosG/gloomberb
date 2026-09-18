@@ -132,7 +132,11 @@ function getBasePriceMaxFractionDigits(kind: AssetDisplayKind, value: number): n
     case "cash":
       return 6;
     case "crypto":
-      return 8;
+      // Sub-cent coins need eight decimals to stay distinguishable from zero,
+      // but a four-figure coin does not. Scaling the ceiling by magnitude keeps
+      // that detail where it carries information instead of surfacing the
+      // provider's float tail on quotes like 109556.1640625.
+      return Math.abs(value) >= 100 ? 2 : Math.abs(value) >= 1 ? 4 : 8;
     case "equity":
       return Math.abs(value) >= 1 ? 2 : 4;
     case "contract":
