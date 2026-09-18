@@ -590,15 +590,15 @@ export interface CloudJobsSummaryPayload {
   closed30d: number;
   change30d: CloudJobsChange | null;
   change90d: CloudJobsChange | null;
-  /** False when the careers system re-dates every role on refresh, so dates are withheld. Absent on older servers. */
+  /** False when the careers system re-dates every role on refresh, so dates are withheld. */
   datesReliable?: boolean;
-  /** Open postings the system dates within the last 30 days. Absent on older servers. */
+  /** Open postings the system dates within the last 30 days. */
   posted30d?: number | null;
-  postingVelocity: { recent: number; prior: number; percent: number | null } | null;
   remoteShare: number | null;
   medianAgeDays: number | null;
   series: CloudJobsSeriesPoint[];
-  postedByWeek: Array<{ weekStart: string; count: number }>;
+  /** The current backlog by how long each role has been posted. */
+  ageBuckets?: Array<{ id: string; label: string; count: number }>;
   functions: CloudJobsBucket[];
   countries: CloudJobsBucket[];
   seniority: CloudJobsBucket[];
@@ -634,14 +634,18 @@ export interface CloudJobsMoverPayload {
   openCount: number;
   employeeCount: number | null;
   change30d: CloudJobsChange | null;
-  postingVelocity: { recent: number; prior: number; percent: number | null } | null;
+  /** Open roles the system dates within the last 30 days, null when its dates cannot be read. */
+  posted30d?: number | null;
   new7d: number;
   topFunction: string | null;
+  topCountry?: { code: string; share: number } | null;
 }
 
 export interface CloudJobsMoversPayload {
   asOf: string;
   covered: number;
+  /** Companies in the ranking; `movers` is one page of them. */
+  total?: number;
   movers: CloudJobsMoverPayload[];
 }
 

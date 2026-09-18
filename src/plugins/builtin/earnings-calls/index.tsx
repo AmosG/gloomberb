@@ -1,16 +1,17 @@
 import type { PluginModule } from "../plugin-module";
-import { createTickerSurfacePaneTemplate } from "../shared/ticker-surface";
 import { attachEarningsCallsPersistence, resetEarningsCallsPersistence } from "./data";
 import { EarningsCallsPane, EARNINGS_CALLS_PANE_ID } from "./pane";
-import {
-  earningsCallsHeadless,
-  earningsTranscriptHeadless,
-} from "./headless";
+import { earningsCallsHeadless } from "./headless";
 
-export { earningsCallsHeadless, earningsTranscriptHeadless } from "./headless";
+export { earningsCallsHeadless } from "./headless";
 
 const description =
-  "Earnings call transcripts with speaker attribution, analyst Q&A, and extracted guidance.";
+  "Earnings call transcripts with speaker attribution, analyst Q&A, and extracted guidance. Alone, every transcribed call; with a ticker, that company's calls.";
+
+function explicitSymbol(options?: { arg?: string; symbol?: string | null }): string | null {
+  const symbol = (options?.symbol ?? options?.arg ?? "").trim().toUpperCase();
+  return symbol || null;
+}
 
 export const earningsCallsModule: PluginModule = {
   setup(ctx) {
@@ -43,7 +44,6 @@ export const earningsCallsModule: PluginModule = {
   ],
 
   paneTemplates: [
-    // Browse every transcribed call, unbound to a ticker.
     {
       id: "earnings-calls-pane",
       paneId: EARNINGS_CALLS_PANE_ID,
@@ -58,22 +58,22 @@ export const earningsCallsModule: PluginModule = {
         "conference",
         "guidance",
         "qa",
+        "ect",
       ],
-      shortcut: { prefix: "CALLS" },
+      // The ticker is optional on purpose: CALLS alone browses every call,
+      // and it must not silently bind to whatever ticker happens to be active.
+      shortcut: { prefix: "CALLS", argPlaceholder: "ticker", argKind: "ticker", argOptional: true },
       headless: earningsCallsHeadless,
-      createInstance: () => ({ placement: "floating" }),
-    },
-    {
-      ...createTickerSurfacePaneTemplate({
-        id: "earnings-call-transcripts-pane",
-        paneId: EARNINGS_CALLS_PANE_ID,
-        label: "Earnings Call Transcripts",
-        description,
-        keywords: ["earnings", "call", "transcript", "ect", "qa", "guidance"],
-        shortcut: "ECT",
-        publicShare: false,
-      }),
-      headless: earningsTranscriptHeadless,
+      createInstance: (_context, options) => {
+        const symbol = explicitSymbol(options);
+        if (!symbol) return { placement: "floating" };
+        return {
+          instanceId: `${EARNINGS_CALLS_PANE_ID}:${encodeURIComponent(symbol).replace(/%/g, "~")}`,
+          title: `CALLS ${symbol}`,
+          binding: { kind: "fixed", symbol },
+          placement: "floating",
+        };
+      },
     },
   ],
 };

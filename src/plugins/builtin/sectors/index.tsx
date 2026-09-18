@@ -310,27 +310,13 @@ export const sectorsModule: PluginModule = {
     },
   ],
 
-  setup(ctx) {
-    ctx.registerCommand({
-      id: "sectors-sp",
-      label: "Sector Performance",
-      description: "S&P 500 sector and industry performance sorted by daily change.",
-      keywords: ["sector", "sectors", "sp", "performance"],
-      category: "data",
-      shortcut: "SP",
-      execute: () => {
-        ctx.createPaneFromTemplate("sectors-pane");
-      },
-    });
-  },
-
   paneTemplates: [
     {
       id: "sectors-pane",
       paneId: "sectors",
       label: "Sector Performance",
       description: "S&P 500 sector and industry performance sorted by daily change.",
-      keywords: ["sector", "sectors", "industry", "semis", "defense", "food", "leisure", "etf", "xlk", "xlv", "xlf", "performance", "spdr"],
+      keywords: ["sector", "sectors", "industry", "semis", "defense", "food", "leisure", "etf", "xlk", "xlv", "xlf", "performance", "spdr", "sp"],
       shortcut: { prefix: "BI" },
       headless: sectorsHeadless,
     },

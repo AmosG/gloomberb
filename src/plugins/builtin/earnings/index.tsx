@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { DataTableView, usePaneFooter, type DataTableKeyEvent } from "../../../components";
+import { DataTableStackView, usePaneFooter, type DataTableKeyEvent } from "../../../components";
 import type { PaneProps } from "../../../types/plugin";
 import type { PluginModule } from "../plugin-module";
 import type { EarningsEvent } from "../../../types/data-provider";
-import { useAppSelector, usePaneInstance } from "../../../state/app/context";
+import { useAppSelector, usePaneInstance, usePaneSettingValue } from "../../../state/app/context";
 import { parseTickerListInput, formatTickerListInput } from "../../../tickers/list";
-import { useAssetData, usePluginPaneState, usePluginTickerActions } from "../../runtime";
+import { useAssetData, usePluginAppActions, usePluginPaneState, usePluginTickerActions } from "../../runtime";
+import { useUiCapabilities } from "../../../ui";
+import { EarningsDetailView } from "./detail-view";
 import { useAutoRefresh } from "../shared/auto-refresh";
 import type {
   PaneSettingsContext,
@@ -37,6 +39,14 @@ import {
 function EarningsCalendarPane({ focused, width, height }: PaneProps) {
   const dataProvider = useAssetData();
   const { navigateTicker } = usePluginTickerActions();
+  const { createPaneFromTemplate } = usePluginAppActions();
+  const { nativePaneChrome } = useUiCapabilities();
+  // The open detail is remembered by symbol and date so a reload keeps it.
+  const [openKey, setOpenKey] = usePluginPaneState<string | null>("openEvent", null);
+  // A layout or `gloomberb shot ERN NVDA,AMD --open NVDA` lands on that
+  // company's next report instead of the list.
+  const [openSymbol] = usePaneSettingValue<string>("open", "");
+  const openedSymbol = useRef<string | null>(null);
   const pane = usePaneInstance();
   const [events, setEvents] = useState<EarningsEvent[]>([]);
   // Starts loading so the first frame never claims there are no earnings.
@@ -123,18 +133,41 @@ function EarningsCalendarPane({ focused, width, height }: PaneProps) {
     }
   }, [eventCount, selectedIdx, setSelectedIdx]);
 
-  const openEvent = useCallback((event: EarningsEvent) => {
-    navigateTicker(event.symbol);
-  }, [navigateTicker]);
+  const selectedEvent = eventRows[activeEventIdx]?.event ?? null;
 
-  const handleTableKeyDown = useCallback((event: DataTableKeyEvent) => {
+  useEffect(() => {
+    const symbol = openSymbol.trim().toUpperCase();
+    if (!symbol || openedSymbol.current === symbol || events.length === 0) return;
+    const match = eventRows.find((row) => row.event.symbol === symbol)?.event;
+    if (!match) return;
+    openedSymbol.current = symbol;
+    setOpenKey(eventKey(match));
+  }, [eventRows, events.length, openSymbol, setOpenKey]);
+  const openEvent = useMemo(
+    () => (openKey ? events.find((event) => eventKey(event) === openKey) ?? null : null),
+    [events, openKey],
+  );
+
+  const openTicker = useCallback((symbol: string) => navigateTicker(symbol), [navigateTicker]);
+  const openEstimates = useCallback((symbol: string) => createPaneFromTemplate("earnings-estimates-pane", { symbol }), [createPaneFromTemplate]);
+  const openCalls = useCallback((symbol: string) => createPaneFromTemplate("earnings-calls-pane", { symbol }), [createPaneFromTemplate]);
+  const openAnalysts = useCallback((symbol: string) => createPaneFromTemplate("analyst-research-pane", { symbol }), [createPaneFromTemplate]);
+
+  const handleKeyDown = useCallback((event: DataTableKeyEvent) => {
+    const symbol = openEvent?.symbol ?? selectedEvent?.symbol ?? null;
     if (event.name === "r") {
       event.preventDefault?.();
       reload(true);
       return true;
     }
-    return false;
-  }, [reload]);
+    if (!symbol) return false;
+    const actions: Record<string, (symbol: string) => void> = { t: openTicker, e: openEstimates, c: openCalls, a: openAnalysts };
+    const action = event.name ? actions[event.name] : undefined;
+    if (!action) return false;
+    event.preventDefault?.();
+    action(symbol);
+    return true;
+  }, [openAnalysts, openCalls, openEstimates, openEvent, openTicker, reload, selectedEvent]);
 
   const renderCell = useCallback((
     row: EarningsDisplayRow,
@@ -145,17 +178,45 @@ function EarningsCalendarPane({ focused, width, height }: PaneProps) {
     return renderEarningsCell(row, column, rowState.selected);
   }, []);
 
-  usePaneFooter("earnings-calendar", () => ({
-    info: [
-      ...(stale ? [{ id: "stale", parts: [{ text: "STALE", tone: "warning" as const }] }] : []),
-      ...(loading ? [{ id: "loading", parts: [{ text: "loading", tone: "muted" as const }] }] : []),
-      ...(error ? [{ id: "error", parts: [{ text: error, tone: "warning" as const }] }] : []),
-    ],
-  }), [error, loading, stale]);
+  usePaneFooter("earnings-calendar", () => {
+    const symbol = openEvent?.symbol ?? selectedEvent?.symbol ?? null;
+    return {
+      info: [
+        ...(stale ? [{ id: "stale", parts: [{ text: "STALE", tone: "warning" as const }] }] : []),
+        ...(loading ? [{ id: "loading", parts: [{ text: "loading", tone: "muted" as const }] }] : []),
+        ...(error ? [{ id: "error", parts: [{ text: error, tone: "warning" as const }] }] : []),
+      ],
+      hints: symbol
+        ? [
+            { id: "ticker", key: "t", label: "icker", onPress: () => openTicker(symbol) },
+            { id: "estimates", key: "e", label: "stimates", onPress: () => openEstimates(symbol) },
+            { id: "calls", key: "c", label: "alls", onPress: () => openCalls(symbol) },
+            { id: "analysts", key: "a", label: "nalysts", onPress: () => openAnalysts(symbol) },
+          ]
+        : [],
+    };
+  }, [error, loading, stale, openEvent, selectedEvent, openTicker, openEstimates, openCalls, openAnalysts]);
+
+  const detailContent = openEvent ? (
+    <EarningsDetailView
+      event={openEvent}
+      width={width}
+      height={Math.max(4, height - 1)}
+      onOpenTicker={openTicker}
+      onOpenEstimates={openEstimates}
+      onOpenCalls={openCalls}
+      onOpenAnalysts={openAnalysts}
+    />
+  ) : null;
 
   return (
-    <DataTableView<EarningsDisplayRow, EarningsColumn>
+    <DataTableStackView<EarningsDisplayRow, EarningsColumn>
       focused={focused}
+      detailOpen={!!openEvent}
+      onBack={() => setOpenKey(null)}
+      detailTitle={openEvent ? `${openEvent.symbol} · ${openEvent.name}` : undefined}
+      detailContent={detailContent}
+      onDetailKeyDown={handleKeyDown}
       selection={{
         kind: "index",
         selectedIndex: selectedRowIndex,
@@ -165,11 +226,11 @@ function EarningsCalendarPane({ focused, width, height }: PaneProps) {
       }}
       isNavigable={(row) => row.kind === "event"}
       onActivate={(row) => {
-        if (row.kind === "event") openEvent(row.event);
+        if (row.kind === "event") setOpenKey(eventKey(row.event));
       }}
-      onRootKeyDown={handleTableKeyDown}
+      onRootKeyDown={handleKeyDown}
       rootWidth={width}
-      rootHeight={height}
+      rootHeight={Math.max(3, height - (nativePaneChrome ? 1 : 0))}
       columns={columns}
       items={rows}
       sortColumnId={null}
@@ -189,6 +250,10 @@ function EarningsCalendarPane({ focused, width, height }: PaneProps) {
       }
     />
   );
+}
+
+function eventKey(event: EarningsEvent): string {
+  return `${event.symbol}:${event.earningsDate.toISOString().slice(0, 10)}`;
 }
 
 /** Tickers named on the command bar or the CLI win over the active collection. */
@@ -236,24 +301,6 @@ function earningsSettings(context: PaneSettingsContext): PaneSettingsDef {
 export const earningsModule: PluginModule = {
   setup(ctx) {
     attachEarningsCalendarPersistence(ctx.persistence);
-    ctx.registerCommand({
-      id: "earnings-monitor-shortcut",
-      label: "Earnings Monitor",
-      keywords: ["earnings", "monitor", "calendar", "em", "eps"],
-      shortcut: "EM",
-      shortcutArg: {
-        placeholder: "tickers",
-        kind: "text",
-        parse: (arg) => ({ tickers: arg.trim() }),
-      },
-      category: "data",
-      description: "Open upcoming earnings, optionally scoped to tickers.",
-      execute: (values) => {
-        ctx.createPaneFromTemplate("earnings-monitor-pane", {
-          arg: values?.tickers ?? "",
-        });
-      },
-    });
   },
 
   dispose() {
@@ -279,43 +326,23 @@ export const earningsModule: PluginModule = {
       id: "earnings-calendar-pane",
       paneId: "earnings-calendar",
       label: "Earnings Calendar",
-      description: "Upcoming earnings dates and estimates for your tickers.",
-      keywords: ["earn", "earnings", "calendar", "eps", "revenue", "quarterly"],
-      shortcut: { prefix: "ERN", argPlaceholder: "tickers", argKind: "ticker-list" },
+      description: "Upcoming earnings dates and estimates: alone, for your portfolio and watchlists; with tickers, for those.",
+      keywords: ["earn", "earnings", "calendar", "monitor", "em", "eps", "revenue", "quarterly"],
+      // Tickers are optional on purpose: ERN alone follows the active
+      // collection and must not silently narrow to the active ticker.
+      shortcut: { prefix: "ERN", argPlaceholder: "tickers", argKind: "ticker-list", argOptional: true },
       headless: earningsCalendarHeadless,
-      // The shortcut takes tickers, so honor them the way the report does.
-      // Ignoring them left `ERN NKE` scoped to the active collection, which
-      // rendered "No tickers in scope" while the report listed NKE's earnings.
+      canCreate: () => true,
+      // Tickers named on the command bar win over the collection. Ignoring
+      // them left `ERN NKE` scoped to the active collection, which rendered
+      // "No tickers in scope" while the report listed NKE's earnings.
       createInstance: (context, options) => {
         const symbols = earningsScopeSymbols(options);
         return {
-          title: symbols.length > 0 ? `ERN ${formatTickerListInput(symbols)}` : undefined,
-          settings: symbols.length > 0
-            ? { symbols, symbolsText: formatTickerListInput(symbols) }
-            : context.activeCollectionId
-              ? { collectionId: context.activeCollectionId }
-              : undefined,
-        };
-      },
-    },
-    {
-      id: "earnings-monitor-pane",
-      paneId: "earnings-calendar",
-      label: "Earnings Monitor",
-      description: "Upcoming earnings dates and estimates, optionally scoped to tickers.",
-      keywords: ["earn", "earnings", "monitor", "em", "eps", "revenue"],
-      canCreate: () => true,
-      createInstance: (context, options) => {
-        const raw = options?.arg?.trim() ?? "";
-        const symbols = raw ? parseTickerListInput(raw) : [];
-        return {
-          title: symbols.length > 0 ? `EM ${formatTickerListInput(symbols)}` : "Earnings Monitor",
+          title: symbols.length > 0 ? `ERN ${formatTickerListInput(symbols)}` : "Earnings Calendar",
           placement: "floating",
           settings: symbols.length > 0
-            ? {
-              symbols,
-              symbolsText: formatTickerListInput(symbols),
-            }
+            ? { symbols, symbolsText: formatTickerListInput(symbols) }
             : context.activeCollectionId
               ? { collectionId: context.activeCollectionId }
               : undefined,

@@ -6,7 +6,6 @@ import type {
 import type { HeadlessPaneContext, HeadlessPaneLoadArgs } from "../../../types/plugin";
 import {
   createEarningsCallsHeadless,
-  createEarningsTranscriptHeadless,
   type EarningsCallsHeadlessDependencies,
 } from "./headless";
 import { buildTranscriptSegments, findCallForQuarter } from "./model";
@@ -152,8 +151,19 @@ describe("earnings transcript headless", () => {
     expect(findCallForQuarter(cost, "FQ4-2025")?.id).toBe("cost-fq4");
     expect(findCallForQuarter(cost, "FY2026")?.id).toBe("cost-fq1");
   });
+  test("a ticker alone lists the company's calls; a quarter or section reads the transcript", async () => {
+    const definition = createEarningsCallsHeadless(dependencies());
+    const listed = await definition.load(transcriptArgs({}), context);
+    expect(listed.columns.map((column) => column.key)).toContain("callAt");
+    expect(listed.rows.length).toBe(calls.length);
+    expect(definition.describe?.(transcriptArgs({}))).toBe("Earnings Calls | AMD");
+    const read = await definition.load(transcriptArgs({ section: "guidance" }), context);
+    expect(read.metadata).toMatchObject({ section: "guidance", fiscalQuarter: 2, limit: 20 });
+    expect(definition.describe?.(transcriptArgs({ section: "guidance" }))).toBe("Earnings Call Transcript | AMD | latest");
+  });
+
   test("selects a quarter and filters speakers by role acronym", async () => {
-    const definition = createEarningsTranscriptHeadless(dependencies());
+    const definition = createEarningsCallsHeadless(dependencies());
 
     const result = await definition.load(transcriptArgs({
       section: "transcript",
@@ -175,7 +185,7 @@ describe("earnings transcript headless", () => {
   });
 
   test("pages bounded transcript segments and reports truncation", async () => {
-    const definition = createEarningsTranscriptHeadless(dependencies());
+    const definition = createEarningsCallsHeadless(dependencies());
     const first = await definition.load(transcriptArgs({
       section: "transcript",
       quarter: "latest",
@@ -225,7 +235,7 @@ describe("bounded call discovery", () => {
     expect(result.rows).toEqual([]);
     expect(result.complete).toBe(false);
     expect(result.metadata).toMatchObject({ total: 0, truncated: true, totalIsExact: false });
-    await expect(createEarningsTranscriptHeadless(deps).load(transcriptArgs({ quarter: "FQ1-1990" }), context))
+    await expect(createEarningsCallsHeadless(deps).load(transcriptArgs({ quarter: "FQ1-1990" }), context))
       .rejects.toThrow("among the latest 200 loaded calls");
   });
 
@@ -234,7 +244,7 @@ describe("bounded call discovery", () => {
     const result = await createEarningsCallsHeadless(deps).load(callArgs({ limit: 200 }), context);
     expect(result.complete).not.toBe(false);
     expect(result.metadata).toMatchObject({ total: 2, truncated: false, sourceLimitReached: false, totalIsExact: true });
-    await expect(createEarningsTranscriptHeadless(deps).load(transcriptArgs({ quarter: "FQ1-1990" }), context))
+    await expect(createEarningsCallsHeadless(deps).load(transcriptArgs({ quarter: "FQ1-1990" }), context))
       .rejects.toThrow("No FQ1-1990 earnings call found for AMD.");
   });
 });

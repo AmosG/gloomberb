@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import type { CloudJobsSummaryPayload } from "../../../api-client/types";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAppendedPages } from "./pages";
+import type { CloudJobsMoverPayload, CloudJobsPosting, CloudJobsSummaryPayload } from "../../../api-client/types";
 import {
   Badge,
   Button,
+  DataTableStackView,
   DataTableView,
   EmptyState,
   PaneStatusBody,
@@ -11,6 +13,7 @@ import {
   Tabs,
   usePaneFooter,
   usePaneTicker,
+  useTableLoadMore,
   type DataTableCell,
   type PaneFooterSegment,
 } from "../../../components";
@@ -18,17 +21,18 @@ import { resolveChartPalette } from "../../../components/chart/core/palette";
 import { useAsyncResource } from "../../../react/async-resource";
 import { useShortcut } from "../../../react/input";
 import { blendHex, colors } from "../../../theme/colors";
-import { Box, Text, TextAttributes, useRendererHost, useUiCapabilities } from "../../../ui";
+import { Box, Text, TextAttributes, useRendererHost, useUiCapabilities, type ScrollBoxRenderable } from "../../../ui";
 import { formatCompact, formatNumber } from "../../../utils/format";
 import { isPlainKey } from "../../../utils/keyboard";
 import { SignInWall } from "../cloud/auth-actions";
 import { useCloudPlanAction, useCloudUpgradeAction } from "../shared/cloud-upgrade";
 import { usePlanAccess } from "../shared/plan-access";
 import { usePluginPaneState, usePluginTickerActions } from "../../runtime";
-import { fetchJobs, fetchJobsMovers, type JobsCompanyState } from "./client";
+import { fetchJobs, fetchJobsMovers, fetchJobsPostings, type JobsCompanyState } from "./client";
 import {
   DEFAULT_MOVER_SORT,
   DEFAULT_POSTING_SORT,
+  buildAgeBars,
   buildMoverColumns,
   buildMoverRows,
   buildPostingColumns,
@@ -39,10 +43,10 @@ import {
   formatCollectedAgo,
   formatSalaryRange,
   formatShare,
+  historyChartPoints,
   moversHaveWeekHistory,
   nextMoverSort,
   nextPostingSort,
-  primaryChart,
   sortMoverRows,
   sortPostingRows,
   type MoverColumn,
@@ -57,6 +61,9 @@ import { ShareBars } from "./share-bars";
 export const JOBS_PANE_ID = "jobs";
 
 const PENDING_POLL_MS = 20_000;
+const POSTINGS_PAGE = 100;
+const MOVERS_PAGE = 200;
+
 const VENDOR_LABELS: Record<string, string> = {
   greenhouse: "Greenhouse",
   lever: "Lever",
@@ -118,8 +125,7 @@ function ProWall({ action }: { action: string }) {
 // Company view ----------------------------------------------------------------
 
 function CompanyHeader({ summary, width }: { summary: CloudJobsSummaryPayload; width: number }) {
-  const history = summary.change30d;
-  const trend = history ?? null;
+  const trend = summary.change30d;
   const columns = Math.max(2, Math.min(5, Math.floor(width / 18)));
   const statWidth = Math.floor((width - 2) / columns);
   // Details only fit beside the figure on a roomy column.
@@ -132,18 +138,9 @@ function CompanyHeader({ summary, width }: { summary: CloudJobsSummaryPayload; w
     },
     trend
       ? { label: "30 days", value: formatChange(trend), color: toneColor(changeTone(trend.count)) }
-      : summary.postingVelocity
-        ? {
-            label: "posting pace",
-            value: summary.postingVelocity.percent != null
-              ? `${summary.postingVelocity.percent > 0 ? "+" : ""}${formatNumber(summary.postingVelocity.percent, 0)}%`
-              : `${summary.postingVelocity.recent} vs ${summary.postingVelocity.prior}`,
-            detail: roomy ? "30d vs prior 30d" : undefined,
-            color: toneColor(changeTone(summary.postingVelocity.percent)),
-          }
-        : summary.posted30d != null
-          ? { label: "posted last 30d", value: formatNumber(summary.posted30d, 0) }
-          : { label: "closed 30d", value: formatNumber(summary.closed30d, 0) },
+      : summary.posted30d != null
+        ? { label: "posted last 30d", value: formatNumber(summary.posted30d, 0) }
+        : { label: "closed 30d", value: formatNumber(summary.closed30d, 0) },
     { label: "new this week", value: formatNumber(summary.new7d, 0), detail: roomy && summary.coverage.daysObserved <= 1 ? "first read" : undefined },
     { label: "remote", value: summary.remoteShare != null ? formatShare(summary.remoteShare) : "-" },
     { label: "median age", value: summary.medianAgeDays != null ? `${summary.medianAgeDays}d` : "-" },
@@ -157,47 +154,62 @@ function CompanyHeader({ summary, width }: { summary: CloudJobsSummaryPayload; w
   );
 }
 
+/**
+ * The open-roles history once a week of daily reads exists; before that,
+ * the backlog by posting age, which is the one thing a first read can say
+ * honestly about time.
+ */
 function Chart({ summary, width, height }: { summary: CloudJobsSummaryPayload; width: number; height: number }) {
-  const chart = useMemo(() => primaryChart(summary), [summary]);
-  const tone = chart.kind === "history" ? changeTone(summary.change30d?.count ?? summary.change90d?.count) : "neutral";
-  const accent = tone === "positive" ? colors.positive : tone === "negative" ? colors.negative : colors.borderFocused;
-  const palette = {
-    ...resolveChartPalette(colors, tone),
-    lineColor: accent,
-    fillColor: blendHex(colors.bg, accent, 0.22),
-    gridColor: blendHex(colors.bg, colors.border, 0.55),
-  };
-  if (chart.points.length < 2) {
+  const points = useMemo(() => historyChartPoints(summary), [summary]);
+  const ageRows = useMemo(() => buildAgeBars(summary), [summary]);
+  if (points) {
+    const tone = changeTone(summary.change30d?.count ?? summary.change90d?.count);
+    const accent = tone === "positive" ? colors.positive : tone === "negative" ? colors.negative : colors.borderFocused;
+    const palette = {
+      ...resolveChartPalette(colors, tone),
+      lineColor: accent,
+      fillColor: blendHex(colors.bg, accent, 0.22),
+      gridColor: blendHex(colors.bg, colors.border, 0.55),
+    };
     return (
-      <Box flexDirection="column" width={width} height={height} justifyContent="center" paddingX={1}>
-        <Text fg={colors.textDim}>
-          {chart.kind === "history"
-            ? "The open-roles history starts today."
-            : summary.datesReliable === false
-              ? "This careers system re-dates roles on refresh, so posting dates are not shown; the history builds from today."
-              : "Posting dates are not published by this careers system; the history builds from today."}
-        </Text>
+      <Box flexDirection="column" width={width} height={height}>
+        <Box height={1} paddingX={1}>
+          <Text fg={colors.textDim} attributes={TextAttributes.BOLD}>Open roles</Text>
+        </Box>
+        <StaticChartSurface
+          points={points}
+          width={Math.max(20, width - 2)}
+          height={Math.max(3, height - 1)}
+          mode="area"
+          calendarSpaced
+          colors={palette}
+          showTimeAxis
+          timeAxisColor={colors.textDim}
+          yAxisColor={colors.textDim}
+          formatYAxisValue={(value: number) => formatCompact(Math.round(value))}
+        />
       </Box>
     );
   }
+  const daysLeft = Math.max(0, 7 - summary.series.length);
   return (
-    <Box flexDirection="column" width={width} height={height}>
-      <Box height={1} paddingX={1} flexDirection="row">
-        <Text fg={colors.textDim} attributes={TextAttributes.BOLD}>{chart.title}</Text>
-        {chart.kind === "intake" ? <Text fg={colors.textMuted}>{"  open roles by posting week"}</Text> : null}
+    <Box flexDirection="column" width={width} height={height} paddingX={1}>
+      <Box height={1} flexDirection="row">
+        <Text fg={colors.textDim} attributes={TextAttributes.BOLD}>Open roles by posting age</Text>
+        {daysLeft > 0 ? (
+          <Text fg={colors.textMuted}>{`  history chart in ${daysLeft} ${daysLeft === 1 ? "day" : "days"}`}</Text>
+        ) : null}
       </Box>
-      <StaticChartSurface
-        points={chart.points}
-        width={Math.max(20, width - 2)}
-        height={Math.max(3, height - 1)}
-        mode="area"
-        calendarSpaced
-        colors={palette}
-        showTimeAxis
-        timeAxisColor={colors.textDim}
-        yAxisColor={colors.textDim}
-        formatYAxisValue={(value: number) => formatCompact(Math.round(value))}
-      />
+      {ageRows.length === 0 ? (
+        <Text fg={colors.textDim}>This careers system publishes no posting dates.</Text>
+      ) : (
+        <ShareBars rows={ageRows} width={Math.max(24, width - 2)} color={colors.borderFocused} />
+      )}
+      {summary.datesReliable === false ? (
+        <Box marginTop={1}>
+          <Text fg={colors.textMuted}>Posting dates on this system move on every refresh, so they are not shown.</Text>
+        </Box>
+      ) : null}
     </Box>
   );
 }
@@ -279,12 +291,27 @@ function CompanyView({
   const [tab, setTab] = usePluginPaneState<DetailTab>("jobs:tab", "roles");
   const [sort, setSort] = usePluginPaneState<PostingSort>("jobs:sort", DEFAULT_POSTING_SORT);
   const [selectedIdx, setSelectedIdx] = useState(0);
+  const rolesScrollRef = useRef<ScrollBoxRenderable | null>(null);
 
-  const rows = useMemo(() => sortPostingRows(buildPostingRows(summary.recent), sort), [summary, sort]);
-  const hasSalary = summary.recent.some((posting) => posting.salaryMin != null || posting.salaryMax != null);
+  // The summary carries the newest 40 roles; the rest page in on scroll.
+  const loadPostingsPage = useCallback(
+    (offset: number) => fetchJobsPostings(summary.ticker, { limit: POSTINGS_PAGE, offset }).then((page) => page.postings),
+    [summary.ticker],
+  );
+  const more = useAppendedPages<CloudJobsPosting>(
+    `${summary.ticker}:${summary.coverage.lastCollectedAt ?? ""}`,
+    summary.recent.length,
+    summary.openCount,
+    loadPostingsPage,
+  );
+  const postings = useMemo(() => [...summary.recent, ...more.items], [summary.recent, more.items]);
+  const loadMoreFromScroll = useTableLoadMore(rolesScrollRef, tab === "roles" && more.hasMore && !more.loadingMore, more.loadMore);
+
+  const rows = useMemo(() => sortPostingRows(buildPostingRows(postings), sort), [postings, sort]);
+  const hasSalary = postings.some((posting) => posting.salaryMin != null || posting.salaryMax != null);
   const columns = useMemo(() => buildPostingColumns(width, hasSalary), [width, hasSalary]);
   const functionRows = useMemo(() => buildShareBars(summary.functions, 7), [summary]);
-  const countryRows = useMemo(() => buildShareBars(summary.countries, 10), [summary]);
+  const countryRows = useMemo(() => buildShareBars(summary.countries, 12), [summary]);
   const seniorityRows = useMemo(() => buildShareBars(summary.seniority, 8), [summary]);
 
   const selected = rows[Math.min(selectedIdx, rows.length - 1)] ?? null;
@@ -312,6 +339,7 @@ function CompanyView({
   usePaneFooter(registrationId, () => {
     const info: PaneFooterSegment[] = [];
     if (loading) info.push({ id: "loading", parts: [{ text: "refreshing", tone: "muted" }] });
+    if (more.loadingMore) info.push({ id: "loading-more", parts: [{ text: "loading more roles", tone: "muted" }] });
     if (error) info.push({ id: "error", parts: [{ text: error.slice(0, 60), tone: "warning" }] });
     const vendor = summary.coverage.vendor ? VENDOR_LABELS[summary.coverage.vendor] ?? summary.coverage.vendor : null;
     const collected = formatCollectedAgo(summary.coverage.lastCollectedAt);
@@ -328,7 +356,7 @@ function CompanyView({
         : []),
     ];
     return { info, hints };
-  }, [loading, error, summary, tab, selected, openSelected, rendererHost]);
+  }, [loading, more.loadingMore, error, summary, tab, selected, openSelected, rendererHost]);
 
   const renderCell = useCallback((row: PostingRow, column: PostingColumn, _index: number, rowState: { selected: boolean }): DataTableCell => {
     const selectedColor = rowState.selected ? colors.selectedText : undefined;
@@ -355,7 +383,7 @@ function CompanyView({
   const barsWidth = wide ? width - chartWidth - 1 : width;
 
   const tabs = [
-    { label: `Roles ${summary.recent.length < summary.openCount ? `${summary.recent.length} of ${formatCompact(summary.openCount)}` : summary.openCount}`, value: "roles" },
+    { label: `Roles ${postings.length < summary.openCount ? `${postings.length} of ${formatCompact(summary.openCount)}` : summary.openCount}`, value: "roles" },
     { label: "Locations", value: "locations" },
     { label: "Seniority", value: "seniority" },
     { label: "Pay", value: "salary" },
@@ -381,6 +409,8 @@ function CompanyView({
         {tab === "roles" ? (
           <DataTableView<PostingRow, PostingColumn>
             focused={focused}
+            scrollRef={rolesScrollRef}
+            onBodyScrollActivity={loadMoreFromScroll}
             selection={{ kind: "index", selectedIndex: rows.length ? Math.min(selectedIdx, rows.length - 1) : -1, onChange: setSelectedIdx }}
             onActivate={() => openSelected()}
             rootWidth={width}
@@ -399,7 +429,12 @@ function CompanyView({
           <Box flexDirection="column" paddingX={1} paddingTop={1}>
             {countryRows.length === 0
               ? <Text fg={colors.textDim}>No locations in the postings collected so far.</Text>
-              : <ShareBars rows={countryRows} width={Math.min(width - 2, 80)} color={colors.warning} />}
+              : <ShareBars rows={countryRows} width={Math.min(width - 2, 80)} color={colors.warning} showDelta />}
+            {countryRows.length > 0 && countryRows.every((row) => row.delta == null) ? (
+              <Box marginTop={1}>
+                <Text fg={colors.textMuted}>30-day changes by country appear once the history reaches back that far.</Text>
+              </Box>
+            ) : null}
           </Box>
         ) : tab === "seniority" ? (
           <Box flexDirection="column" paddingX={1} paddingTop={1}>
@@ -419,21 +454,123 @@ function CompanyView({
   );
 }
 
-// Movers view ------------------------------------------------------------------
+/**
+ * One company's hiring, loaded and rendered with every state a pane needs.
+ * Used by the ticker-bound pane, the research tab, and the detail page of
+ * the coverage table.
+ */
+function CompanyPanel({
+  symbol,
+  companyName,
+  width,
+  height,
+  focused,
+  registrationId,
+}: {
+  symbol: string;
+  companyName: string | null;
+  width: number;
+  height: number;
+  focused: boolean;
+  registrationId: string;
+}) {
+  const request = useCallback(
+    (force: boolean) => fetchJobs(symbol, { name: companyName, force }),
+    [symbol, companyName],
+  );
+  const resource = useAsyncResource<JobsCompanyState>(request);
+  const { data, status, error, reload } = resource;
 
-function MoversView({ width, height, focused, registrationId }: { width: number; height: number; focused: boolean; registrationId: string }) {
+  // While the server is looking for the company, ask again on a timer.
+  useEffect(() => {
+    if (data?.kind !== "pending") return;
+    const timer = setTimeout(() => reload(), PENDING_POLL_MS);
+    return () => clearTimeout(timer);
+  }, [data, reload]);
+
+  if (data?.kind === "denied") {
+    if (data.status === 402) return <ProWall action={`Open ${symbol}'s hiring picture with Pro.`} />;
+    return <SignInWall action="see who is hiring" needsVerification={data.status === 403} />;
+  }
+  if ((status === "idle" || status === "loading") && !data) {
+    return <PaneStatusBody loading align="center" loadingLabel={`Loading ${symbol} hiring...`} />;
+  }
+  if (status === "error" && !data) {
+    return <PaneStatusBody error={error ?? "Could not load hiring data."} errorTitle="Could not load hiring data." actions={<Button label="Try again" onPress={reload} />} />;
+  }
+  if (!data) return null;
+  if (data.kind === "pending") {
+    return (
+      <PaneStatusBody
+        loading
+        align="center"
+        loadingLabel={`Looking for ${symbol}'s careers system. First read lands within a few minutes.`}
+      />
+    );
+  }
+  if (data.kind === "uncovered") {
+    return (
+      <EmptyState
+        title={`No careers system found for ${symbol}.`}
+        message="Gloomberb reads companies' own careers systems. This one either has none we can read or lists roles only on third-party job boards."
+        actions={<Button label="Look again" onPress={reload} />}
+      />
+    );
+  }
+  return (
+    <CompanyView
+      summary={data.summary}
+      width={width}
+      height={height}
+      focused={focused}
+      loading={status === "loading"}
+      error={status === "error" ? error : null}
+      reload={reload}
+      registrationId={registrationId}
+    />
+  );
+}
+
+// Coverage home ------------------------------------------------------------------
+
+/**
+ * Every company under coverage, ranked; opening a row shows that company's
+ * hiring in place, the way a feed opens a story.
+ */
+function HomeView({ width, height, focused, registrationId }: { width: number; height: number; focused: boolean; registrationId: string }) {
   const { nativePaneChrome } = useUiCapabilities();
   const { navigateTicker } = usePluginTickerActions();
-  const request = useCallback(() => fetchJobsMovers(), []);
+  const request = useCallback(() => fetchJobsMovers(undefined, MOVERS_PAGE), []);
   const resource = useAsyncResource(request);
   const { data, status, error, reload } = resource;
   const [sort, setSort] = usePluginPaneState<MoverSort>("jobs:movers-sort", DEFAULT_MOVER_SORT);
   const [selectedIdx, setSelectedIdx] = useState(0);
+  const [open, setOpen] = usePluginPaneState<string | null>("jobs:open", null);
+  const tableScrollRef = useRef<ScrollBoxRenderable | null>(null);
 
-  const rows = useMemo(() => sortMoverRows(buildMoverRows(data?.movers ?? []), sort), [data, sort]);
+  const loadMoversPage = useCallback(
+    (offset: number) => fetchJobsMovers(undefined, MOVERS_PAGE, offset).then((page) => page.movers),
+    [],
+  );
+  const more = useAppendedPages<CloudJobsMoverPayload>(
+    data?.asOf ?? "",
+    data?.movers.length ?? 0,
+    data?.total ?? data?.movers.length ?? 0,
+    loadMoversPage,
+  );
+  const movers = useMemo(() => [...(data?.movers ?? []), ...more.items], [data, more.items]);
+  const loadMoreFromScroll = useTableLoadMore(tableScrollRef, !!data && !open && more.hasMore && !more.loadingMore, more.loadMore);
+
+  const rows = useMemo(() => sortMoverRows(buildMoverRows(movers), sort), [movers, sort]);
   const hasHistory = rows.some((row) => row.mover.change30d != null);
   const hasWeek = moversHaveWeekHistory(rows);
   const columns = useMemo(() => buildMoverColumns(width, hasHistory, hasWeek), [width, hasHistory, hasWeek]);
+  const selected = rows[Math.min(selectedIdx, rows.length - 1)] ?? null;
+  const openMover: CloudJobsMoverPayload | null = useMemo(
+    () => (open ? (movers.find((mover) => mover.ticker === open) ?? null) : null),
+    [open, movers],
+  );
+  const detailOpen = !!open;
 
   useShortcut((event) => {
     if (!focused) return;
@@ -441,16 +578,28 @@ function MoversView({ width, height, focused, registrationId }: { width: number;
       event.preventDefault?.();
       event.stopPropagation?.();
       reload();
+    } else if (isPlainKey(event, "t")) {
+      const ticker = open ?? selected?.ticker;
+      if (!ticker) return;
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      navigateTicker(ticker);
     }
   });
 
   usePaneFooter(registrationId, () => ({
-    info: [
-      ...(status === "loading" ? [{ id: "loading", parts: [{ text: "loading", tone: "muted" as const }] }] : []),
-      ...(error ? [{ id: "error", parts: [{ text: error.slice(0, 60), tone: "warning" as const }] }] : []),
-      ...(data ? [{ id: "covered", parts: [{ text: `${formatNumber(data.covered, 0)} companies covered`, tone: "muted" as const }] }] : []),
-    ],
-  }), [status, error, data]);
+    info: detailOpen
+      ? []
+      : [
+          ...(status === "loading" ? [{ id: "loading", parts: [{ text: "loading", tone: "muted" as const }] }] : []),
+          ...(more.loadingMore ? [{ id: "loading-more", parts: [{ text: "loading more companies", tone: "muted" as const }] }] : []),
+          ...(error ? [{ id: "error", parts: [{ text: error.slice(0, 60), tone: "warning" as const }] }] : []),
+          ...(data ? [{ id: "covered", parts: [{ text: `${formatNumber(data.covered, 0)} companies covered`, tone: "muted" as const }] }] : []),
+        ],
+    hints: open || selected
+      ? [{ id: "ticker", key: "t", label: "icker", onPress: () => navigateTicker((open ?? selected?.ticker)!) }]
+      : [],
+  }), [status, more.loadingMore, error, data, detailOpen, open, selected, navigateTicker]);
 
   const renderCell = useCallback((row: MoverRow, column: MoverColumn, _index: number, rowState: { selected: boolean }): DataTableCell => {
     const selectedColor = rowState.selected ? colors.selectedText : undefined;
@@ -463,26 +612,44 @@ function MoversView({ width, height, focused, registrationId }: { width: number;
         return { text: row.open, color: selectedColor ?? colors.textBright };
       case "change":
         return { text: row.change, color: selectedColor ?? toneColor(changeTone(row.changeValue)) };
-      case "velocity":
-        return { text: row.velocity, color: selectedColor ?? toneColor(changeTone(row.velocityValue)) };
+      case "posted30d":
+        return { text: row.posted30d, color: selectedColor ?? colors.text };
       case "new7d":
         return { text: row.new7d, color: selectedColor ?? colors.text };
       case "function":
         return { text: row.function, color: selectedColor ?? colors.textDim };
+      case "country":
+        return { text: row.country, color: selectedColor ?? colors.textDim };
     }
   }, []);
 
   if (status === "loading" && !data) return <PaneStatusBody loading align="center" loadingLabel="Loading hiring data..." />;
   if (status === "error" && !data) return <PaneStatusBody error={error ?? "Could not load hiring data."} errorTitle="Could not load hiring data." />;
 
+  const tableHeight = Math.max(3, height - (nativePaneChrome ? 1 : 0));
   return (
     <Box flexDirection="column" width={width} height={height}>
-      <DataTableView<MoverRow, MoverColumn>
+      <DataTableStackView<MoverRow, MoverColumn>
         focused={focused}
+        scrollRef={tableScrollRef}
+        onBodyScrollActivity={loadMoreFromScroll}
+        detailOpen={detailOpen}
+        onBack={() => setOpen(null)}
+        detailTitle={openMover ? [openMover.ticker, openMover.companyName].filter(Boolean).join(" · ") : open ?? undefined}
+        detailContent={open ? (
+          <CompanyPanel
+            symbol={open}
+            companyName={openMover?.companyName ?? null}
+            width={width}
+            height={Math.max(4, height - 1)}
+            focused={focused}
+            registrationId={registrationId}
+          />
+        ) : null}
         selection={{ kind: "index", selectedIndex: rows.length ? Math.min(selectedIdx, rows.length - 1) : -1, onChange: setSelectedIdx }}
-        onActivate={(row) => navigateTicker(row.ticker)}
+        onActivate={(row) => setOpen(row.ticker)}
         rootWidth={width}
-        rootHeight={Math.max(3, height - (nativePaneChrome ? 1 : 0))}
+        rootHeight={tableHeight}
         columns={columns}
         freezeFirstColumn
         items={rows}
@@ -503,7 +670,7 @@ export interface JobsViewProps {
   width: number;
   height: number;
   focused: boolean;
-  /** The research tab always shows the company; the pane shows movers when unbound. */
+  /** The research tab always shows the company; the pane shows coverage when unbound. */
   companyOnly?: boolean;
 }
 
@@ -514,73 +681,21 @@ export function JobsView({ width, height, focused, companyOnly = false }: JobsVi
   const access = usePlanAccess();
   const registrationId = JOBS_PANE_ID;
 
-  const request = useCallback(
-    (force: boolean) => fetchJobs(symbol!, { name: companyName, force }),
-    [symbol, companyName],
-  );
-  const resource = useAsyncResource<JobsCompanyState>(symbol ? request : null);
-  const { data, status, error, reload } = resource;
-
-  // While the server is looking for the company, ask again on a timer.
-  useEffect(() => {
-    if (data?.kind !== "pending") return;
-    const timer = setTimeout(() => reload(), PENDING_POLL_MS);
-    return () => clearTimeout(timer);
-  }, [data, reload]);
-
-  const deniedStatus = data?.kind === "denied" ? data.status : null;
-  const signInRequired = !access.signedIn || deniedStatus === 401;
-  const verificationRequired = !signInRequired && (!access.emailVerified || deniedStatus === 403);
-  const proRequired = !signInRequired && !verificationRequired && (!access.hasProAccess || deniedStatus === 402);
-
-  if (signInRequired || verificationRequired) {
-    return <SignInWall action="see who is hiring" needsVerification={verificationRequired} />;
-  }
-  if (proRequired) {
-    return <ProWall action={symbol ? `Open ${symbol}'s hiring picture with Pro.` : ""} />;
-  }
+  if (!access.signedIn) return <SignInWall action="see who is hiring" />;
+  if (!access.emailVerified) return <SignInWall action="see who is hiring" needsVerification />;
+  if (!access.hasProAccess) return <ProWall action={symbol ? `Open ${symbol}'s hiring picture with Pro.` : ""} />;
 
   if (!symbol) {
     if (companyOnly) return <EmptyState title="No ticker selected." message="Select a ticker to see its hiring." />;
-    return <MoversView width={width} height={height} focused={focused} registrationId={registrationId} />;
+    return <HomeView width={width} height={height} focused={focused} registrationId={registrationId} />;
   }
-
-  if ((status === "idle" || status === "loading") && !data) {
-    return <PaneStatusBody loading align="center" loadingLabel={`Loading ${symbol} hiring...`} />;
-  }
-  if (status === "error" && !data) {
-    return <PaneStatusBody error={error ?? "Could not load hiring data."} errorTitle="Could not load hiring data." actions={<Button label="Try again" onPress={reload} />} />;
-  }
-  if (!data || data.kind === "denied") return null;
-
-  if (data.kind === "pending") {
-    return (
-      <PaneStatusBody
-        loading
-        align="center"
-        loadingLabel={`Looking for ${symbol}'s careers system. First read lands within a few minutes.`}
-      />
-    );
-  }
-  if (data.kind === "uncovered") {
-    return (
-      <EmptyState
-        title={`No careers system found for ${symbol}.`}
-        message="Gloomberb reads companies' own careers systems. This one either has none we can read or lists roles only on third-party job boards."
-        actions={<Button label="Look again" onPress={reload} />}
-      />
-    );
-  }
-
   return (
-    <CompanyView
-      summary={data.summary}
+    <CompanyPanel
+      symbol={symbol}
+      companyName={companyName}
       width={width}
       height={height}
       focused={focused}
-      loading={status === "loading"}
-      error={status === "error" ? error : null}
-      reload={reload}
       registrationId={registrationId}
     />
   );

@@ -192,7 +192,6 @@ describe("built-in composite plugin ownership", () => {
     expect(registry.getPanePluginId("analytics")).toBe("portfolio");
     expect(registry.getPanePluginId("help")).toBe("application");
     expect(registry.getPanePluginId("connections")).toBe("application");
-    expect(registry.getCommandPluginId("earnings-monitor-shortcut")).toBe("macro");
     expect(registry.getCommandPluginId("gridlock-all")).toBe("application");
     expect(registry.allPlugins.has("analytics")).toBe(false);
     expect(registry.allPlugins.has("kelly-sizer")).toBe(false);

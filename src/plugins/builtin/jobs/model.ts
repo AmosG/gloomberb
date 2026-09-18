@@ -73,43 +73,23 @@ export function seriesToChartPoints(summary: Pick<CloudJobsSummaryPayload, "seri
   }));
 }
 
-/**
- * Roles posted per week, from the systems' own posting dates, for the
- * currently open roles. Older weeks are thinner because their postings have
- * had longer to fill, so the chart reads as the intake of the current
- * backlog rather than a history of hiring volume.
- */
-export function weeklyToChartPoints(summary: Pick<CloudJobsSummaryPayload, "postedByWeek">): ProjectedChartPoint[] {
-  if (summary.postedByWeek.length === 0) return [];
-  // Weeks with nothing posted are absent from the payload; they are zeros on
-  // the chart, which also pins the axis at zero for a count.
-  const counts = new Map(summary.postedByWeek.map((point) => [point.weekStart, point.count]));
-  const first = utcDate(summary.postedByWeek[0]!.weekStart);
-  const last = utcDate(summary.postedByWeek.at(-1)!.weekStart);
-  const points: ProjectedChartPoint[] = [];
-  for (let at = first.getTime(); at <= last.getTime(); at += 7 * 86_400_000) {
-    const date = new Date(at);
-    const count = counts.get(date.toISOString().slice(0, 10)) ?? 0;
-    points.push({ date, open: count, high: count, low: count, close: count, volume: 0 });
-  }
-  if (points.length > 0 && points.every((point) => point.close > 0)) {
-    // Pin the axis at zero: a week before the first with nothing posted.
-    const date = new Date(first.getTime() - 7 * 86_400_000);
-    points.unshift({ date, open: 0, high: 0, low: 0, close: 0, volume: 0 });
-  }
-  return points;
+/** The open-roles history, drawn once there is a week of daily points. */
+export function historyChartPoints(summary: CloudJobsSummaryPayload): ProjectedChartPoint[] | null {
+  return summary.series.length >= 7 ? seriesToChartPoints(summary) : null;
 }
 
-/** The open-roles history once there is enough of it; the intake curve before that. */
-export function primaryChart(summary: CloudJobsSummaryPayload): {
-  kind: "history" | "intake";
-  title: string;
-  points: ProjectedChartPoint[];
-} {
-  if (summary.series.length >= 7) {
-    return { kind: "history", title: "Open roles", points: seriesToChartPoints(summary) };
-  }
-  return { kind: "intake", title: "Roles posted per week", points: weeklyToChartPoints(summary) };
+/** Open roles by posting age as share bars, oldest last. */
+export function buildAgeBars(summary: Pick<CloudJobsSummaryPayload, "ageBuckets" | "openCount">): ShareBarRow[] {
+  const buckets = summary.ageBuckets ?? [];
+  const max = Math.max(1, ...buckets.map((bucket) => bucket.count));
+  return buckets.map((bucket) => ({
+    key: bucket.id,
+    label: bucket.label,
+    count: bucket.count,
+    share: summary.openCount > 0 ? bucket.count / summary.openCount : 0,
+    ratio: bucket.count / max,
+    delta: null,
+  }));
 }
 
 export function formatChange(change: CloudJobsChange | null | undefined): string {
@@ -117,13 +97,6 @@ export function formatChange(change: CloudJobsChange | null | undefined): string
   const sign = change.count > 0 ? "+" : "";
   const percent = change.percent != null ? ` (${sign}${formatNumber(change.percent, 1)}%)` : "";
   return `${sign}${change.count}${percent}`;
-}
-
-export function formatVelocity(velocity: CloudJobsSummaryPayload["postingVelocity"]): string {
-  if (!velocity) return "-";
-  if (velocity.percent == null) return `${velocity.recent} vs ${velocity.prior}`;
-  const sign = velocity.percent > 0 ? "+" : "";
-  return `${sign}${formatNumber(velocity.percent, 0)}% (${velocity.recent} vs ${velocity.prior})`;
 }
 
 export function changeTone(value: number | null | undefined): "positive" | "negative" | "neutral" {
@@ -280,7 +253,7 @@ export function buildShareBars(buckets: readonly CloudJobsBucket[], limit: numbe
 
 // Movers table --------------------------------------------------------------
 
-export type MoverColumnId = "ticker" | "company" | "open" | "change" | "velocity" | "new7d" | "function";
+export type MoverColumnId = "ticker" | "company" | "open" | "change" | "posted30d" | "new7d" | "function" | "country";
 export type MoverColumn = DataTableColumn & { id: MoverColumnId };
 
 export interface MoverRow {
@@ -291,10 +264,12 @@ export interface MoverRow {
   open: string;
   change: string;
   changeValue: number | null;
-  velocity: string;
-  velocityValue: number | null;
+  posted30d: string;
+  posted30dValue: number | null;
   new7d: string;
   function: string;
+  country: string;
+  countryShare: number | null;
 }
 
 export function buildMoverRows(movers: readonly CloudJobsMoverPayload[]): MoverRow[] {
@@ -306,12 +281,12 @@ export function buildMoverRows(movers: readonly CloudJobsMoverPayload[]): MoverR
     open: formatCompact(mover.openCount),
     change: mover.change30d ? formatChange(mover.change30d) : "",
     changeValue: mover.change30d?.percent ?? mover.change30d?.count ?? null,
-    velocity: mover.postingVelocity?.percent != null
-      ? `${mover.postingVelocity.percent > 0 ? "+" : ""}${formatNumber(mover.postingVelocity.percent, 0)}%`
-      : "",
-    velocityValue: mover.postingVelocity?.percent ?? null,
+    posted30d: mover.posted30d != null ? formatCompact(mover.posted30d) : "",
+    posted30dValue: mover.posted30d ?? null,
     new7d: mover.new7d > 0 ? String(mover.new7d) : "",
     function: functionLabel(mover.topFunction),
+    country: mover.topCountry ? `${mover.topCountry.code} ${formatShare(mover.topCountry.share)}` : "",
+    countryShare: mover.topCountry?.share ?? null,
   }));
 }
 
@@ -322,9 +297,10 @@ export function buildMoverColumns(width: number, hasHistory: boolean, hasWeek = 
     { id: "company", label: "COMPANY", width: narrow ? 18 : 28, align: "left", flexGrow: 1 },
     { id: "open", label: "OPEN", width: 8, align: "right" },
     ...(hasHistory ? [{ id: "change" as const, label: "30D", width: 14, align: "right" as const }] : []),
-    { id: "velocity", label: "POSTING PACE", width: 13, align: "right" },
+    { id: "posted30d", label: "POSTED 30D", width: 11, align: "right" },
     ...(hasWeek ? [{ id: "new7d" as const, label: "NEW 7D", width: 8, align: "right" as const }] : []),
     ...(narrow ? [] : [{ id: "function" as const, label: "TOP FUNCTION", width: 18, align: "left" as const }]),
+    ...(narrow ? [] : [{ id: "country" as const, label: "TOP COUNTRY", width: 12, align: "left" as const }]),
   ];
 }
 
@@ -350,8 +326,10 @@ function moverSortValue(row: MoverRow, columnId: MoverColumnId): string | number
       return row.mover.openCount;
     case "change":
       return row.changeValue;
-    case "velocity":
-      return row.velocityValue;
+    case "posted30d":
+      return row.posted30dValue;
+    case "country":
+      return row.countryShare;
     case "new7d":
       return row.mover.new7d;
     case "function":

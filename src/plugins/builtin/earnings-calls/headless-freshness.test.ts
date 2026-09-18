@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { apiClient, setCloudApiFetchTransport } from "../../../api-client";
 import { MemoryPluginPersistence } from "../../../test-support/plugin-persistence";
 import { attachEarningsCallsPersistence, resetEarningsCallsPersistence } from "./data";
-import { earningsTranscriptHeadless } from "./headless";
+import { earningsCallsHeadless } from "./headless";
 import { buildHeadlessFunctionReport } from "../../../cli/pane-functions/headless";
 import { createDefaultConfig } from "../../../types/config";
 const call = {id:"FIRST-q1",ticker:"FIRST",companyName:"First Corp",fiscalYear:2026,fiscalQuarter:1,callAt:"2026-05-01T20:00:00Z",status:"published",durationSeconds:3600,wordCount:50,hasTranscript:true,sentiment:null};
@@ -22,7 +22,7 @@ for (const stale of [false, true]) {
         ? Response.json({ error: "Controlled call discovery outage" }, { status: 503 })
         : Response.json({ calls: [call] }));
       const report = await buildHeadlessFunctionReport({
-        headless: earningsTranscriptHeadless, token: "ECT", label: "Earnings Call Transcript",
+        headless: earningsCallsHeadless, token: "CALLS", label: "Earnings Calls",
         options: { quarter, section: "guidance", limit: 20, offset: 0 }, instance: { settings: {} }, capability: { id: "transcript" },
       } as never, { config: createDefaultConfig("/tmp/unused-offline-transcript-report") } as never, "FIRST");
       expect(report.data).toMatchObject({ complete: !stale, rowCount: 1, unavailableSymbols: [],

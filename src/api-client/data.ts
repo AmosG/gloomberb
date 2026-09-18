@@ -355,8 +355,8 @@ export class CloudDataApi {
     return this.request<CloudJobsPostingsPayload>(cloudJobsPostingsPath(ticker, params));
   }
 
-  async getCloudJobsMovers(limit?: number): Promise<CloudJobsMoversPayload> {
-    return this.request<CloudJobsMoversPayload>(cloudJobsMoversPath(limit));
+  async getCloudJobsMovers(limit?: number, offset?: number): Promise<CloudJobsMoversPayload> {
+    return this.request<CloudJobsMoversPayload>(cloudJobsMoversPath(limit, offset));
   }
 
   async getCloudEarningsCalls(
