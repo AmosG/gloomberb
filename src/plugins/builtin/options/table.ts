@@ -5,6 +5,7 @@ import { blendHex, colors } from "../../../theme/colors";
 import { blendForContrast, contrastRatio } from "../../../theme/color-utils";
 import { formatCompact } from "../../../utils/format";
 import { formatMarketPrice } from "../../../market-data/market/format";
+import { optionSpread } from "./market-reference";
 import type {
   OptionColumn,
   OptionFieldId,
@@ -27,6 +28,7 @@ const OPTION_TEXT_MIN_CONTRAST = 4.5;
 export const OPTION_FIELD_DEFS: OptionFieldDef[] = [
   { id: "bid", label: "Bid", header: "BID", width: 7, description: "Best bid price." },
   { id: "ask", label: "Ask", header: "ASK", width: 7, description: "Best ask price." },
+  { id: "spread", label: "Spread", header: "SPRD", width: 6, description: "Bid/ask width as a share of the midpoint, the comparable liquidity read across strikes." },
   { id: "last", label: "Last", header: "LAST", width: 7, description: "Last traded price." },
   { id: "delta", label: "Delta", header: "Δ", width: 6, description: "Price sensitivity to a $1 move in the underlying." },
   { id: "gamma", label: "Gamma", header: "Γ", width: 7, description: "Delta sensitivity to a $1 move in the underlying." },
@@ -38,7 +40,7 @@ export const OPTION_FIELD_DEFS: OptionFieldDef[] = [
   { id: "openInterest", label: "Open interest", header: "OI", width: 6, description: "Outstanding open contracts." },
 ];
 
-export const DEFAULT_OPTION_FIELD_IDS: OptionFieldId[] = ["bid", "ask", "last", "delta", "gamma"];
+export const DEFAULT_OPTION_FIELD_IDS: OptionFieldId[] = ["bid", "ask", "spread", "last", "delta", "gamma"];
 
 const OPTION_FIELDS_BY_ID = new Map(OPTION_FIELD_DEFS.map((field) => [field.id, field]));
 
@@ -117,6 +119,18 @@ export function formatIv(value: number | undefined): string {
   return `${(value * 100).toFixed(1)}%`;
 }
 
+/**
+ * The width between the two quotes, as a share of their midpoint: the absolute
+ * spread is a subtraction away from the neighbouring columns, while the share
+ * is what makes one strike comparable to another. Bounded above by 200%, since
+ * a zero bid leaves no midpoint at all. Why a quote has none is the status
+ * bar's to say; the column has room only for the number.
+ */
+function formatSpreadPercent(contract: OptionContract): string {
+  const spread = optionSpread(contract);
+  return spread.kind === "two-sided" ? `${spread.percentOfMid.toFixed(1)}%` : "—";
+}
+
 function formatGreek(value: number | undefined): string {
   if (value == null || !Number.isFinite(value)) return "\u2014";
   return value.toFixed(3).replace(/^(-?)0\./, "$1.");
@@ -141,7 +155,7 @@ function optionColumnRole(column: Pick<OptionColumn, "field" | "side">): OptionC
   if (column.field === "strike") return "strike";
   if (column.field === "iv") return "iv";
   if (column.field === "volume" || column.field === "openInterest") return "activity";
-  if (column.field === "bid" || column.field === "ask") return "price";
+  if (column.field === "bid" || column.field === "ask" || column.field === "spread") return "price";
   return column.side ?? "strike";
 }
 
@@ -229,6 +243,8 @@ function formatOptionContractCell(
       return formatMarketPrice(contract.bid, { assetCategory: "OPT", maxWidth: column.width });
     case "ask":
       return formatMarketPrice(contract.ask, { assetCategory: "OPT", maxWidth: column.width });
+    case "spread":
+      return formatSpreadPercent(contract);
     case "volume":
       return formatCompact(contract.volume);
     case "openInterest":

@@ -5,6 +5,7 @@ import type { OptionSide, OptionValuation } from "../options-calculator/model";
 export type OptionFieldId =
   | "bid"
   | "ask"
+  | "spread"
   | "last"
   | "delta"
   | "gamma"
