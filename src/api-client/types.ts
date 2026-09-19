@@ -535,6 +535,10 @@ export interface CloudJobsSeriesPoint {
   open: number;
   new: number;
   closed: number;
+  /** Open standing roles the company hires for continuously. */
+  evergreen?: number;
+  /** Open contract and temporary roles. */
+  contract?: number;
 }
 
 export interface CloudJobsBucket {
@@ -554,6 +558,9 @@ export interface CloudJobsPosting {
   location: string | null;
   country: string | null;
   remote: boolean | null;
+  employmentKind?: string | null;
+  /** A standing posting for a continuous-hiring role; null when unjudged. */
+  evergreen?: boolean | null;
   postedAt: string | null;
   postedPrecision: "exact" | "approximate" | "floor" | null;
   firstSeenAt: string;
@@ -595,6 +602,16 @@ export interface CloudJobsSummaryPayload {
   /** Open postings the system dates within the last 30 days. */
   posted30d?: number | null;
   remoteShare: number | null;
+  /**
+   * Open roles that are standing postings for continuous-hiring positions
+   * (baristas, servers, store associates, nurses). One more of those says
+   * nothing about the company's plans; open minus evergreen is the count of
+   * specific roles.
+   */
+  evergreenCount?: number;
+  evergreenShare?: number | null;
+  /** Share of open roles that are contract or temporary, among those known. */
+  contractShare?: number | null;
   medianAgeDays: number | null;
   series: CloudJobsSeriesPoint[];
   /** The current backlog by how long each role has been posted. */

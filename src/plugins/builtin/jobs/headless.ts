@@ -59,6 +59,19 @@ function companyBundle(symbol: string, state: JobsCompanyState, roleLimit: numbe
           { label: "Change, 90 days", value: summary.change90d?.count ?? null, formatted: formatChange(summary.change90d) },
           { label: "Posted, last 30 days", value: summary.posted30d ?? null, formatted: summary.posted30d != null ? formatNumber(summary.posted30d, 0) : "-" },
           { label: "Remote share", value: summary.remoteShare, formatted: summary.remoteShare != null ? formatShare(summary.remoteShare) : "-" },
+          ...(summary.evergreenShare != null && summary.evergreenCount != null
+            ? [
+                { label: "Evergreen share", value: summary.evergreenShare, formatted: formatShare(summary.evergreenShare) },
+                {
+                  label: "Specific roles",
+                  value: Math.max(0, summary.openCount - summary.evergreenCount),
+                  formatted: formatNumber(Math.max(0, summary.openCount - summary.evergreenCount), 0),
+                },
+              ]
+            : []),
+          ...(summary.contractShare != null
+            ? [{ label: "Contract share", value: summary.contractShare, formatted: formatShare(summary.contractShare) }]
+            : []),
           { label: "Median posting age", value: summary.medianAgeDays, formatted: summary.medianAgeDays != null ? `${summary.medianAgeDays} days` : "-" },
           ...(summary.salary
             ? [{
