@@ -88,6 +88,10 @@ function installResolutionEventBridge(renderer: CliRenderer): void {
 export async function createOpenTuiHost(): Promise<OpenTuiHost> {
   resetTerminalInputState();
 
+  // A watch reload SIGKILLs this process, so the player it started outlives it
+  // and keeps decoding into the terminal. Clear those before taking the screen.
+  terminalMedia.reapStale();
+
   // Mouse motion is reported per pixel; our @opentui/core patch coalesces moves
   // to one per fastest frame (~16ms) so pointer-tracked UI like the chart
   // crosshair follows the cursor instead of stepping at 10fps.
@@ -150,8 +154,6 @@ export async function createOpenTuiHost(): Promise<OpenTuiHost> {
         throw new Error("mpv is required for terminal TV playback. Install mpv and try again.");
       }
 
-      // A player stranded by a previous run keeps decoding video, so clear it
-      // before adding another one.
       terminalMedia.reapStale();
       renderer.suspend();
       try {
