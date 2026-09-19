@@ -126,7 +126,7 @@ function ProWall({ action }: { action: string }) {
 
 function CompanyHeader({ summary, width }: { summary: CloudJobsSummaryPayload; width: number }) {
   const trend = summary.change30d;
-  const columns = Math.max(2, Math.min(5, Math.floor(width / 18)));
+  const columns = Math.max(2, Math.min(7, Math.floor(width / 18)));
   const statWidth = Math.floor((width - 2) / columns);
   // Details only fit beside the figure on a roomy column.
   const roomy = statWidth >= 26;
@@ -144,6 +144,16 @@ function CompanyHeader({ summary, width }: { summary: CloudJobsSummaryPayload; w
     { label: "new this week", value: formatNumber(summary.new7d, 0), detail: roomy && summary.coverage.daysObserved <= 1 ? "first read" : undefined },
     { label: "remote", value: summary.remoteShare != null ? formatShare(summary.remoteShare) : "-" },
     { label: "median age", value: summary.medianAgeDays != null ? `${summary.medianAgeDays}d` : "-" },
+    // Standing roles the company hires for continuously; the rest are the
+    // openings that say something about its plans.
+    {
+      label: "evergreen",
+      value: summary.evergreenShare != null ? formatShare(summary.evergreenShare) : "-",
+      detail: roomy && summary.evergreenCount != null && summary.evergreenShare != null
+        ? `${formatNumber(Math.max(0, summary.openCount - summary.evergreenCount), 0)} specific`
+        : undefined,
+    },
+    { label: "contract", value: summary.contractShare != null ? formatShare(summary.contractShare) : "-" },
   ];
   return (
     <Box flexDirection="row" paddingX={1} height={2} flexShrink={0}>
