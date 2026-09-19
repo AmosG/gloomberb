@@ -699,6 +699,31 @@ describe("loadConfig", () => {
     expect(invalidConfig.onboardingProgress).toBeUndefined();
   });
 
+  test("keeps keybinding overrides, including ones that do not parse, and drops junk shapes", async () => {
+    const dataDir = await createTempConfigDir();
+    await writeConfigJson(dataDir, createSavedConfig({
+      keybindings: {
+        actions: { "ticker-search": ["Ctrl+T", 7], help: null, "command-bar": "Bogus+P", "": "F1", quit: 3 },
+        commands: { "Alt+1": "DES AAPL", F5: "", F6: 12 },
+        extra: true,
+      },
+    }));
+
+    const config = await loadConfig(dataDir);
+    expect(config.keybindings).toEqual({
+      actions: { "ticker-search": ["Ctrl+T"], help: null, "command-bar": "Bogus+P" },
+      commands: { "Alt+1": "DES AAPL" },
+    });
+
+    await saveConfig({ ...config, keybindings: { actions: {}, commands: {} } });
+    const saved = JSON.parse(await readFile(join(dataDir, "config.json"), "utf8")) as Record<string, unknown>;
+    expect("keybindings" in saved).toBe(false);
+
+    const emptyDir = await createTempConfigDir();
+    await writeConfigJson(emptyDir, createSavedConfig({ keybindings: "Ctrl+T" }));
+    expect((await loadConfig(emptyDir)).keybindings).toBeUndefined();
+  });
+
   test("marks pre-onboarding configs complete so existing users skip the wizard", async () => {
     const dataDir = await createTempConfigDir();
     await writeConfigJson(dataDir, createSavedConfig({

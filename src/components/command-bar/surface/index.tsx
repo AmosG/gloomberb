@@ -26,6 +26,7 @@ import { useCommandBarPanelRuntime } from "../panel/runtime";
 import { useCommandBarRouteEffects } from "../routing/effects";
 import { useCommandBarEnvironment } from "./environment";
 import { useCommandBarActionRuntime } from "../action-runtime";
+import { requestKeybindingCapture } from "../../../app/keybindings";
 
 interface CommandBarProps {
   dataProvider: DataProvider;
@@ -274,6 +275,14 @@ export function CommandBar({
       : {}),
   }), [askAssistNow, askGloomTemplate, assistActive, assistAutoAsk, assistState, planAccess.emailVerified, startAssistSignUp]);
 
+  // The bar cannot capture a key while it owns the keyboard, so the request
+  // goes to Help > Shortcuts, which captures once the bar is gone.
+  const bindKey = useCallback((query: string) => {
+    requestKeybindingCapture({ kind: "command", query });
+    closeAll({ revertThemePreview: false });
+    pluginRegistry.showPane("help");
+  }, [closeAll, pluginRegistry]);
+
   const searchProviders = useMemo(
     () => getAvailableCommandBarSearchProviders(pluginRegistry, state.config.disabledPlugins),
     [pluginRegistry, state.config.disabledPlugins],
@@ -315,6 +324,7 @@ export function CommandBar({
     activeTickerSymbol,
     assist,
     availableCommands,
+    bindKey,
     buildLayoutItems,
     buildPaneSettingItems,
     buildTickerSearchResultItems,
@@ -394,6 +404,18 @@ export function CommandBar({
     visibleListStateRef,
   });
   runRootQueryRef.current = runRootQuery;
+
+  // A key bound to command bar text opens the bar with a run-query launch:
+  // the text is submitted exactly as if typed and entered, once per request,
+  // and text the parser cannot run stays in the input.
+  const processedRunQuerySequenceRef = useRef<number | null>(null);
+  useEffect(() => {
+    const launch = state.commandBarLaunchRequest;
+    if (!launch || launch.kind !== "run-query" || !state.commandBarOpen) return;
+    if (processedRunQuerySequenceRef.current === launch.sequence) return;
+    processedRunQuerySequenceRef.current = launch.sequence;
+    runRootQuery(launch.query);
+  }, [runRootQuery, state.commandBarLaunchRequest, state.commandBarOpen]);
 
   const routeListState = useRouteListState({
     activeMatch,

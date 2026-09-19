@@ -4,8 +4,9 @@ import { act } from "react";
 import type { PluginRegistry } from "../plugins/registry";
 import { TestDialogProvider, createOpenTuiTestRoot as createRoot, emitKeypress as emitTuiKeypress, type TestKeyEvent } from "../renderers/opentui/test-utils";
 import { createInitialState, type AppAction, type AppState } from "../state/app/context";
-import { cloneLayout, createDefaultConfig } from "../types/config";
+import { cloneLayout, createDefaultConfig, type KeybindingsConfig } from "../types/config";
 import { useAppGlobalShortcuts } from "./global-shortcuts";
+import { resolveKeybindings } from "./keybindings";
 
 let testSetup: Awaited<ReturnType<typeof createTestRenderer>> | undefined;
 let root: ReturnType<typeof createRoot> | undefined;
@@ -63,12 +64,19 @@ function ShortcutHarness({
     dispatch,
     focusedTickerSymbol,
     isDetachedWindow: false,
+    keybindings: resolveKeybindings(state.config.keybindings),
     pluginRegistry,
     refreshTicker,
     startUpdate: () => {},
     state,
   });
   return <text>ready</text>;
+}
+
+function stateWithKeybindings(suffix: string, keybindings: KeybindingsConfig, options: Partial<AppState> = {}): AppState {
+  const config = createDefaultConfig(`/tmp/gloomberb-global-shortcuts-${suffix}`);
+  config.keybindings = keybindings;
+  return { ...createInitialState(config), ...options };
 }
 
 async function renderHarness(
@@ -150,6 +158,98 @@ describe("useAppGlobalShortcuts", () => {
     }]);
     expect(event.defaultPrevented).toBe(true);
     expect(event.propagationStopped).toBe(true);
+  });
+
+  test("opens ticker search with the primary modifier and T for layouts without a backtick key", async () => {
+    const actions: AppAction[] = [];
+    const state = createInitialState(createDefaultConfig("/tmp/gloomberb-global-shortcuts-ctrl-t"));
+    await renderHarness(state, createRegistry(), (action) => actions.push(action));
+
+    const event = await emitKeypress({ name: "t", super: true });
+
+    expect(actions).toEqual([{
+      type: "SET_COMMAND_BAR",
+      open: true,
+      query: "",
+      launch: { kind: "ticker-search", query: "" },
+    }]);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  test("a rebound action answers to its new key and not the old one", async () => {
+    const actions: AppAction[] = [];
+    const state = stateWithKeybindings("rebound", {
+      actions: { "ticker-search": "Ctrl+Shift+S", "command-bar": "Ctrl+Shift+P", help: null },
+    });
+    const openedPanes: string[] = [];
+    await renderHarness(state, createRegistry(undefined, (paneId) => openedPanes.push(paneId)), (action) => actions.push(action));
+
+    const oldKey = await emitKeypress({ name: "`" });
+    expect(actions).toEqual([]);
+    expect(oldKey.defaultPrevented).toBe(false);
+
+    await emitKeypress({ name: "s", ctrl: true, shift: true });
+    expect(actions).toEqual([{
+      type: "SET_COMMAND_BAR",
+      open: true,
+      query: "",
+      launch: { kind: "ticker-search", query: "" },
+    }]);
+
+    await emitKeypress({ name: "p", ctrl: true });
+    expect(actions).toHaveLength(1);
+    await emitKeypress({ name: "p", ctrl: true, shift: true });
+    expect(actions[1]).toEqual({ type: "TOGGLE_COMMAND_BAR" });
+
+    const help = await emitKeypress({ name: "?", shift: true });
+    expect(openedPanes).toEqual([]);
+    expect(help.defaultPrevented).toBe(false);
+  });
+
+  test("a command binding opens the bar with the text to run, unless the bar or a dialog owns the keyboard", async () => {
+    const actions: AppAction[] = [];
+    const state = stateWithKeybindings("command", { commands: { "Alt+1": "DES AAPL" } });
+    await renderHarness(state, createRegistry(), (action) => actions.push(action));
+
+    const event = await emitKeypress({ name: "1", alt: true });
+
+    expect(actions).toEqual([{
+      type: "SET_COMMAND_BAR",
+      open: true,
+      query: "DES AAPL",
+      launch: { kind: "run-query", query: "DES AAPL" },
+    }]);
+    expect(event.defaultPrevented).toBe(true);
+    expect(event.propagationStopped).toBe(true);
+  });
+
+  test("a Control command binding yields to the editor while text is being typed", async () => {
+    const actions: AppAction[] = [];
+    const state = stateWithKeybindings("command-typing", { commands: { "Ctrl+N": "NEWS", F5: "NEWS" } }, { inputCaptured: true });
+    await renderHarness(state, createRegistry(), (action) => actions.push(action));
+
+    const ctrl = await emitKeypress({ name: "n", ctrl: true });
+    expect(actions).toEqual([]);
+    expect(ctrl.defaultPrevented).toBe(false);
+
+    await emitKeypress({ name: "f5" });
+    expect(actions).toEqual([{
+      type: "SET_COMMAND_BAR",
+      open: true,
+      query: "NEWS",
+      launch: { kind: "run-query", query: "NEWS" },
+    }]);
+  });
+
+  test("a plugin shortcut honours its override", async () => {
+    let executed = 0;
+    const state = stateWithKeybindings("plugin-override", { actions: { "plugin:test-shortcut": "Alt+X" } });
+    await renderHarness(state, createRegistry(() => { executed += 1; }), () => {});
+
+    await emitKeypress({ name: "x" });
+    expect(executed).toBe(0);
+    await emitKeypress({ name: "x", alt: true });
+    expect(executed).toBe(1);
   });
 
   function layoutState(suffix: string, options: { commandBarOpen?: boolean } = {}) {

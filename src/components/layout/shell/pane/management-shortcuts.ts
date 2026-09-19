@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useShortcut } from "../../../../react/input";
+import { useKeybindings } from "../../../../app/keybindings";
 import type { WindowEditMode } from "../../../../plugins/registry";
 import {
   createDoubleEscapeCloseState,
@@ -51,6 +52,7 @@ export function useShellPaneManagementShortcuts({
   toggleFocusedPaneFloating,
 }: ShellPaneManagementShortcutOptions): void {
   const doubleEscapeCloseRef = useRef(createDoubleEscapeCloseState());
+  const keybindings = useKeybindings();
 
   useEffect(() => {
     if (overlayOpen) {
@@ -59,7 +61,7 @@ export function useShellPaneManagementShortcuts({
   }, [overlayOpen]);
 
   useShortcut((event) => {
-    const shortcut = resolvePaneManagementShortcut(event);
+    const shortcut = resolvePaneManagementShortcut(event, keybindings);
     if (shortcut === "toggle-fullscreen" && !overlayOpen) {
       if (!inputCaptured || inputCaptureAllowsPaneManagementShortcut(shortcut, event)) {
         if (hasActiveDrag()) {
@@ -96,7 +98,7 @@ export function useShellPaneManagementShortcuts({
   }, { phase: "before" });
 
   useShortcut((event) => {
-    const shortcut = resolvePaneManagementShortcut(event);
+    const shortcut = resolvePaneManagementShortcut(event, keybindings);
     if (!shortcut || hasActiveDrag() || overlayOpen) return;
     if (inputCaptured && !inputCaptureAllowsPaneManagementShortcut(shortcut, event)) return;
 

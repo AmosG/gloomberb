@@ -1,4 +1,5 @@
-import { useShortcut } from "../../react/input";
+import { useShortcut, type KeyEventLike } from "../../react/input";
+import { matchesKeyChord, useKeybindings, type ResolvedKeybindings } from "../../app/keybindings";
 import type { NativeSelectElement } from "../ui/native-select";
 import {
   consumeShortcutEvent,
@@ -56,6 +57,21 @@ interface CommandBarKeyboardShortcutArgs {
   workflowNativeSelectRefs: RefLike<Map<string, NativeSelectElement>>;
 }
 
+/**
+ * Whether the key that opens ticker search should close the bar instead. The
+ * bar toggles on any ticker-search chord that could not be typed into the
+ * query: a modifier chord, a function key, or the backtick, which has always
+ * closed the bar and is not a character anyone searches for. A plain letter
+ * bound to ticker search stays typeable here.
+ */
+export function isTickerSearchToggle(event: KeyEventLike, keybindings: ResolvedKeybindings): boolean {
+  const chords = keybindings.actionsById.get("ticker-search")?.chords ?? [];
+  return chords.some((chord) => (
+    (chord.key === "`" || chord.ctrl || chord.cmd || chord.primary || chord.alt || /^f\d+$/.test(chord.key))
+    && matchesKeyChord(chord, event)
+  ));
+}
+
 export function useCommandBarKeyboardShortcuts({
   acceptRootShortcutTab,
   acceptSelectedShortcutTab,
@@ -82,8 +98,9 @@ export function useCommandBarKeyboardShortcuts({
   visibleListStateRef,
   workflowNativeSelectRefs,
 }: CommandBarKeyboardShortcutArgs): void {
+  const keybindings = useKeybindings();
   useShortcut((event) => {
-    if (event.name === "escape" || event.name === "`") {
+    if (event.name === "escape" || isTickerSearchToggle(event, keybindings)) {
       event.stopPropagation();
       event.preventDefault();
       // Esc first backs out of an AI answer, leaving the query and bar intact.

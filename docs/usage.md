@@ -18,7 +18,7 @@ The desktop app and TUI share the command language and plugin system. The [brows
 | Key | Action |
 |-----|--------|
 | `Ctrl+P` | Open command mode |
-| `` ` `` | Open ticker search |
+| `` ` `` / `Ctrl+T` | Open ticker search |
 | `Ctrl+,` | Open focused pane settings |
 | `Ctrl+W` | Close focused pane (unless it is locked) |
 | `Ctrl+Shift+M` | Move focused window (`WIN resize` starts resize mode) |
@@ -36,6 +36,38 @@ The desktop app and TUI share the command language and plugin system. The [brows
 Desktop builds also accept `Cmd/Ctrl+K` for the command bar, the matching `Cmd` shortcuts on macOS, `Cmd/Ctrl+Shift+O` to pop out a pane, and `Cmd/Ctrl+Shift+C` to copy a focused pane screenshot.
 
 Wide tables retain their columns in narrow panes. Use their horizontal scrollbar or horizontal wheel/trackpad scrolling to reach additional fields; `Ctrl+Left` / `Ctrl+Right` moves by half a table viewport. Plain arrows keep their existing navigation behavior, and text-field shortcuts remain with the editor.
+
+### Custom keybindings
+
+Every global and pane management key can be moved, and any command bar text can be put on a key. Open `HELP`, pick the Shortcuts tab, and press Enter on a row (or click it) to capture the next chord; Backspace unbinds, `0` restores the default, and `N` starts a command binding. Typing a command in the command bar, such as `DES AAPL` or `CN`, offers a `Bind a key` row as well. Capture shows exactly what your terminal delivered for the combination, which matters on terminals that fold `Ctrl+Shift+F` into `Ctrl+F`.
+
+The same table lives in `config.json` under `keybindings` and through the CLI:
+
+```bash
+gloomberb config get keybindings
+gloomberb config set keybindings.actions.ticker-search "Ctrl+T"
+gloomberb config set keybindings.actions.command-bar "Ctrl+Shift+P"
+gloomberb config set keybindings.actions.help null
+gloomberb config set keybindings.actions.ticker-search default
+gloomberb config set keybindings.commands.Alt+1 "DES AAPL"
+gloomberb config set keybindings.commands.F5 CN
+```
+
+```json
+"keybindings": {
+  "actions": {
+    "ticker-search": "Ctrl+T",
+    "command-bar": ["Ctrl+Shift+P", "CmdOrCtrl+K"],
+    "help": null
+  },
+  "commands": {
+    "Alt+1": "DES AAPL",
+    "F5": "CN"
+  }
+}
+```
+
+Chords use the accelerator grammar: `Ctrl`, `Cmd`, `Alt`, `Shift`, and `CmdOrCtrl` for Control in the terminal and Command on a Mac desktop, followed by a key (`K`, `,`, `` ` ``, `Tab`, `F5`). Action ids are listed by `gloomberb config get keybindings`; plugin shortcuts use `plugin:<shortcut id>`. Command bindings run the text exactly as if typed, so `CN` opens news for the focused ticker, and they need a modifier or a function key so they never fire while you type. Control chords also yield to a focused text field. Bindings are per machine and stay out of cloud sync. Anything that does not parse or lands on a taken key is reported at launch and in Help > Shortcuts.
 
 ## Command Reference
 

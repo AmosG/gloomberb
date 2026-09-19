@@ -158,6 +158,26 @@ export interface OnboardingProgress {
   checkoutOpenedAt?: string;
 }
 
+/**
+ * User key overrides. Bindings use the accelerator grammar the menus already
+ * speak (`CmdOrCtrl+Shift+F`, `Alt+1`, `F5`, `` ` ``). Kept local to the machine:
+ * a laptop with a German layout and a desk with a US keyboard want different keys.
+ */
+export interface KeybindingsConfig {
+  /**
+   * Built-in actions keyed by action id (`ticker-search`, `command-bar`,
+   * `pane-close`, `plugin:<shortcutId>`). A string or list replaces the default
+   * chords; `null` unbinds the action.
+   */
+  actions?: Record<string, string | string[] | null>;
+  /**
+   * Command bar text to run when a chord is pressed, keyed by chord. The text is
+   * submitted exactly as if typed, so `DES AAPL` opens the security and `NEWS`
+   * infers the focused ticker.
+   */
+  commands?: Record<string, string>;
+}
+
 export interface AppConfig {
   dataDir: string;
   configVersion: number;
@@ -190,6 +210,8 @@ export interface AppConfig {
   lastLaunchedVersion?: string;
   /** Local, resumable progress. This is intentionally not cloud-synced. */
   onboardingProgress?: OnboardingProgress;
+  /** Key overrides for this machine. Absent means every default applies. */
+  keybindings?: KeybindingsConfig;
 }
 
 export const TICKER_RESEARCH_PANE_ID = "ticker-research";

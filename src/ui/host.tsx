@@ -1,7 +1,8 @@
 import { createContext, useContext, type ComponentType, type ReactNode, type Ref } from "react";
 import type { ContextMenuItem } from "../types/context-menu";
 import type { AppNotificationRequest } from "../types/plugin";
-import { formatCommandBarShortcut, getShortcutDisplayMode } from "../utils/shortcut-labels";
+import { getShortcutDisplayMode } from "../utils/shortcut-labels";
+import { formatAdvertisedChord, useKeybindings } from "../app/keybindings";
 import type { AsciiFontName } from "./ascii-font";
 
 export const TextAttributes = {
@@ -459,11 +460,12 @@ export function useUiCapabilities(): NonNullable<UiHost["capabilities"]> {
 
 /**
  * The binding this host advertises for the command bar, for any copy that has
- * to name it. Read from the host rather than hardcoded so a hint never quotes a
- * key the header does not.
+ * to name it. Read from the keybinding table and the host rather than
+ * hardcoded, so a hint never quotes a key the header does not.
  */
 export function useCommandBarShortcut(): string {
-  return formatCommandBarShortcut(getShortcutDisplayMode(useUiHost().kind));
+  const keybindings = useKeybindings();
+  return formatAdvertisedChord(keybindings, "command-bar", getShortcutDisplayMode(useUiHost().kind));
 }
 
 export function useRendererHost(): RendererHost {

@@ -13,7 +13,7 @@ import {
   formatPlatformShortcutLabel,
   type ShortcutDisplayMode,
 } from "../../../utils/shortcut-labels";
-import { PANE_MANAGEMENT_ACCELERATORS } from "./shortcuts";
+import { PANE_MANAGEMENT_ACCELERATORS, type PaneManagementAccelerators } from "./shortcuts";
 import { t } from "../../../i18n";
 import { displayWidth, truncateToDisplayWidth } from "../../../utils/format";
 
@@ -36,13 +36,14 @@ export function menuForPane(
   sharePane?: () => void | Promise<void>,
   linkItems: ContextMenuItem[] = [],
   exportPaneCsv?: (paneId: string) => void | Promise<void>,
+  accelerators: PaneManagementAccelerators = PANE_MANAGEMENT_ACCELERATORS,
 ): ContextMenuItem[] {
   const baseActions: ContextMenuItem[] = [];
   if (pluginRegistry.hasPaneSettings(pane.instance.instanceId)) {
     baseActions.push({
       id: "settings",
       label: "Settings",
-      accelerator: PANE_MANAGEMENT_ACCELERATORS.settings,
+      accelerator: accelerators.settings,
       onSelect: () => openPaneSettings(pane.instance.instanceId),
     });
   }
@@ -50,7 +51,7 @@ export function menuForPane(
     baseActions.push({
       id: "share-pane",
       label: "Share Pane",
-      accelerator: PANE_MANAGEMENT_ACCELERATORS.share,
+      accelerator: accelerators.share,
       onSelect: sharePane,
     });
   }
@@ -58,7 +59,7 @@ export function menuForPane(
     baseActions.push({
       id: "copy-screenshot",
       label: "Copy Screenshot",
-      accelerator: PANE_MANAGEMENT_ACCELERATORS.copyScreenshot,
+      accelerator: accelerators.copyScreenshot,
       onSelect: () => copyPaneScreenshot(pane.instance.instanceId),
     });
   }
@@ -66,7 +67,7 @@ export function menuForPane(
     baseActions.push({
       id: "export-csv",
       label: "Export CSV",
-      accelerator: PANE_MANAGEMENT_ACCELERATORS.exportCsv,
+      accelerator: accelerators.exportCsv,
       onSelect: () => exportPaneCsv(pane.instance.instanceId),
     });
   }
@@ -75,7 +76,7 @@ export function menuForPane(
     baseActions.push({
       id: "dock",
       label: "Dock Pane",
-      accelerator: PANE_MANAGEMENT_ACCELERATORS.toggleFloating,
+      accelerator: accelerators.toggleFloating,
       onSelect: () => {
         persistLayout(applyDrop(layout, pane.instance.instanceId, { kind: "frame", edge: "right" }));
         focusPane(pane.instance.instanceId);
@@ -85,7 +86,7 @@ export function menuForPane(
     baseActions.push({
       id: "float",
       label: "Float Pane",
-      accelerator: PANE_MANAGEMENT_ACCELERATORS.toggleFloating,
+      accelerator: accelerators.toggleFloating,
       onSelect: () => {
         persistLayout(floatPane(layout, pane.instance.instanceId, width, contentHeight, pane.def));
         focusPane(pane.instance.instanceId);
@@ -97,7 +98,7 @@ export function menuForPane(
     baseActions.push({
       id: "pop-out",
       label: "Pop Out",
-      accelerator: PANE_MANAGEMENT_ACCELERATORS.popOut,
+      accelerator: accelerators.popOut,
       onSelect: () => {
         void desktopWindowBridge.popOutPane?.(pane.instance.instanceId);
       },
@@ -115,7 +116,7 @@ export function menuForPane(
   baseActions.push({
     id: "close-pane",
     label: "Close Pane",
-    accelerator: PANE_MANAGEMENT_ACCELERATORS.close,
+    accelerator: accelerators.close,
     onSelect: () => persistLayout(removePane(layout, pane.instance.instanceId)),
   });
 
@@ -128,13 +129,13 @@ export function menuForPane(
     {
       id: "window-move-mode",
       label: "Move Window...",
-      accelerator: PANE_MANAGEMENT_ACCELERATORS.windowMode,
+      accelerator: accelerators.windowMode,
       onSelect: () => pluginRegistry.openWindowMode(pane.instance.instanceId, "move"),
     },
     {
       id: "window-resize-mode",
       label: "Resize Window...",
-      accelerator: PANE_MANAGEMENT_ACCELERATORS.windowResizeMode,
+      accelerator: accelerators.windowResizeMode,
       onSelect: () => pluginRegistry.openWindowMode(pane.instance.instanceId, "resize"),
     },
   );

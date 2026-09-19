@@ -47,6 +47,8 @@ export interface RootResultModelOptions {
   /** Natural-language fallback rows; omit to build the list without an AI section. */
   assist?: AssistRowHandlers | null;
   availableCommands: Command[];
+  /** Offers to bind a key to the typed text once it resolves to a command; omit to hide the row. */
+  bindKey?: (query: string) => void;
   buildLayoutItems: (query: string, options?: { confirmDangerousActions?: boolean }) => ResultItem[];
   buildPaneSettingItems: (paneId: string | null, query: string) => ResultItem[];
   buildWindowModeItems: (arg: string) => ResultItem[];
@@ -97,6 +99,30 @@ function isAssistSectionVisible(
   return assist.auto;
 }
 
+/**
+ * The text a key would replay. An inferred ticker is left out on purpose: the
+ * key should follow the focused ticker at press time, not freeze today's.
+ */
+function buildBindKeyItem(
+  intent: Exclude<RootShortcutIntent, { kind: "none" }>,
+  bindKey: (query: string) => void,
+): ResultItem {
+  const query = intent.kind !== "inferred-complete" && intent.argText
+    ? `${intent.prefix} ${intent.argText}`
+    : intent.prefix;
+  return {
+    id: `bind-key:${query}`,
+    label: `Bind a key to ${query}`,
+    detail: intent.kind === "inferred-complete"
+      ? `${intent.label} for the focused ticker, on a key of your choice`
+      : `${intent.label}, on a key of your choice`,
+    category: "Keybindings",
+    kind: "action",
+    defaultSelectable: false,
+    action: () => bindKey(query),
+  };
+}
+
 export function buildRootResultModel(options: RootResultModelOptions): RootResultModel {
   const {
     activeCollectionId,
@@ -104,6 +130,7 @@ export function buildRootResultModel(options: RootResultModelOptions): RootResul
     activeTickerSymbol,
     assist,
     availableCommands,
+    bindKey,
     buildLayoutItems,
     buildPaneSettingItems,
     buildWindowModeItems,
@@ -243,6 +270,12 @@ export function buildRootResultModel(options: RootResultModelOptions): RootResul
   // Counted before the provider rows: they arrive whenever the network answers,
   // and an assist offer must not appear and vanish as they land.
   const matchCount = items.length;
+  // Text the parser can run is text a key can run, so the offer sits under the
+  // match it would replay. Never the default selection: Enter still runs the
+  // command itself.
+  if (bindKey && shortcutClaimedQuery && rootShortcutIntent.kind !== "ambiguous") {
+    items.push(buildBindKeyItem(rootShortcutIntent, bindKey));
+  }
   // A resolved prefix means the user is speaking the command language, so
   // free-text providers stay out of the way.
   if (!shortcutClaimedQuery) {

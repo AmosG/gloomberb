@@ -33,7 +33,9 @@ import { useThemeColors } from "../../../theme/theme-context";
 import { tf } from "../../../i18n";
 import { getPaneDisplayTitle } from "../pane/title";
 import type { PaneHeaderQuickSetting } from "../pane/header";
-import { formatCommandBarShortcut, getShortcutDisplayMode } from "../../../utils/shortcut-labels";
+import { getShortcutDisplayMode } from "../../../utils/shortcut-labels";
+import { formatAdvertisedChord, useKeybindings } from "../../../app/keybindings";
+import { paneManagementAccelerators } from "./shortcuts";
 import {
   actionMenuWidth,
   menuForPane,
@@ -113,6 +115,8 @@ export function Shell({
   const { setTransientLayout } = useTransientLayout();
   const uiKind = useUiHost().kind;
   const shortcutDisplayMode = getShortcutDisplayMode(uiKind);
+  const keybindings = useKeybindings();
+  const paneAccelerators = useMemo(() => paneManagementAccelerators(keybindings), [keybindings]);
   const { nativePaneChrome = false, nativeContextMenu, precisePointer, publicSharing, titleBarOverlay, cellHeightPx } = useUiCapabilities();
   const { showContextMenu } = useContextMenu();
   const { width, height } = useViewport();
@@ -552,6 +556,7 @@ export function Shell({
         persistLayout,
       }),
       canExportPaneCsv(paneId) ? exportPaneCsv : undefined,
+      paneAccelerators,
     );
     void showContextMenu(context, items, event).then((shown) => {
       if (shown) return;
@@ -575,7 +580,7 @@ export function Shell({
         items: fallbackItems,
       });
     });
-  }, [canExportPaneCsv, contentHeight, copyPaneScreenshot, desktopWindowBridge, exportPaneCsv, focusPane, getPaneTitle, nativePaneChrome, openPaneSettings, paneMap, paneState, persistLayout, pluginRegistry, publicSharing, rendererHost.copyPngImage, sharePane, shortcutDisplayMode, showContextMenu, titleState, visibleLayout, width]);
+  }, [canExportPaneCsv, contentHeight, copyPaneScreenshot, desktopWindowBridge, exportPaneCsv, focusPane, getPaneTitle, nativePaneChrome, openPaneSettings, paneAccelerators, paneMap, paneState, persistLayout, pluginRegistry, publicSharing, rendererHost.copyPngImage, sharePane, shortcutDisplayMode, showContextMenu, titleState, visibleLayout, width]);
 
   const {
     handleFloatingCloseMouseDown,
@@ -659,7 +664,7 @@ export function Shell({
           <AsciiText text="Gloomberb" font="wordmark" color={colors.textMuted} />
           <Box height={1} />
           <Text fg={colors.textDim}>
-            {tf("{shortcut} to get started.", { shortcut: formatCommandBarShortcut(shortcutDisplayMode) })}
+            {tf("{shortcut} to get started.", { shortcut: formatAdvertisedChord(keybindings, "command-bar", shortcutDisplayMode) })}
           </Text>
         </Box>
       </Box>
