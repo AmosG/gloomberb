@@ -1,20 +1,12 @@
 import type { KeyEventLike } from "../../../react/input";
-
-export const PANE_MANAGEMENT_ACCELERATORS = {
-  settings: "CmdOrCtrl+,",
-  fullscreen: "CmdOrCtrl+Shift+F",
-  toggleFloating: "CmdOrCtrl+Shift+D",
-  popOut: "CmdOrCtrl+Shift+O",
-  copyScreenshot: "CmdOrCtrl+Shift+C",
-  exportCsv: "CmdOrCtrl+Shift+E",
-  share: "CmdOrCtrl+Shift+S",
-  close: "CmdOrCtrl+W",
-  closeAllFloating: "CmdOrCtrl+Alt+W",
-  layoutGallery: "CmdOrCtrl+Shift+L",
-  gridlockAll: "CmdOrCtrl+Shift+G",
-  windowMode: "CmdOrCtrl+Shift+M",
-  windowResizeMode: "CmdOrCtrl+Shift+R",
-} as const;
+import {
+  getDefaultKeybindings,
+  isPaneKeybindingAction,
+  matchKeybinding,
+  menuAcceleratorFor,
+  type CoreKeybindingActionId,
+  type ResolvedKeybindings,
+} from "../../../app/keybindings";
 
 export type PaneManagementShortcut =
   | "settings"
@@ -31,28 +23,56 @@ export type PaneManagementShortcut =
   | "window-mode"
   | "window-resize-mode";
 
+const PANE_ACTION_TO_SHORTCUT: Partial<Record<CoreKeybindingActionId, PaneManagementShortcut>> = {
+  "pane-settings": "settings",
+  "pane-fullscreen": "toggle-fullscreen",
+  "pane-float": "toggle-floating",
+  "pane-pop-out": "pop-out",
+  "pane-screenshot": "copy-screenshot",
+  "pane-export-csv": "export-csv",
+  "pane-share": "share",
+  "pane-close": "close",
+  "close-floating-panes": "close-all-floating",
+  "layout-gallery": "layout-gallery",
+  "tidy-windows": "gridlock-all",
+  "window-move-mode": "window-mode",
+  "window-resize-mode": "window-resize-mode",
+};
+
+export type PaneManagementAccelerators = Record<
+  "settings" | "fullscreen" | "toggleFloating" | "popOut" | "copyScreenshot" | "exportCsv" | "share" | "close"
+  | "closeAllFloating" | "layoutGallery" | "gridlockAll" | "windowMode" | "windowResizeMode",
+  string | undefined
+>;
+
+/** Menu accelerators for the pane actions, read from the same table the keys are. */
+export function paneManagementAccelerators(keybindings: ResolvedKeybindings): PaneManagementAccelerators {
+  return {
+    settings: menuAcceleratorFor(keybindings, "pane-settings"),
+    fullscreen: menuAcceleratorFor(keybindings, "pane-fullscreen"),
+    toggleFloating: menuAcceleratorFor(keybindings, "pane-float"),
+    popOut: menuAcceleratorFor(keybindings, "pane-pop-out"),
+    copyScreenshot: menuAcceleratorFor(keybindings, "pane-screenshot"),
+    exportCsv: menuAcceleratorFor(keybindings, "pane-export-csv"),
+    share: menuAcceleratorFor(keybindings, "pane-share"),
+    close: menuAcceleratorFor(keybindings, "pane-close"),
+    closeAllFloating: menuAcceleratorFor(keybindings, "close-floating-panes"),
+    layoutGallery: menuAcceleratorFor(keybindings, "layout-gallery"),
+    gridlockAll: menuAcceleratorFor(keybindings, "tidy-windows"),
+    windowMode: menuAcceleratorFor(keybindings, "window-move-mode"),
+    windowResizeMode: menuAcceleratorFor(keybindings, "window-resize-mode"),
+  };
+}
+
+export const PANE_MANAGEMENT_ACCELERATORS = paneManagementAccelerators(getDefaultKeybindings());
+
 export function resolvePaneManagementShortcut(
   event: Pick<KeyEventLike, "name" | "key" | "ctrl" | "meta" | "super" | "shift" | "alt">,
+  keybindings: ResolvedKeybindings = getDefaultKeybindings(),
 ): PaneManagementShortcut | null {
-  if (!event.ctrl && !event.meta && !event.super) return null;
-  const rawName = event.name ?? event.key ?? "";
-  const name = rawName.toLowerCase();
-  const shifted = event.shift || rawName !== name;
-  if (!shifted && event.alt && name === "w") return "close-all-floating";
-  if (!shifted && name === "w") return "close";
-  if (!shifted && name === ",") return "settings";
-  if (!shifted || event.alt) return null;
-  if (name === "c") return "copy-screenshot";
-  if (name === "e") return "export-csv";
-  if (name === "s") return "share";
-  if (name === "d") return "toggle-floating";
-  if (name === "f") return "toggle-fullscreen";
-  if (name === "o") return "pop-out";
-  if (name === "l") return "layout-gallery";
-  if (name === "g") return "gridlock-all";
-  if (name === "m") return "window-mode";
-  if (name === "r") return "window-resize-mode";
-  return null;
+  const match = matchKeybinding(keybindings, event);
+  if (!match || match.kind !== "action" || !isPaneKeybindingAction(match.id)) return null;
+  return PANE_ACTION_TO_SHORTCUT[match.id as CoreKeybindingActionId] ?? null;
 }
 
 export function inputCaptureAllowsPaneManagementShortcut(

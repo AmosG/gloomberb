@@ -39,6 +39,7 @@ import { useBrokerImportRuntime } from "./app/runtime/broker-import";
 import { useDesktopDeepLinkRuntime } from "./app/runtime/desktop-deeplink";
 import { useDesktopApplicationMenuRuntime } from "./app/runtime/desktop-menu";
 import { useAppGlobalShortcuts } from "./app/global-shortcuts";
+import { KeybindingsProvider, useResolvedKeybindings } from "./app/keybindings";
 import { useAppPaneRuntime } from "./app/pane-runtime";
 import { bindPluginRegistryRuntimeAccess } from "./app/runtime/plugin-bindings";
 import { useAppStartupRuntime } from "./app/runtime/startup";
@@ -380,10 +381,12 @@ function AppInner({
     }
   }, [focusedTickerSymbol]);
 
+  const keybindings = useResolvedKeybindings(state.config.keybindings);
   useAppGlobalShortcuts({
     dispatch,
     focusedTickerSymbol,
     isDetachedWindow,
+    keybindings,
     pluginRegistry,
     refreshTicker,
     startUpdate,
@@ -392,27 +395,30 @@ function AppInner({
 
   if (desktopWindowBridge?.kind === "detached" && desktopWindowBridge.paneId) {
     return (
-      <ContextMenuProvider pluginRegistry={pluginRegistry}>
-        <RemoteControlHost
-          adapter={remoteControlAdapter}
-          dispatch={dispatch}
-          getState={getRemoteState}
-          pluginRegistry={pluginRegistry}
-          desktopWindowBridge={desktopWindowBridge}
-        >
-          <ThemedAppRoot>
-            <DetachedPaneShell
-              pluginRegistry={pluginRegistry}
-              desktopWindowBridge={{ ...desktopWindowBridge, kind: "detached", paneId: desktopWindowBridge.paneId }}
-            />
-            <ToastViewport position="bottom-right" />
-          </ThemedAppRoot>
-        </RemoteControlHost>
-      </ContextMenuProvider>
+      <KeybindingsProvider value={keybindings}>
+        <ContextMenuProvider pluginRegistry={pluginRegistry}>
+          <RemoteControlHost
+            adapter={remoteControlAdapter}
+            dispatch={dispatch}
+            getState={getRemoteState}
+            pluginRegistry={pluginRegistry}
+            desktopWindowBridge={desktopWindowBridge}
+          >
+            <ThemedAppRoot>
+              <DetachedPaneShell
+                pluginRegistry={pluginRegistry}
+                desktopWindowBridge={{ ...desktopWindowBridge, kind: "detached", paneId: desktopWindowBridge.paneId }}
+              />
+              <ToastViewport position="bottom-right" />
+            </ThemedAppRoot>
+          </RemoteControlHost>
+        </ContextMenuProvider>
+      </KeybindingsProvider>
     );
   }
 
   return (
+    <KeybindingsProvider value={keybindings}>
     <ContextMenuProvider pluginRegistry={pluginRegistry}>
       <RemoteControlHost
         adapter={remoteControlAdapter}
@@ -460,6 +466,7 @@ function AppInner({
         </ThemedAppRoot>
       </RemoteControlHost>
     </ContextMenuProvider>
+    </KeybindingsProvider>
   );
 }
 

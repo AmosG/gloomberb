@@ -2,6 +2,7 @@ import type {
   AppConfig,
   BrokerInstanceConfig,
   ChartPreferences,
+  KeybindingsConfig,
   LayoutConfig,
   OnboardingProgress,
   LayoutOrigin,
@@ -65,6 +66,7 @@ export function normalizeLoadedConfig(saved: Record<string, unknown>, dataDir: s
     onboardingComplete,
     onboardingProgress,
     lastLaunchedVersion: typeof candidate.lastLaunchedVersion === "string" ? candidate.lastLaunchedVersion : undefined,
+    ...withKeybindings(sanitizeKeybindings(candidate.keybindings)),
   };
 
   const needsSave =
@@ -120,8 +122,47 @@ export function normalizeConfigForSave(config: AppConfig): AppConfig {
     onboardingComplete: onboardingProgress ? false : config.onboardingComplete,
     onboardingProgress,
   };
+  delete persisted.keybindings;
+  Object.assign(persisted, withKeybindings(sanitizeKeybindings(config.keybindings)));
 
   return persisted;
+}
+
+function withKeybindings(keybindings: KeybindingsConfig | undefined): Pick<AppConfig, "keybindings"> {
+  return keybindings ? { keybindings } : {};
+}
+
+/**
+ * Keeps the shape honest without judging the contents: a chord that does not
+ * parse stays in the file and is reported when the table resolves, so a typo
+ * is something the user can see and fix rather than something that vanishes.
+ */
+function sanitizeKeybindings(value: unknown): KeybindingsConfig | undefined {
+  if (!isPlainRecord(value)) return undefined;
+  const actions: Record<string, string | string[] | null> = {};
+  if (isPlainRecord(value.actions)) {
+    for (const [actionId, binding] of Object.entries(value.actions)) {
+      if (!actionId.trim()) continue;
+      if (binding === null || typeof binding === "string") {
+        actions[actionId] = binding;
+      } else if (Array.isArray(binding)) {
+        actions[actionId] = binding.filter((entry): entry is string => typeof entry === "string");
+      }
+    }
+  }
+  const commands: Record<string, string> = {};
+  if (isPlainRecord(value.commands)) {
+    for (const [chord, query] of Object.entries(value.commands)) {
+      if (chord.trim() && typeof query === "string" && query.trim()) commands[chord] = query;
+    }
+  }
+  const hasActions = Object.keys(actions).length > 0;
+  const hasCommands = Object.keys(commands).length > 0;
+  if (!hasActions && !hasCommands) return undefined;
+  return {
+    ...(hasActions ? { actions } : {}),
+    ...(hasCommands ? { commands } : {}),
+  };
 }
 
 function sanitizeFontSize(value: unknown, fallback: number): number {

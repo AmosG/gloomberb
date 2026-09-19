@@ -395,6 +395,18 @@ export function CommandBar({
   });
   runRootQueryRef.current = runRootQuery;
 
+  // A key bound to command bar text opens the bar with a run-query launch:
+  // the text is submitted exactly as if typed and entered, once per request,
+  // and text the parser cannot run stays in the input.
+  const processedRunQuerySequenceRef = useRef<number | null>(null);
+  useEffect(() => {
+    const launch = state.commandBarLaunchRequest;
+    if (!launch || launch.kind !== "run-query" || !state.commandBarOpen) return;
+    if (processedRunQuerySequenceRef.current === launch.sequence) return;
+    processedRunQuerySequenceRef.current = launch.sequence;
+    runRootQuery(launch.query);
+  }, [runRootQuery, state.commandBarLaunchRequest, state.commandBarOpen]);
+
   const routeListState = useRouteListState({
     activeMatch,
     adaptTickerSearchRouteResult,

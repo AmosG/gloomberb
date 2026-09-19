@@ -1,4 +1,4 @@
-import type { Dispatch } from "react";
+import { useEffect, useRef, type Dispatch } from "react";
 import { useShortcut } from "../react/input";
 import { useNativeRenderer, useRendererHost } from "../ui";
 import { useDialogState } from "../ui/dialog";
@@ -14,11 +14,49 @@ import {
   isPasteShortcut,
   pasteSystemClipboard,
 } from "../utils/selection-clipboard";
+import {
+  describeKeybindingIssue,
+  getDefaultKeybindings,
+  matchKeybinding,
+  matchesKeyChord,
+  resolvePluginShortcutChords,
+  type ResolvedKeybindings,
+} from "./keybindings";
+
+/**
+ * Tells the user once per launch when `config.json` holds a binding that does
+ * not parse, names no action, or lands on a key another action already has.
+ * Silence would read as "I set it and nothing happened".
+ */
+function useKeybindingIssueNotice(
+  keybindings: ResolvedKeybindings,
+  pluginRegistry: PluginRegistry,
+  initialized: boolean,
+) {
+  const noticedRef = useRef<string | null>(null);
+  const issueKey = keybindings.issues.map(describeKeybindingIssue).join("\n");
+  useEffect(() => {
+    if (!initialized || !issueKey || noticedRef.current === issueKey) return;
+    noticedRef.current = issueKey;
+    const lines = keybindings.issues.map(describeKeybindingIssue);
+    const shown = lines.slice(0, 3);
+    const more = lines.length - shown.length;
+    pluginRegistry.notify({
+      body: [
+        "Keybindings need attention:",
+        ...shown,
+        ...(more > 0 ? [`and ${more} more; see Help > Shortcuts.`] : []),
+      ].join("\n"),
+      type: "error",
+    });
+  }, [initialized, issueKey, keybindings.issues, pluginRegistry]);
+}
 
 export function useAppGlobalShortcuts({
   dispatch,
   focusedTickerSymbol,
   isDetachedWindow,
+  keybindings = getDefaultKeybindings(),
   pluginRegistry,
   refreshTicker,
   startUpdate,
@@ -27,6 +65,8 @@ export function useAppGlobalShortcuts({
   dispatch: Dispatch<AppAction>;
   focusedTickerSymbol: string | null;
   isDetachedWindow: boolean;
+  /** The resolved table; the app resolves it once and shares it with the shell. */
+  keybindings?: ResolvedKeybindings;
   pluginRegistry: PluginRegistry;
   refreshTicker: (symbol: string, exchange?: string, tickerOverride?: TickerRecord | null, priority?: number) => void;
   startUpdate: (release: ReleaseInfo) => void;
@@ -35,6 +75,7 @@ export function useAppGlobalShortcuts({
   const dialogOpen = useDialogState((s) => s.isOpen);
   const nativeRenderer = useNativeRenderer();
   const rendererHost = useRendererHost();
+  useKeybindingIssueNotice(keybindings, pluginRegistry, state.initialized);
 
   useShortcut((event) => {
     if (isCopyShortcut(event) && copyActiveSelection(nativeRenderer)) {
@@ -48,17 +89,18 @@ export function useAppGlobalShortcuts({
       return;
     }
 
+    const match = matchKeybinding(keybindings, event);
+    const action = match?.kind === "action" ? match.id : null;
+
     // Terminals send Ctrl; the browser and the desktop webview send Cmd on
     // macOS, which the OpenTUI host also reports as `super` under the kitty
-    // protocol. Alt stays out so Alt-digit keeps its terminal meaning. While a
-    // dialog, the command bar or an editable field owns the keyboard the digit
-    // must not move layouts, but it still has to be swallowed there or the
-    // webview hands Cmd-digit to the browser's own tab switcher.
-    if (!isDetachedWindow
-      && /^[1-9]$/.test(event.name ?? "")
-      && (event.ctrl || event.meta || event.super)) {
+    // protocol. While a dialog, the command bar or an editable field owns the
+    // keyboard the digit must not move layouts, but it still has to be
+    // swallowed there or the webview hands Cmd-digit to the browser's own tab
+    // switcher.
+    if (!isDetachedWindow && action === "switch-layout" && match?.kind === "action" && match.digit !== null) {
       const layouts = state.config.layouts ?? [];
-      const idx = parseInt(event.name!, 10) - 1;
+      const idx = match.digit - 1;
       const uiOwnsKeyboard = dialogOpen || state.commandBarOpen || event.targetEditable === true;
       if (!uiOwnsKeyboard && idx < layouts.length && idx !== state.config.activeLayoutIndex) {
         dispatch({ type: "SWITCH_LAYOUT", index: idx });
@@ -70,16 +112,13 @@ export function useAppGlobalShortcuts({
 
     if (dialogOpen) return;
 
-    if (!isDetachedWindow && (
-      (event.name === "p" && event.ctrl)
-      || (event.name === "k" && (event.ctrl || event.meta || event.super))
-    )) {
+    if (!isDetachedWindow && action === "command-bar") {
       event.preventDefault();
       event.stopPropagation();
       dispatch({ type: "TOGGLE_COMMAND_BAR" });
       return;
     }
-    if (!isDetachedWindow && event.name === "`" && !state.commandBarOpen) {
+    if (!isDetachedWindow && action === "ticker-search" && !state.commandBarOpen) {
       event.preventDefault();
       event.stopPropagation();
       dispatch({
@@ -91,11 +130,9 @@ export function useAppGlobalShortcuts({
       return;
     }
 
-    const hasShortcutModifier = event.ctrl || event.meta || event.super || event.alt;
-
     if (state.commandBarOpen) return;
 
-    if (event.name === "tab") {
+    if (action === "focus-next-pane" || action === "focus-prev-pane") {
       const paneOrder = getVisiblePaneCycleOrder(
         state.config.layout,
         pluginRegistry,
@@ -103,50 +140,60 @@ export function useAppGlobalShortcuts({
       );
       if (paneOrder.length === 0) return;
 
-      if (event.shift) {
-        dispatch({ type: "FOCUS_PREV", paneOrder });
-      } else {
-        dispatch({ type: "FOCUS_NEXT", paneOrder });
-      }
+      dispatch({ type: action === "focus-prev-pane" ? "FOCUS_PREV" : "FOCUS_NEXT", paneOrder });
       event.preventDefault();
       event.stopPropagation();
       return;
     }
 
+    if (match?.kind === "command" && !isDetachedWindow) {
+      // Control chords belong to the editor while text is being typed; Alt,
+      // Command and function keys are never text, so they still fire.
+      const editing = state.inputCaptured || event.targetEditable === true;
+      if (editing && event.ctrl && !(event.meta || event.super)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      dispatch({
+        type: "SET_COMMAND_BAR",
+        open: true,
+        query: match.command.query,
+        launch: { kind: "run-query", query: match.command.query },
+      });
+      return;
+    }
+
     if (state.inputCaptured) return;
 
-    const isQuestionMark = event.name === "?"
-      || event.key === "?"
-      || event.sequence === "?"
-      || (event.name === "/" && event.shift);
-    if (!isDetachedWindow && !hasShortcutModifier && isQuestionMark) {
+    if (!isDetachedWindow && action === "help") {
       event.preventDefault();
       event.stopPropagation();
       pluginRegistry.showPane("help");
       return;
     }
 
-    if (!hasShortcutModifier && !isDetachedWindow && event.name === "q") {
+    if (!isDetachedWindow && action === "quit") {
       rendererHost.requestExit();
-    } else if (!hasShortcutModifier && event.name === "r") {
+    } else if (action === "refresh-ticker") {
       if (focusedTickerSymbol) {
         const ticker = state.tickers.get(focusedTickerSymbol);
         if (ticker) refreshTicker(ticker.metadata.ticker, ticker.metadata.exchange, ticker, 0);
       }
-    } else if (!hasShortcutModifier && (event.name === "R" || (event.name === "r" && event.shift))) {
+    } else if (action === "refresh-all") {
       for (const ticker of state.tickers.values()) {
         refreshTicker(ticker.metadata.ticker, ticker.metadata.exchange, ticker, 1);
       }
-    } else if (!hasShortcutModifier && event.name === "u" && state.updateAvailable && !state.updateProgress && !state.updateCheckInProgress && canSelfUpdate(state.updateAvailable)) {
-      startUpdate(state.updateAvailable);
-    } else {
+    } else if (action === "install-update") {
+      if (state.updateAvailable && !state.updateProgress && !state.updateCheckInProgress && canSelfUpdate(state.updateAvailable)) {
+        startUpdate(state.updateAvailable);
+      }
+    } else if (!action) {
       const disabledPlugins = new Set(state.config.disabledPlugins || []);
+      const keybindingsConfig = state.config.keybindings;
       for (const shortcut of pluginRegistry.shortcuts.values()) {
         const ownerId = pluginRegistry.getShortcutPluginId(shortcut.id);
         if (ownerId && disabledPlugins.has(ownerId)) continue;
-        if (shortcut.key === event.name
-            && (shortcut.ctrl ?? false) === (event.ctrl ?? false)
-            && (shortcut.shift ?? false) === (event.shift ?? false)) {
+        const chords = resolvePluginShortcutChords(keybindingsConfig, shortcut);
+        if (chords.some((chord) => matchesKeyChord(chord, event))) {
           shortcut.execute();
           break;
         }

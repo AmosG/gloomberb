@@ -43,6 +43,9 @@ export function useCommandBarLaunchRequest({
       openModeRoute("ticker-search", launch.query ?? "");
       return;
     }
+    // Submitting text needs the selection runtime, which the surface wires up
+    // after this hook; it watches for this kind itself.
+    if (launch.kind === "run-query") return;
 
     const command = pluginRegistry.commands.get(launch.commandId);
     if (!command?.wizard || command.wizard.length === 0) return;

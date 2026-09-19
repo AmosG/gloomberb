@@ -4,9 +4,9 @@ import {
   SpinnerMark,
   Text,
   TextAttributes,
+  useCommandBarShortcut,
   useRendererHost,
   useUiCapabilities,
-  useUiHost,
   type InputRenderable,
 } from "../../ui";
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
@@ -34,7 +34,6 @@ import {
 import { useViewport } from "../../react/input";
 import { t, tf } from "../../i18n";
 import { truncateToDisplayWidth } from "../../utils/format";
-import { formatCommandBarShortcut, getShortcutDisplayMode } from "../../utils/shortcut-labels";
 import { resolveMarketSummaryFit, useMarketSummary } from "./market-summary";
 import { resolveHeaderPromptGeometry } from "./shell/chrome";
 import { useWindowFullscreen } from "./window-fullscreen";
@@ -384,7 +383,6 @@ export function Header({
   const dispatch = useAppDispatch();
   const commandBarOpen = useAppSelector(selectCommandBarOpen);
   const { width: termWidth } = useViewport();
-  const uiKind = useUiHost().kind;
   const { nativePaneChrome = false, titleBarOverlay, nativeWindowChrome = titleBarOverlay, windowControls } = useUiCapabilities();
   const showWindowControls = nativeWindowChrome && windowControls === "windows";
   const windowFullscreen = useWindowFullscreen();
@@ -395,7 +393,7 @@ export function Header({
     titleBarOverlay,
     windowFullscreen,
   });
-  const shortcutLabel = formatCommandBarShortcut(getShortcutDisplayMode(uiKind));
+  const shortcutLabel = useCommandBarShortcut();
   // Desktop has its own window chrome to sit on; the terminal has none, so the
   // bar itself wears the prompt's fill and reads as a single strip.
   const headerBg = nativePaneChrome ? colors.header : headerSurface(colors);

@@ -40,6 +40,21 @@ interface CommandBarTickerSearchLaunchRequest extends CommandBarLaunchRequestBas
   query?: string;
 }
 
+/**
+ * Submit `query` the moment the bar opens, as if it had been typed and
+ * entered. A key bound to a command bar string arrives this way; text the
+ * parser cannot run stays in the input so the user sees what it resolved to.
+ */
+interface CommandBarRunQueryLaunchRequest extends CommandBarLaunchRequestBase {
+  kind: "run-query";
+  query: string;
+}
+
+export type CommandBarLaunch =
+  | { kind: "plugin-command"; commandId: string }
+  | { kind: "ticker-search"; query?: string }
+  | { kind: "run-query"; query: string };
+
 export interface AppState {
   config: AppConfig;
   tickers: Map<string, TickerRecord>;
@@ -53,7 +68,11 @@ export interface AppState {
   recentTickers: string[];
   commandBarOpen: boolean;
   commandBarQuery: string;
-  commandBarLaunchRequest: CommandBarPluginLaunchRequest | CommandBarTickerSearchLaunchRequest | null;
+  commandBarLaunchRequest:
+    | CommandBarPluginLaunchRequest
+    | CommandBarTickerSearchLaunchRequest
+    | CommandBarRunQueryLaunchRequest
+    | null;
   themePreview: string | null;
   refreshing: Set<string>;
   initialized: boolean;
@@ -86,7 +105,7 @@ export type AppAction =
       type: "SET_COMMAND_BAR";
       open: boolean;
       query?: string;
-      launch?: { kind: "plugin-command"; commandId: string } | { kind: "ticker-search"; query?: string } | null;
+      launch?: CommandBarLaunch | null;
     }
   | { type: "SET_COMMAND_BAR_QUERY"; query: string }
   | { type: "SET_REFRESHING"; symbol: string; refreshing: boolean }
