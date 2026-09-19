@@ -1,27 +1,31 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { formatActionChords, hasKeybindingCaptureRequest, subscribeKeybindingCapture, useKeybindings } from "../../../app/keybindings";
 import { Button, Section, Tabs } from "../../../components";
 import { ExternalLinkText } from "../../../components/ui";
 import { t } from "../../../i18n";
 import { colors } from "../../../theme/colors";
 import type { PaneProps } from "../../../types/plugin";
-import { Box, ScrollBox, Text, TextAttributes, useUiHost, type ScrollBoxRenderable } from "../../../ui";
+import { Box, ScrollBox, Text, TextAttributes, useUiHost } from "../../../ui";
 import { detectShortcutPlatform, formatPrimaryShortcut, getShortcutDisplayMode } from "../../../utils/shortcut-labels";
 import { getSharedRegistry } from "../../registry";
 import { usePluginAppActions } from "../../runtime";
 import type { PluginModule } from "../plugin-module";
-import { ShortcutGroup, ShortcutRow } from "./components";
+import { ShortcutRow } from "./components";
+import { FunctionsTable } from "./functions-table";
 import { KeybindingsEditor } from "./keybindings-editor";
-import { groupShortcutEntries, resolveCommandShortcuts, resolveWindowTemplates } from "./shortcut-model";
+import { resolveCommandShortcuts, resolveWindowTemplates } from "./shortcut-model";
 
 const HELP_TABS = [
   { label: "Basics", value: "basics" },
   { label: "Functions", value: "functions" },
   { label: "Shortcuts", value: "shortcuts" },
+  { label: "Reference", value: "reference" },
   { label: "Issues", value: "issues" },
 ] as const;
 
 type HelpTabId = typeof HELP_TABS[number]["value"];
+/** Tabs that are one full-height table and do their own scrolling. */
+const TABLE_TABS = new Set<HelpTabId>(["functions", "shortcuts"]);
 const GLOOMBERB_ISSUES_URL = "https://github.com/gloom-sh/gloomberb/issues";
 
 function HelpPane({ focused, width, height }: PaneProps) {
@@ -33,7 +37,6 @@ function HelpPane({ focused, width, height }: PaneProps) {
   const commandShortcuts = resolveCommandShortcuts(registry);
   const windowTemplates = resolveWindowTemplates(registry);
   const uiHost = useUiHost();
-  const scrollRef = useRef<ScrollBoxRenderable | null>(null);
   const shortcutPlatform = detectShortcutPlatform();
   const shortcutDisplayMode = getShortcutDisplayMode(uiHost.kind);
   const platformShortcut = (keys: string | readonly string[]) => formatPrimaryShortcut(keys, shortcutPlatform, shortcutDisplayMode);
@@ -64,47 +67,9 @@ function HelpPane({ focused, width, height }: PaneProps) {
 
   const renderContent = () => {
     switch (activeTabId) {
-      case "functions":
+      case "reference":
         return (
           <>
-            <Box flexDirection="row" gap={1}>
-              <Button label="Manage Plugins" onPress={openPluginManager} />
-            </Box>
-
-            <Section title="Command Prefixes">
-              {groupShortcutEntries(commandShortcuts).map((group) => (
-                <ShortcutGroup
-                  key={group.title}
-                  title={group.title}
-                  entries={group.entries}
-                />
-              ))}
-            </Section>
-
-            <Section title="Window Templates">
-              {windowTemplates.length > 0 ? groupShortcutEntries(windowTemplates).map((group) => (
-                <ShortcutGroup
-                  key={group.title}
-                  title={group.title}
-                  entries={group.entries}
-                />
-              )) : (
-                <Text fg={colors.textDim}>{t("No shortcut window templates are currently registered.")}</Text>
-              )}
-            </Section>
-          </>
-        );
-
-      case "shortcuts":
-        return (
-          <>
-            <KeybindingsEditor
-              active={activeTabId === "shortcuts"}
-              focused={focused}
-              scrollRef={scrollRef}
-              contentTop={1}
-            />
-
             <Section title="Navigation">
               <ShortcutRow
                 badges={["Up/Down", "j/k"]}
@@ -219,6 +184,11 @@ function HelpPane({ focused, width, height }: PaneProps) {
             </Section>
           </>
         );
+
+      case "functions":
+      case "shortcuts":
+        // Rendered outside the scroll box; these tabs are their own table.
+        return null;
 
       case "issues":
         return (
@@ -339,11 +309,38 @@ function HelpPane({ focused, width, height }: PaneProps) {
           scrollable={false}
         />
       </Box>
-      <ScrollBox key={activeTabId} ref={scrollRef} width={width} height={contentHeight} scrollY>
-        <Box flexDirection="column" padding={1}>
-          {renderContent()}
+      {TABLE_TABS.has(activeTabId) ? (
+        <Box flexDirection="column" width={width} height={contentHeight} paddingX={1}>
+          {activeTabId === "shortcuts" ? (
+            <KeybindingsEditor
+              active
+              focused={focused}
+              width={Math.max(1, width - 2)}
+              height={contentHeight}
+            />
+          ) : (
+            <FunctionsTable
+              commandShortcuts={commandShortcuts}
+              windowTemplates={windowTemplates}
+              focused={focused}
+              width={Math.max(1, width - 2)}
+              height={contentHeight}
+              header={(
+                <Box flexDirection="row" gap={1} flexShrink={0}>
+                  <Button label="Manage Plugins" onPress={openPluginManager} />
+                </Box>
+              )}
+              onRunPrefix={openCommandBar}
+            />
+          )}
         </Box>
-      </ScrollBox>
+      ) : (
+        <ScrollBox key={activeTabId} width={width} height={contentHeight} scrollY>
+          <Box flexDirection="column" padding={1}>
+            {renderContent()}
+          </Box>
+        </ScrollBox>
+      )}
     </Box>
   );
 }
