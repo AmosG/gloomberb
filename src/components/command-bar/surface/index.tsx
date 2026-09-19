@@ -26,6 +26,7 @@ import { useCommandBarPanelRuntime } from "../panel/runtime";
 import { useCommandBarRouteEffects } from "../routing/effects";
 import { useCommandBarEnvironment } from "./environment";
 import { useCommandBarActionRuntime } from "../action-runtime";
+import { requestKeybindingCapture } from "../../../app/keybindings";
 
 interface CommandBarProps {
   dataProvider: DataProvider;
@@ -274,6 +275,14 @@ export function CommandBar({
       : {}),
   }), [askAssistNow, askGloomTemplate, assistActive, assistAutoAsk, assistState, planAccess.emailVerified, startAssistSignUp]);
 
+  // The bar cannot capture a key while it owns the keyboard, so the request
+  // goes to Help > Shortcuts, which captures once the bar is gone.
+  const bindKey = useCallback((query: string) => {
+    requestKeybindingCapture({ kind: "command", query });
+    closeAll({ revertThemePreview: false });
+    pluginRegistry.showPane("help");
+  }, [closeAll, pluginRegistry]);
+
   const searchProviders = useMemo(
     () => getAvailableCommandBarSearchProviders(pluginRegistry, state.config.disabledPlugins),
     [pluginRegistry, state.config.disabledPlugins],
@@ -315,6 +324,7 @@ export function CommandBar({
     activeTickerSymbol,
     assist,
     availableCommands,
+    bindKey,
     buildLayoutItems,
     buildPaneSettingItems,
     buildTickerSearchResultItems,

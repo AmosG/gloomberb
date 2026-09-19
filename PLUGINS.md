@@ -1415,6 +1415,8 @@ setup(ctx) {
 }
 ```
 
+The shortcut appears in Help > Shortcuts, where users can move it to another key. Keep `id` stable: an override is stored as `keybindings.actions["plugin:my-shortcut"]` in their config.
+
 ## Example: ticker action
 
 ```typescript

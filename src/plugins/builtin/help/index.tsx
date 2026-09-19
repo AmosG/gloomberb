@@ -1,16 +1,18 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { formatActionChords, hasKeybindingCaptureRequest, subscribeKeybindingCapture, useKeybindings } from "../../../app/keybindings";
 import { Button, Section, Tabs } from "../../../components";
 import { ExternalLinkText } from "../../../components/ui";
 import { t } from "../../../i18n";
 import { colors } from "../../../theme/colors";
 import type { PaneProps } from "../../../types/plugin";
-import { Box, ScrollBox, Text, TextAttributes, useUiHost } from "../../../ui";
+import { Box, ScrollBox, Text, TextAttributes, useUiHost, type ScrollBoxRenderable } from "../../../ui";
 import { detectShortcutPlatform, formatPrimaryShortcut, getShortcutDisplayMode } from "../../../utils/shortcut-labels";
 import { getSharedRegistry } from "../../registry";
 import { usePluginAppActions } from "../../runtime";
 import type { PluginModule } from "../plugin-module";
 import { ShortcutGroup, ShortcutRow } from "./components";
-import { groupShortcutEntries, resolveCommandShortcuts, resolvePluginShortcuts, resolveWindowTemplates } from "./shortcut-model";
+import { KeybindingsEditor } from "./keybindings-editor";
+import { groupShortcutEntries, resolveCommandShortcuts, resolveWindowTemplates } from "./shortcut-model";
 
 const HELP_TABS = [
   { label: "Basics", value: "basics" },
@@ -25,18 +27,21 @@ const GLOOMBERB_ISSUES_URL = "https://github.com/gloom-sh/gloomberb/issues";
 function HelpPane({ focused, width, height }: PaneProps) {
   const registry = getSharedRegistry();
   const { openCommandBar, showPane } = usePluginAppActions();
-  const [activeTabId, setActiveTabId] = useState<HelpTabId>("basics");
+  // A key capture requested from the command bar belongs to the Shortcuts
+  // tab, whether the pane is already open or is being opened for it.
+  const [activeTabId, setActiveTabId] = useState<HelpTabId>(() => (hasKeybindingCaptureRequest() ? "shortcuts" : "basics"));
   const commandShortcuts = resolveCommandShortcuts(registry);
-  const pluginShortcuts = resolvePluginShortcuts(registry);
   const windowTemplates = resolveWindowTemplates(registry);
   const uiHost = useUiHost();
-  const isDesktopWeb = uiHost.kind === "desktop-web";
+  const scrollRef = useRef<ScrollBoxRenderable | null>(null);
   const shortcutPlatform = detectShortcutPlatform();
   const shortcutDisplayMode = getShortcutDisplayMode(uiHost.kind);
   const platformShortcut = (keys: string | readonly string[]) => formatPrimaryShortcut(keys, shortcutPlatform, shortcutDisplayMode);
-  const commandBarBadges = shortcutDisplayMode === "terminal"
-    ? ["Ctrl+P"]
-    : ["Ctrl+P", platformShortcut("K")];
+  const keybindings = useKeybindings();
+  const actionBadges = (actionId: string) => formatActionChords(keybindings, actionId, shortcutDisplayMode, shortcutPlatform);
+  const commandBarBadges = actionBadges("command-bar");
+  const tickerSearchBadges = actionBadges("ticker-search");
+  useEffect(() => subscribeKeybindingCapture(() => setActiveTabId("shortcuts")), []);
   const copyBadges = shortcutDisplayMode === "terminal"
     ? ["Ctrl+Shift+C"]
     : [platformShortcut("C")];
@@ -87,24 +92,19 @@ function HelpPane({ focused, width, height }: PaneProps) {
                 <Text fg={colors.textDim}>{t("No shortcut window templates are currently registered.")}</Text>
               )}
             </Section>
-
-            {pluginShortcuts.length > 0 && (
-              <Section title="Plugin Shortcuts">
-                {groupShortcutEntries(pluginShortcuts).map((group) => (
-                  <ShortcutGroup
-                    key={group.title}
-                    title={group.title}
-                    entries={group.entries}
-                  />
-                ))}
-              </Section>
-            )}
           </>
         );
 
       case "shortcuts":
         return (
           <>
+            <KeybindingsEditor
+              active={activeTabId === "shortcuts"}
+              focused={focused}
+              scrollRef={scrollRef}
+              contentTop={1}
+            />
+
             <Section title="Navigation">
               <ShortcutRow
                 badges={["Up/Down", "j/k"]}
@@ -169,23 +169,7 @@ function HelpPane({ focused, width, height }: PaneProps) {
               </Text>
             </Section>
 
-            <Section title="Global Keys">
-              <ShortcutRow
-                badges={["Tab", "Shift+Tab"]}
-                description="Move focus between panes and floating windows."
-              />
-              <ShortcutRow
-                badges={["Ctrl+1-9"]}
-                description="Switch saved layouts by number."
-              />
-              <ShortcutRow
-                badges={["r", "Shift+R"]}
-                description="Refresh the focused ticker or refresh everything."
-              />
-              <ShortcutRow
-                badges={["q"]}
-                description="Quit the terminal app."
-              />
+            <Section title="Clipboard">
               <ShortcutRow
                 badges={copyBadges}
                 description="Copy the active terminal selection."
@@ -194,61 +178,9 @@ function HelpPane({ focused, width, height }: PaneProps) {
                 badges={pasteBadges}
                 description="Paste clipboard text into the active input."
               />
-              <ShortcutRow
-                badges={["u"]}
-                description="Install an available app update when one is shown."
-              />
             </Section>
 
-            <Section title="Pane Management">
-              <ShortcutRow
-                badges={[platformShortcut("W")]}
-                description="Close the focused pane, docked or floating. Locked panes stay open."
-              />
-              <ShortcutRow
-                badges={[platformShortcut(["Alt", "W"])]}
-                description="Close all floating panes except locked ones."
-              />
-              <ShortcutRow
-                badges={[platformShortcut(",")]}
-                description="Edit settings for the focused pane."
-              />
-              <ShortcutRow
-                badges={[platformShortcut(["Shift", "D"])]}
-                description="Dock or float the focused pane."
-              />
-              {isDesktopWeb && (
-                <ShortcutRow
-                  badges={[platformShortcut(["Shift", "O"])]}
-                  description="Pop the focused pane out to a desktop window."
-                />
-              )}
-              {isDesktopWeb && (
-                <ShortcutRow
-                  badges={[platformShortcut(["Shift", "C"])]}
-                  description="Copy a screenshot of the focused pane."
-                />
-              )}
-              <ShortcutRow
-                badges={[platformShortcut(["Shift", "E"])]}
-                description="Export the focused pane's table as CSV."
-              />
-              <ShortcutRow
-                badges={[platformShortcut(["Shift", "L"])]}
-                description="Open layout actions."
-              />
-              <ShortcutRow
-                badges={[platformShortcut(["Shift", "G"])]}
-                description="Tidy Windows"
-              />
-              <ShortcutRow
-                badges={[platformShortcut(["Shift", "M"])]}
-                description="Enter window move mode."
-              />
-              <ShortcutRow
-                badges={[platformShortcut(["Shift", "R"])]}
-                description="Enter window resize mode."
-              />
+            <Section title="Panes">
               <ShortcutRow
                 badges={["Esc"]}
                 description="Cancel an active pane drag."
@@ -323,14 +255,18 @@ function HelpPane({ focused, width, height }: PaneProps) {
             </Box>
 
             <Section title="Command Bar">
-              <ShortcutRow
-                badges={commandBarBadges}
-                description="Open command mode for actions, pane commands, and typed prefixes."
-              />
-              <ShortcutRow
-                badges={["`"]}
-                description="Open ticker search directly."
-              />
+              {commandBarBadges.length > 0 && (
+                <ShortcutRow
+                  badges={commandBarBadges}
+                  description="Open command mode for actions, pane commands, and typed prefixes."
+                />
+              )}
+              {tickerSearchBadges.length > 0 && (
+                <ShortcutRow
+                  badges={tickerSearchBadges}
+                  description="Open ticker search directly."
+                />
+              )}
               <ShortcutRow
                 badges={["DES", "<ticker>"]}
                 description="Open security details for a specific ticker."
@@ -352,7 +288,7 @@ function HelpPane({ focused, width, height }: PaneProps) {
                 description="Accept a suggested command argument when one is available."
               />
               <ShortcutRow
-                badges={["Esc", "`"]}
+                badges={["Esc", ...tickerSearchBadges.filter((badge) => badge === "`" || badge.includes("+"))]}
                 description="Close the command bar."
               />
               <ShortcutRow
@@ -403,7 +339,7 @@ function HelpPane({ focused, width, height }: PaneProps) {
           scrollable={false}
         />
       </Box>
-      <ScrollBox key={activeTabId} width={width} height={contentHeight} scrollY>
+      <ScrollBox key={activeTabId} ref={scrollRef} width={width} height={contentHeight} scrollY>
         <Box flexDirection="column" padding={1}>
           {renderContent()}
         </Box>

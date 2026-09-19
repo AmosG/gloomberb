@@ -14,6 +14,11 @@ import type { CliCommandDef } from "../../types/plugin";
 import { debugLog, type LogLevel } from "../../utils/debug-log";
 import { withCliServices, withConfigData } from "../context";
 import { parsePositiveInt, requireArg, takeOption } from "./command-utils";
+import {
+  applyKeybindingCliSet,
+  describeKeybindingsForCli,
+  KEYBINDINGS_CONFIG_KEY,
+} from "./keybindings";
 
 const ALERTS_PLUGIN_ID = "alerts";
 const ALERTS_KEY = "alerts";
@@ -101,7 +106,16 @@ export function createSystemCliCommands(allCommands: () => CliCommandDef[]): Cli
   const configCommand: CliCommandDef = {
     name: "config",
     description: "Inspect and update local configuration",
-    help: { usage: ["config list", "config get <key>", "config set <key> <value>"] },
+    help: {
+      usage: [
+        "config list",
+        "config get <key>",
+        "config set <key> <value>",
+        "config get keybindings",
+        "config set keybindings.actions.<action> <chord>[ <chord>]|null|default",
+        "config set keybindings.commands.<chord> <query>|null",
+      ],
+    },
     execute: async (args, ctx) => {
       const action = args[0] ?? "list";
       await withConfigData(ctx, async (context) => {
@@ -115,6 +129,7 @@ export function createSystemCliCommands(allCommands: () => CliCommandDef[]): Cli
           portfolios: context.config.portfolios.length,
           watchlists: context.config.watchlists.length,
           brokerInstances: context.config.brokerInstances.length,
+          [KEYBINDINGS_CONFIG_KEY]: describeKeybindingsForCli(context.config),
         };
 
         if (action === "list") {
@@ -134,6 +149,23 @@ export function createSystemCliCommands(allCommands: () => CliCommandDef[]): Cli
         if (action === "set") {
           const key = requireArg(args[1], "Usage: gloomberb config set <key> <value>", ctx);
           const value = requireArg(args[2], "Usage: gloomberb config set <key> <value>", ctx);
+          if (key.startsWith(`${KEYBINDINGS_CONFIG_KEY}.`)) {
+            // The value may carry several chords or a multi-word command, so
+            // everything after the key is the value.
+            const result = applyKeybindingCliSet(context.config, key, args.slice(2).join(" "));
+            if (!result.ok) return ctx.fail(result.message);
+            if (!ctx.cliOptions.dryRun) await saveConfig(result.config);
+            ctx.printResult({
+              data: {
+                changed: !ctx.cliOptions.dryRun,
+                dryRun: ctx.cliOptions.dryRun,
+                key,
+                value: result.value,
+                [KEYBINDINGS_CONFIG_KEY]: describeKeybindingsForCli(result.config),
+              },
+            });
+            return;
+          }
           const editable = new Set(["baseCurrency", "refreshIntervalMinutes", "theme", "valueFlashingEnabled"]);
           if (!editable.has(key)) ctx.fail(`Config key "${key}" is not editable from the CLI.`);
           const parsedValue = key === "refreshIntervalMinutes"

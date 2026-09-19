@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { act } from "react";
+import { takeKeybindingCaptureRequest } from "../../../app/keybindings";
 import { testRender } from "../../../renderers/opentui/test-utils";
 import { createTestDataProvider } from "../../../test-support/data-provider";
 import type { CommandDef, CommandShortcutArgContext, PaneTemplateCreateOptions, WizardStep } from "../../../types/plugin";
@@ -818,6 +819,63 @@ describe("CommandBar", () => {
     });
 
     expect(pinned).toEqual(["MSFT"]);
+  });
+
+  test("a run-query launch submits the text without a keypress", async () => {
+    const pinned: string[] = [];
+
+    testSetup = await testRender(
+      <CommandBarHarness
+        query="DES MSFT"
+        configureState={(state) => ({
+          ...state,
+          commandBarLaunchRequest: { kind: "run-query", query: "DES MSFT", sequence: 1 },
+        })}
+        configurePluginRegistry={(pluginRegistry) => {
+          pluginRegistry.pinTicker = (symbol) => {
+            pinned.push(symbol);
+          };
+        }}
+      />,
+      { width: 100, height: 20 },
+    );
+
+    await act(async () => {
+      await Bun.sleep(0);
+      await testSetup!.renderOnce();
+      await testSetup!.renderOnce();
+    });
+
+    expect(pinned).toEqual(["MSFT"]);
+  });
+
+  test("resolved text offers a Bind a key row that hands off to Help without being the default selection", async () => {
+    const shown: string[] = [];
+    testSetup = await testRender(
+      <CommandBarHarness
+        query="DES MSFT"
+        configurePluginRegistry={(pluginRegistry) => {
+          pluginRegistry.showPane = (paneId) => {
+            shown.push(paneId);
+          };
+        }}
+      />,
+      { width: 100, height: 20 },
+    );
+
+    await testSetup.renderOnce();
+    const frame = testSetup.captureCharFrame();
+    expect(frame).toContain("Bind a key to DES MSFT");
+    expect(frame.indexOf("▸")).toBeLessThan(frame.indexOf("Bind a key"));
+
+    await act(async () => {
+      await clickFrameText("Bind a key to DES MSFT");
+      await Bun.sleep(0);
+      await testSetup!.renderOnce();
+    });
+
+    expect(shown).toEqual(["help"]);
+    expect(takeKeybindingCaptureRequest()).toEqual({ kind: "command", query: "DES MSFT" });
   });
 
   test("T AMD opens an exact ticker directly", async () => {

@@ -1,5 +1,8 @@
 import type { ApplicationMenuItemConfig } from "electrobun/bun";
 import type { DesktopApplicationMenuCommand } from "../../../../types/desktop-menu";
+import type { KeybindingsConfig } from "../../../../types/config";
+import { menuAcceleratorFor } from "../../../../app/keybindings/labels";
+import { resolveKeybindings, type ResolvedKeybindings } from "../../../../app/keybindings/resolve";
 
 export const ELECTROBUN_APPLICATION_MENU_ACTION = "gloom.application-menu.select";
 const GITHUB_ISSUE_URL = "https://github.com/gloom-sh/gloomberb/issues/new/choose";
@@ -26,7 +29,8 @@ function openCommandBar(label: string, query: string, options?: { accelerator?: 
   return commandItem(label, { type: "open-command-bar", query }, options);
 }
 
-function buildApplicationMenu(): ApplicationMenuItemConfig[] {
+function buildApplicationMenu(keybindings: ResolvedKeybindings): ApplicationMenuItemConfig[] {
+  const accelerator = (actionId: string) => ({ accelerator: menuAcceleratorFor(keybindings, actionId) });
   return [
     {
       label: "Gloomberb",
@@ -45,7 +49,7 @@ function buildApplicationMenu(): ApplicationMenuItemConfig[] {
     {
       label: "File",
       submenu: [
-        openCommandBar("Search Ticker...", "DES "),
+        openCommandBar("Search Ticker...", "DES ", accelerator("ticker-search")),
         { type: "divider" },
         openCommandBar("New Portfolio...", "New Portfolio"),
         openCommandBar("New Watchlist...", "New Watchlist"),
@@ -76,7 +80,7 @@ function buildApplicationMenu(): ApplicationMenuItemConfig[] {
     {
       label: "View",
       submenu: [
-        openCommandBar("Open Command Bar", "", { accelerator: "CmdOrCtrl+K" }),
+        openCommandBar("Open Command Bar", "", accelerator("command-bar")),
         commandItem("Open Developer Tools", { type: "open-devtools" }),
         { type: "divider" },
         commandItem("Toggle Status Bar", { type: "toggle-status-bar" }),
@@ -88,12 +92,12 @@ function buildApplicationMenu(): ApplicationMenuItemConfig[] {
     {
       label: "Layout",
       submenu: [
-        commandItem("Layouts...", { type: "open-layout-gallery" }, { accelerator: "CmdOrCtrl+Shift+L" }),
+        commandItem("Layouts...", { type: "open-layout-gallery" }, accelerator("layout-gallery")),
         openCommandBar("Layout Actions...", "LMA "),
         { type: "divider" },
         commandItem("Undo Layout Change", { type: "layout-undo" }),
         commandItem("Redo Layout Change", { type: "layout-redo" }),
-        commandItem("Tidy Windows", { type: "layout-gridlock" }, { accelerator: "CmdOrCtrl+Shift+G" }),
+        commandItem("Tidy Windows", { type: "layout-gridlock" }, accelerator("tidy-windows")),
         { type: "divider" },
         commandItem("New Layout...", { type: "open-plugin-workflow", commandId: "new-layout" }),
         commandItem("Rename Current Layout...", { type: "open-plugin-workflow", commandId: "rename-layout" }),
@@ -124,6 +128,9 @@ function buildApplicationMenu(): ApplicationMenuItemConfig[] {
   ];
 }
 
-export function buildDesktopApplicationMenu(platform = process.platform): ApplicationMenuItemConfig[] {
-  return platform === "win32" ? [] : buildApplicationMenu();
+export function buildDesktopApplicationMenu(
+  platform = process.platform,
+  keybindings?: KeybindingsConfig,
+): ApplicationMenuItemConfig[] {
+  return platform === "win32" ? [] : buildApplicationMenu(resolveKeybindings(keybindings));
 }

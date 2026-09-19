@@ -72,6 +72,11 @@ export function pluginShortcutDefaultChord(shortcut: KeyboardShortcut): KeyChord
   };
 }
 
+/**
+ * An override's chords. `null` in the config is a deliberate unbind and gives
+ * an empty list; text that does not parse is reported and dropped, and when
+ * nothing parses the override is ignored so a typo never silently unbinds.
+ */
 function parseChordList(
   value: string | string[] | null | undefined,
   target: string,
@@ -81,16 +86,18 @@ function parseChordList(
   if (value === null) return [];
   const texts = Array.isArray(value) ? value : [value];
   const chords: KeyChord[] = [];
+  let invalid = false;
   for (const text of texts) {
     if (typeof text !== "string") continue;
     const chord = parseKeyChord(text);
     if (!chord) {
       issues.push({ kind: "invalid-chord", target, text });
+      invalid = true;
       continue;
     }
     chords.push(chord);
   }
-  return chords;
+  return chords.length === 0 && invalid ? null : chords;
 }
 
 function parseDefaults(texts: readonly string[]): KeyChord[] {

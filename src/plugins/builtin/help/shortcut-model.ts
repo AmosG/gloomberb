@@ -1,4 +1,4 @@
-import type { CommandDef, KeyboardShortcut } from "../../../types/plugin";
+import type { CommandDef } from "../../../types/plugin";
 import { commands as coreCommands } from "../../../components/command-bar/commands/registry";
 import { getSharedRegistry } from "../../registry";
 import type { HelpShortcutEntry } from "./components";
@@ -96,40 +96,6 @@ export function resolveCommandShortcuts(registry: SharedRegistry): HelpShortcutE
     .sort(sortShortcutEntries);
 
   return [...coreRows, ...pluginRows];
-}
-
-function formatShortcutKey(shortcut: KeyboardShortcut): string {
-  const key = shortcut.key.length === 1
-    ? shortcut.key.toUpperCase()
-    : shortcut.key[0]!.toUpperCase() + shortcut.key.slice(1);
-  return [
-    shortcut.ctrl ? "Ctrl" : null,
-    shortcut.shift ? "Shift" : null,
-    key,
-  ].filter((value): value is string => !!value).join("+");
-}
-
-export function resolvePluginShortcuts(registry: SharedRegistry): HelpShortcutEntry[] {
-  if (!registry || !registry.shortcuts) return [];
-
-  const disabledPlugins = resolveDisabledPlugins(registry);
-  const allPlugins = registry.allPlugins ?? new Map<string, { name?: string }>();
-  return [...registry.shortcuts.values()]
-    .filter((shortcut: KeyboardShortcut) => {
-      const pluginId = registry.getShortcutPluginId?.(shortcut.id);
-      return !pluginId || !disabledPlugins.has(pluginId);
-    })
-    .map((shortcut: KeyboardShortcut) => {
-      const pluginId = registry.getShortcutPluginId?.(shortcut.id);
-      const pluginName = pluginId ? allPlugins.get(pluginId)?.name : null;
-      return {
-        id: `plugin-shortcut:${shortcut.id}`,
-        badges: [formatShortcutKey(shortcut)],
-        description: formatShortcutDescription(shortcut.description),
-        category: pluginName ?? "Plugin Shortcuts",
-      };
-    })
-    .sort(sortShortcutEntries);
 }
 
 export function groupShortcutEntries(entries: HelpShortcutEntry[]): Array<{ title: string; entries: HelpShortcutEntry[] }> {

@@ -245,8 +245,12 @@ function syncActiveLayout(
 }
 
 function setCurrentConfig(nextConfig: AppConfig): void {
+  const previousKeybindings = JSON.stringify(currentConfig?.keybindings ?? null);
   currentConfig = syncActiveLayout(nextConfig);
   syncConfigAccessors();
+  // The native menu shows the same accelerators the keys use, so a rebind
+  // rebuilds it.
+  if (JSON.stringify(currentConfig.keybindings ?? null) !== previousKeybindings) installApplicationMenu();
 }
 
 function sendUpdateProgress(rpc: DesktopRpc, progress: UpdateProgress): void {
@@ -587,7 +591,7 @@ async function handleBackendRequest(
 }
 
 function installApplicationMenu() {
-  ApplicationMenu.setApplicationMenu(buildDesktopApplicationMenu());
+  ApplicationMenu.setApplicationMenu(buildDesktopApplicationMenu(process.platform, currentConfig?.keybindings));
 }
 
 function createWindowRpc(key: string): DesktopRpc {

@@ -66,11 +66,18 @@ export function setCommandBinding(
   return withoutEmpty({ ...config, commands });
 }
 
+/** Removes the command on `text`, matching by chord so `alt+1` and `Alt+1` are the same key. */
 export function removeCommandBinding(
   config: KeybindingsConfig | undefined,
   text: string,
 ): KeybindingsConfig | undefined {
-  const commands = { ...(config?.commands ?? {}) };
-  delete commands[text];
+  const target = parseKeyChord(text);
+  const commands: Record<string, string> = {};
+  for (const [existingText, existingQuery] of Object.entries(config?.commands ?? {})) {
+    if (existingText === text) continue;
+    const existing = parseKeyChord(existingText);
+    if (target && existing && keyChordsEqual(existing, target)) continue;
+    commands[existingText] = existingQuery;
+  }
   return withoutEmpty({ ...config, commands });
 }

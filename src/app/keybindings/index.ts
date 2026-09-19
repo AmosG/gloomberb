@@ -53,3 +53,10 @@ export {
   setCommandBinding,
   updateKeybindingsConfig,
 } from "./config";
+export {
+  hasKeybindingCaptureRequest,
+  requestKeybindingCapture,
+  subscribeKeybindingCapture,
+  takeKeybindingCaptureRequest,
+  type KeybindingCaptureRequest,
+} from "./capture-request";

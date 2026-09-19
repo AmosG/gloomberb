@@ -1,5 +1,5 @@
 import type { BrokerAccount } from "../../../types/trading";
-import type { AppConfig, LayoutConfig, LayoutOrigin, OnboardingProgress } from "../../../types/config";
+import type { AppConfig, KeybindingsConfig, LayoutConfig, LayoutOrigin, OnboardingProgress } from "../../../types/config";
 import type { DesktopSharedStateSnapshot } from "../../../types/desktop-window";
 import type { Quote, TickerFinancials } from "../../../types/financials";
 import type { TickerRecord } from "../../../types/ticker";
@@ -87,6 +87,7 @@ export interface AppState {
 
 export type AppAction =
   | { type: "SET_CONFIG"; config: AppConfig }
+  | { type: "SET_KEYBINDINGS"; keybindings: KeybindingsConfig | undefined }
   | {
       type: "SET_ONBOARDING_STATE";
       complete: boolean;

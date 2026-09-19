@@ -33,6 +33,7 @@ interface UseCommandBarRootRuntimeOptions {
   activeTickerSymbol: string | null;
   assist: AssistRowHandlers;
   availableCommands: Command[];
+  bindKey?: (query: string) => void;
   buildLayoutItems(query: string, options?: { confirmDangerousActions?: boolean }): ResultItem[];
   buildPaneSettingItems(paneId: string | null, query: string): ResultItem[];
   buildTickerSearchResultItems(candidates: TickerSearchCandidate[], query: string): ResultItem[];
@@ -98,6 +99,7 @@ export function useCommandBarRootRuntime({
   activeTickerSymbol,
   assist,
   availableCommands,
+  bindKey,
   buildLayoutItems,
   buildPaneSettingItems,
   buildTickerSearchResultItems,
@@ -175,6 +177,7 @@ export function useCommandBarRootRuntime({
     activeTickerSymbol,
     assist,
     availableCommands,
+    bindKey,
     buildLayoutItems,
     buildPaneSettingItems,
     buildWindowModeItems,
@@ -203,6 +206,7 @@ export function useCommandBarRootRuntime({
     activeTickerSymbol,
     assist,
     availableCommands,
+    bindKey,
     buildLayoutItems,
     buildPaneSettingItems,
     buildWindowModeItems,

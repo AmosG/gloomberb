@@ -1,4 +1,5 @@
 import type { AppConfig } from "../../../types/config";
+import { updateKeybindingsConfig } from "../../../app/keybindings/config";
 import { resolveTickerFinancialsQuoteState } from "../../../market-data/quotes/resolution";
 import {
   bringFloatingToFront,
@@ -61,6 +62,9 @@ export function appReducer(state: AppState, action: AppAction): AppState {
           onboardingProgress: action.progress,
         },
       };
+
+    case "SET_KEYBINDINGS":
+      return { ...state, config: updateKeybindingsConfig(state.config, action.keybindings) };
 
     case "SET_TICKERS":
       return { ...state, tickers: action.tickers };
