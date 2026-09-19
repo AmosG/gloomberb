@@ -18,7 +18,7 @@ The desktop app and TUI share the command language and plugin system. The [brows
 | Key | Action |
 |-----|--------|
 | `Ctrl+P` | Open command mode |
-| `` ` `` / `Ctrl+T` | Open ticker search |
+| `` ` `` | Open ticker search |
 | `Ctrl+,` | Open focused pane settings |
 | `Ctrl+W` | Close focused pane (unless it is locked) |
 | `Ctrl+Shift+M` | Move focused window (`WIN resize` starts resize mode) |
@@ -39,7 +39,7 @@ Wide tables retain their columns in narrow panes. Use their horizontal scrollbar
 
 ### Custom keybindings
 
-Every global and pane management key can be moved, and any command bar text can be put on a key. Open `HELP`, pick the Shortcuts tab, and press Enter on a row (or click it) to capture the next chord; Backspace unbinds, `0` restores the default, and `N` starts a command binding. Typing a command in the command bar, such as `DES AAPL` or `CN`, offers a `Bind a key` row as well. Capture shows exactly what your terminal delivered for the combination, which matters on terminals that fold `Ctrl+Shift+F` into `Ctrl+F`.
+Every global and pane management key can be moved, and any command bar text can be put on a key. On a layout where the backtick is a dead key, the command bar already searches symbols for anything you type after `Ctrl+P`; a dedicated ticker search key is one rebind away. Open `HELP`, pick the Shortcuts tab, and press Enter on a row (or click it) to capture the next chord; Backspace unbinds, `0` restores the default, and `N` starts a command binding. Typing a command in the command bar, such as `DES AAPL` or `CN`, offers a `Bind a key` row as well. Capture shows exactly what your terminal delivered for the combination, which matters on terminals that fold `Ctrl+Shift+F` into `Ctrl+F`.
 
 The same table lives in `config.json` under `keybindings` and through the CLI:
 

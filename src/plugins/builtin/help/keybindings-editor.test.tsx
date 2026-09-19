@@ -59,7 +59,7 @@ test("rebinding from the help pane captures the next chord, shows the way back, 
   await openShortcutsTab();
   let text = setup!.captureCharFrame();
   expect(text).toContain("Global Keys");
-  expect(text).toContain("Ctrl+T");
+  expect(text).toContain("Open ticker search directly.");
 
   // Down to ticker search, then capture.
   await emitKeypress(setup!, { name: "j" });
@@ -72,7 +72,7 @@ test("rebinding from the help pane captures the next chord, shows the way back, 
   expect(latestState?.config.keybindings).toEqual({ actions: { "ticker-search": "CmdOrCtrl+Shift+Y" } });
   text = setup!.captureCharFrame();
   expect(text).toContain("Ctrl+Shift+Y");
-  expect(text).toContain("custom, default `, Ctrl+T");
+  expect(text).toContain("custom, default `");
   expect(text).toContain("Bound Open ticker search directly to Ctrl+Shift+Y.");
 
   await emitKeypress(setup!, { name: "0" });

@@ -160,22 +160,6 @@ describe("useAppGlobalShortcuts", () => {
     expect(event.propagationStopped).toBe(true);
   });
 
-  test("opens ticker search with the primary modifier and T for layouts without a backtick key", async () => {
-    const actions: AppAction[] = [];
-    const state = createInitialState(createDefaultConfig("/tmp/gloomberb-global-shortcuts-ctrl-t"));
-    await renderHarness(state, createRegistry(), (action) => actions.push(action));
-
-    const event = await emitKeypress({ name: "t", super: true });
-
-    expect(actions).toEqual([{
-      type: "SET_COMMAND_BAR",
-      open: true,
-      query: "",
-      launch: { kind: "ticker-search", query: "" },
-    }]);
-    expect(event.defaultPrevented).toBe(true);
-  });
-
   test("a rebound action answers to its new key and not the old one", async () => {
     const actions: AppAction[] = [];
     const state = stateWithKeybindings("rebound", {

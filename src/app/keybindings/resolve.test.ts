@@ -10,9 +10,9 @@ describe("resolveKeybindings", () => {
   test("ships every default and reports nothing", () => {
     const resolved = resolveKeybindings(undefined);
     expect(resolved.issues).toEqual([]);
-    expect(resolved.actionsById.get("ticker-search")?.chords.map(serializeKeyChord)).toEqual(["`", "CmdOrCtrl+T"]);
+    expect(resolved.actionsById.get("ticker-search")?.chords.map(serializeKeyChord)).toEqual(["`"]);
     expect(matchKeybinding(resolved, { ...base, name: "`" })).toMatchObject({ kind: "action", id: "ticker-search" });
-    expect(matchKeybinding(resolved, { ...base, name: "t", ctrl: true })).toMatchObject({ kind: "action", id: "ticker-search" });
+    expect(matchKeybinding(resolved, { ...base, name: "t", ctrl: true })).toBeNull();
     expect(matchKeybinding(resolved, { ...base, name: "2", super: true })).toMatchObject({ kind: "action", id: "switch-layout", digit: 2 });
     expect(matchKeybinding(resolved, { ...base, name: "w", ctrl: true, alt: true })).toMatchObject({ id: "close-floating-panes" });
     expect(matchKeybinding(resolved, { ...base, name: "w", ctrl: true })).toMatchObject({ id: "pane-close" });
@@ -82,7 +82,7 @@ describe("keybinding config edits", () => {
     expect(bound).toEqual({ actions: { "ticker-search": "Ctrl+T" } });
     const unbound = applyActionBinding(bound, "help", []);
     expect(unbound).toEqual({ actions: { "ticker-search": "Ctrl+T", help: null } });
-    const restored = applyActionBinding(unbound, "ticker-search", [parseKeyChord("`")!, parseKeyChord("CmdOrCtrl+T")!]);
+    const restored = applyActionBinding(unbound, "ticker-search", [parseKeyChord("`")!]);
     expect(restored).toEqual({ actions: { help: null } });
     expect(applyActionBinding(restored, "help", [parseKeyChord("?")!])).toBeUndefined();
   });
