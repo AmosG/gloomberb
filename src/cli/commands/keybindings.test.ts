@@ -21,7 +21,7 @@ describe("config set keybindings", () => {
     expect(describeKeybindingsForCli(restored.config)).toMatchObject({
       actions: {
         help: { keys: [], custom: true, defaults: ["?"] },
-        "ticker-search": { keys: ["`", "CmdOrCtrl+T"] },
+        "ticker-search": { keys: ["`"] },
       },
       issues: [],
     });
