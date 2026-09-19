@@ -46,6 +46,8 @@ async function openShortcutsTab() {
   await act(async () => { setup = await testRender(<Harness />, { width: 90, height: 30 }); });
   await frame();
   await act(async () => { await createTestControls(() => setup!).clickFrameText("Shortcuts"); });
+  // The table measures its viewport before it can lay columns and rows out.
+  await frame();
   await frame();
 }
 
@@ -59,6 +61,7 @@ test("rebinding from the help pane captures the next chord, shows the way back, 
   await openShortcutsTab();
   let text = setup!.captureCharFrame();
   expect(text).toContain("Global Keys");
+  expect(text).toContain("KEY");
   expect(text).toContain("Open ticker search directly.");
 
   // Down to ticker search, then capture.
@@ -74,6 +77,11 @@ test("rebinding from the help pane captures the next chord, shows the way back, 
   expect(text).toContain("Ctrl+Shift+Y");
   expect(text).toContain("custom, default `");
   expect(text).toContain("Bound Open ticker search directly to Ctrl+Shift+Y.");
+  // The status line spells out the selected row's note, which the column truncates.
+  await emitKeypress(setup!, { name: "k" });
+  await emitKeypress(setup!, { name: "j" });
+  await frame();
+  expect(setup!.captureCharFrame()).toContain("custom, default `");
 
   await emitKeypress(setup!, { name: "0" });
   await frame();
@@ -93,7 +101,9 @@ test("a capture landing on a taken chord still binds and names the other owner",
   expect(latestState?.config.keybindings).toEqual({ actions: { "command-bar": "CmdOrCtrl+W" } });
   const text = setup!.captureCharFrame();
   expect(text).toContain("Ctrl+W is also bound to Close the focused pane.");
-  expect(text).toContain("also Close the focused pane");
+  expect(text).toContain("also Close the focused");
+  // The pane row names the collision from its side too.
+  expect(text).toContain("also Open the command bar");
 });
 
 test("a bind request from the command bar captures a command chord and refuses typing keys", async () => {
