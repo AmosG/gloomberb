@@ -11,7 +11,7 @@ import { createCapabilityInvoker } from "./remote/capability-invoker";
 import { apiClient } from "../../../api-client";
 import { cloudNewsParams, mapCloudNewsArticle } from "../../../sources/gloomberb-cloud/news";
 
-export function createElectrobunAppServices({ config, plugins }: AppServicesFactoryOptions) {
+export function createElectrobunAppServices({ config, plugins, externalPlugins }: AppServicesFactoryOptions) {
   const dataProvider = createRemoteAssetDataClient();
   const invokeCapability = createCapabilityInvoker({
     request: backendRequest,
@@ -19,7 +19,7 @@ export function createElectrobunAppServices({ config, plugins }: AppServicesFact
     timeoutMs: 0,
   });
   return createAppRuntime({
-    config, plugins, dataProvider,
+    config, plugins, externalPlugins, dataProvider,
     persistence: new RemotePersistence(),
     tickerRepository: new RemoteTickerRepository(),
     registryOptions: {

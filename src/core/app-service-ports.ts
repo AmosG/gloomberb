@@ -3,6 +3,7 @@ import type { ResourceStore } from "../data/resource-store";
 import type { SessionStore } from "../data/session-store";
 import type { TickerRepository } from "../data/ticker-repository";
 import type { MarketDataCoordinator } from "../market-data/coordinator";
+import type { LoadedExternalPlugin } from "../plugins/loader";
 import type { PluginRegistry } from "../plugins/registry";
 import type { AppConfig } from "../types/config";
 import type { DataProvider } from "../types/data-provider";
@@ -41,6 +42,13 @@ export interface AppRuntimeServices {
 export interface AppServicesFactoryOptions {
   config: AppConfig;
   plugins: readonly GloomPlugin[];
+  /**
+   * The entries behind the external plugins in `plugins`. One of them failing
+   * to register is recorded on its entry and shown in the marketplace; without
+   * this list the runtime cannot tell it apart from a built-in, whose failure
+   * is a bug that should stop startup.
+   */
+  externalPlugins?: readonly LoadedExternalPlugin[];
 }
 
 export type AppServicesFactory = (options: AppServicesFactoryOptions) => AppRuntimeServices;

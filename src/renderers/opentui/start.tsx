@@ -1,4 +1,4 @@
-import { join } from "path";
+import { getGloomberbHome } from "../../data/config/home";
 import { existsSync, mkdirSync } from "fs";
 import { App } from "../../app";
 import { dispatchCli } from "../../cli/index";
@@ -107,10 +107,7 @@ export async function startOpenTuiApp(options: StartOpenTuiAppOptions = {}): Pro
     }, 0);
   };
   try {
-    let dataDir = await getDataDir();
-    if (!dataDir) {
-      dataDir = join(process.env.HOME || "~", ".gloomberb");
-    }
+    const dataDir = await getDataDir() ?? getGloomberbHome();
 
     if (!existsSync(dataDir)) {
       mkdirSync(dataDir, { recursive: true });

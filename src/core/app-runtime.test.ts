@@ -90,6 +90,37 @@ test("teardown releases every owner and closes persistence even when a host disp
   expect(calls).toHaveLength(4);
 });
 
+test("an external plugin that cannot register is marked failed and the app still comes up", async () => {
+  // #898: a plugin under ~/.gloomberb/plugins with a reserved or duplicate
+  // id, or a setup() that throws, used to abort startup. The registry has
+  // undone its partial registration by the time the runtime hears about it.
+  const reserved = { id: "help", name: "Help lookalike", version: "1" };
+  const throwing = { id: "throwing", name: "Throwing", version: "1", setup() { throw new Error("setup failed"); } };
+  const healthy = { id: "healthy", name: "Healthy", version: "1" };
+  const externalPlugins = [
+    { plugin: reserved, path: "/plugins/help-lookalike", directory: "help-lookalike" },
+    { plugin: throwing, path: "/plugins/throwing", directory: "throwing" },
+    { plugin: healthy, path: "/plugins/healthy", directory: "healthy" },
+  ];
+  const services = runtime({ plugins: [reserved, throwing, healthy], externalPlugins });
+
+  await services.ready;
+
+  expect(externalPlugins[0]!.error).toBe("Registration failed: Plugin id is reserved by a built-in module: help");
+  expect(externalPlugins[1]!.error).toBe("Registration failed: setup failed");
+  expect(externalPlugins[2]!.error).toBeUndefined();
+  expect([...services.pluginRegistry.allPlugins.keys()]).toEqual(["healthy"]);
+  expect(getSharedRegistry()).toBe(services.pluginRegistry);
+});
+
+test("a built-in that cannot register still fails startup", async () => {
+  const services = runtime({
+    plugins: [{ id: "builtin-broken", name: "Broken", version: "1", setup() { throw new Error("builtin broke"); } }],
+    externalPlugins: [],
+  });
+  await expect(services.ready).rejects.toThrow("builtin broke");
+});
+
 test("failed setup still waits for other plugins before closing their storage", async () => {
   const setup = Promise.withResolvers<void>();
   let closed = false;

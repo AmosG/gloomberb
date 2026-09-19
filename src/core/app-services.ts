@@ -10,12 +10,12 @@ import { createAppRuntime } from "./app-runtime";
 
 export type AppServices = ReturnType<typeof createAppServices>;
 
-export function createAppServices({ config, plugins }: AppServicesFactoryOptions) {
+export function createAppServices({ config, plugins, externalPlugins }: AppServicesFactoryOptions) {
   const persistence = new AppPersistence(join(config.dataDir, ".gloomberb-cache.db"));
   const tickerRepository = new TickerRepository(persistence.tickers);
   const providerRouter = new AssetDataRouter(null, [], persistence.resources, connectionHealth);
   const runtime = createAppRuntime({
-    config, plugins, persistence, tickerRepository, dataProvider: providerRouter,
+    config, plugins, externalPlugins, persistence, tickerRepository, dataProvider: providerRouter,
     registryOptions: { connectionHealth },
     configure({ pluginRegistry, newsService }) {
       providerRouter.attachRegistry(pluginRegistry);

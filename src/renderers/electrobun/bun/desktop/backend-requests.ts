@@ -63,7 +63,7 @@ async function importDesktopConfig({
   setCurrentConfig(await importConfig(payload.dataDir, payload.srcPath));
   setServices(createAppServices({
     config: getConfig(),
-    plugins: await loadDesktopBackendPlugins(),
+    ...await loadDesktopBackendPlugins(),
   }));
   syncConfigAccessors();
   registerCoreCapabilities();

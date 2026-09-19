@@ -923,6 +923,7 @@ export const ko: Record<string, string> = {
   "Downloading v{version}: {percent}%": "v{version} 다운로드 중: {percent}%",
   "Update failed: {error}": "업데이트 실패: {error}",
   "v{version} available — run {command}": "v{version} 사용 가능 — {command} 실행",
+  "v{version} available, update through the package manager that installed Gloomberb": "v{version} 사용 가능, Gloomberb를 설치한 패키지 관리자로 업데이트하세요",
   "v{version} available — starting download...": "v{version} 사용 가능 — 다운로드 시작 중...",
   "command bar": "명령 팔레트",
   "Tidy Windows": "창 정리",

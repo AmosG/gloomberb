@@ -910,6 +910,7 @@ export const es: Record<string, string> = {
   "Downloading v{version}: {percent}%": "Descargando v{version}: {percent}%",
   "Update failed: {error}": "Error al actualizar: {error}",
   "v{version} available — run {command}": "v{version} disponible — ejecuta {command}",
+  "v{version} available, update through the package manager that installed Gloomberb": "v{version} disponible, actualiza con el gestor de paquetes que instaló Gloomberb",
   "v{version} available — starting download...": "v{version} disponible — iniciando descarga...",
   "command bar": "barra de comandos",
   "Tidy Windows": "Ordenar ventanas",

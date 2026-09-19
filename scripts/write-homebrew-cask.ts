@@ -53,8 +53,9 @@ function renderCask({ version, sha256 }: Pick<Options, "version" | "sha256">): s
   version "${version}"
   sha256 "${sha256}"
 
-  url "https://github.com/gloom-sh/gloomberb/releases/download/v#{version}/stable-macos-arm64-Gloomberb.app.zip",
-      verified: "github.com/gloom-sh/gloomberb/"
+  # No \`verified:\` here: Homebrew checks a GitHub release URL against the
+  # homepage on its own now and warns that the parameter is deprecated (#916).
+  url "https://github.com/gloom-sh/gloomberb/releases/download/v#{version}/stable-macos-arm64-Gloomberb.app.zip"
   name "Gloomberb"
   desc "Open-source finance terminal"
   homepage "https://gloom.sh"

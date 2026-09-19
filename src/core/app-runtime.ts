@@ -3,7 +3,9 @@ import { NewsService, type NewsServiceOptions } from "../news/aggregator";
 import { getSharedNewsService, setSharedNewsService } from "../news/hooks";
 import { PluginRegistry } from "../plugins/registry";
 import { releaseSharedRegistry } from "../plugins/registry/shared";
+import type { LoadedExternalPlugin } from "../plugins/loader";
 import type { GloomPlugin } from "../types/plugin";
+import { debugLog } from "../utils/debug-log";
 import { measurePerfAsync } from "../utils/perf-marks";
 import type { AppRuntimeServices, AppServicesFactoryOptions } from "./app-service-ports";
 
@@ -19,9 +21,34 @@ interface AppRuntimeOptions extends AppServicesFactoryOptions, Pick<Runtime, "pe
   onPluginError?: (error: unknown, plugin: GloomPlugin) => void;
 }
 
+const runtimeLog = debugLog.createLogger("app-runtime");
+
+/**
+ * A built-in that cannot register is a bug in this repository and stops
+ * startup. An external plugin that cannot register is someone else's code:
+ * a reserved or duplicate id, or a `setup()` that throws. Before this, one
+ * such plugin in `~/.gloomberb/plugins` took the whole app down at launch,
+ * with nothing on screen to say which one. Now the failure lands on the
+ * plugin's entry, where the marketplace shows it as failed with the reason,
+ * and the app starts without it. The registry has already undone the
+ * partial registration by the time this runs.
+ */
+function recordExternalPluginFailure(
+  externalPlugins: readonly LoadedExternalPlugin[] | undefined,
+  plugin: GloomPlugin,
+  error: unknown,
+): boolean {
+  const entry = externalPlugins?.find((candidate) => candidate.plugin === plugin);
+  if (!entry) return false;
+  const message = error instanceof Error ? error.message : String(error);
+  entry.error = `Registration failed: ${message}`;
+  runtimeLog.error("external plugin failed to register", { pluginId: plugin.id, path: entry.path, error: message });
+  return true;
+}
+
 /** Hosts supply adapters; registration, shared-service ownership and disposal have one lifecycle. */
 export function createAppRuntime({
-  config, plugins, persistence, tickerRepository, dataProvider,
+  config, plugins, externalPlugins, persistence, tickerRepository, dataProvider,
   registryOptions, newsOptions, configure, onReady, onPluginError,
 }: AppRuntimeOptions): Runtime {
   const pluginRegistry = new PluginRegistry(dataProvider, tickerRepository, persistence, registryOptions);
@@ -77,7 +104,10 @@ export function createAppRuntime({
   registering = true;
   const ready = Promise.allSettled(plugins.map((plugin) => (
     measurePerfAsync("startup.services.register-plugin", () => pluginRegistry.register(plugin), { pluginId: plugin.id })
-      .catch((error) => { if (onPluginError) onPluginError(error, plugin); else throw error; })
+      .catch((error) => {
+        if (onPluginError) return onPluginError(error, plugin);
+        if (!recordExternalPluginFailure(externalPlugins, plugin, error)) throw error;
+      })
   ))).then((results) => {
     registering = false;
     if (destroyed) {

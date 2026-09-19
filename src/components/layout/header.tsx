@@ -310,6 +310,15 @@ function UpdateStatus() {
         </Text>
       );
     }
+    if (updateAvailable.updateAction.kind === "managed") {
+      return (
+        <Text fg={colors.headerText}>
+          {tf("v{version} available, update through the package manager that installed Gloomberb", {
+            version: updateAvailable.version,
+          })}
+        </Text>
+      );
+    }
     return (
       <Text fg={colors.headerText}>
         {tf("v{version} available — starting download...", { version: updateAvailable.version })}

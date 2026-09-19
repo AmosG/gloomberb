@@ -12,6 +12,16 @@ export function getDesktopBackendPlugins(
   });
 }
 
-export async function loadDesktopBackendPlugins(): Promise<GloomPlugin[]> {
-  return getDesktopBackendPlugins(await loadExternalPlugins("desktop"));
+export interface DesktopBackendPlugins {
+  plugins: GloomPlugin[];
+  /**
+   * The external entries behind `plugins`, handed to the runtime so a plugin
+   * that fails to register is marked failed rather than failing the launch.
+   */
+  externalPlugins: LoadedExternalPlugin[];
+}
+
+export async function loadDesktopBackendPlugins(): Promise<DesktopBackendPlugins> {
+  const externalPlugins = await loadExternalPlugins("desktop");
+  return { plugins: getDesktopBackendPlugins(externalPlugins), externalPlugins };
 }

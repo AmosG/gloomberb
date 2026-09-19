@@ -1,6 +1,5 @@
 import { existsSync, mkdirSync } from "fs";
-import { homedir } from "os";
-import { join } from "path";
+import { getGloomberbHome } from "../../../../data/config/home";
 import { createAppServices, type AppServices } from "../../../../core/app-services";
 import { loadDesktopBackendPlugins } from "../../../../plugins/catalog-backend";
 import { restoreExtractedPlugins } from "../../../../cli/restore-plugins";
@@ -107,7 +106,7 @@ function buildInitializationPayload(
 }
 
 async function resolveDesktopDataDir(): Promise<string> {
-  const dataDir = await getDataDir() ?? join(process.env.HOME || homedir(), ".gloomberb");
+  const dataDir = await getDataDir() ?? getGloomberbHome();
   if (!existsSync(dataDir)) {
     mkdirSync(dataDir, { recursive: true });
   }
@@ -146,7 +145,7 @@ export async function initializeDesktopBackend<TRpc>(
 
   const services = createAppServices({
     config,
-    plugins: await loadDesktopBackendPlugins(),
+    ...await loadDesktopBackendPlugins(),
   });
   options.setServices(services);
   await services.ready;

@@ -548,6 +548,7 @@ export function App({
       servicesFactory({
         config,
         plugins,
+        externalPlugins,
       })
     ), {
       externalPluginCount: externalPlugins.length,

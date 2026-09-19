@@ -95,6 +95,7 @@ export async function initCliServices(options: CliServicesOptions = {}) {
   const services = createAppServices({
     config,
     plugins: getLoadablePlugins(options.externalPlugins ?? []),
+    externalPlugins: options.externalPlugins ?? [],
   });
   services.providerRouter.setConfigAccessor(() => config);
   await ensureCliServicesReady(services);
