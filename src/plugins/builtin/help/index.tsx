@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { formatActionChords, hasKeybindingCaptureRequest, subscribeKeybindingCapture, useKeybindings } from "../../../app/keybindings";
-import { Button, Section, Tabs } from "../../../components";
+import { Button, Section, Tabs, type TableSection } from "../../../components";
 import { ExternalLinkText } from "../../../components/ui";
 import { t } from "../../../i18n";
 import { colors } from "../../../theme/colors";
@@ -10,9 +10,9 @@ import { detectShortcutPlatform, formatPrimaryShortcut, getShortcutDisplayMode }
 import { getSharedRegistry } from "../../registry";
 import { usePluginAppActions } from "../../runtime";
 import type { PluginModule } from "../plugin-module";
-import { ShortcutRow } from "./components";
 import { FunctionsTable } from "./functions-table";
 import { KeybindingsEditor } from "./keybindings-editor";
+import { ShortcutTable, type ShortcutTableEntry } from "./shortcut-table";
 import { resolveCommandShortcuts, resolveWindowTemplates } from "./shortcut-model";
 
 const HELP_TABS = [
@@ -27,6 +27,10 @@ type HelpTabId = typeof HELP_TABS[number]["value"];
 /** Tabs that are one full-height table and do their own scrolling. */
 const TABLE_TABS = new Set<HelpTabId>(["functions", "shortcuts"]);
 const GLOOMBERB_ISSUES_URL = "https://github.com/gloom-sh/gloomberb/issues";
+
+function entry(id: string, badges: string[], description: string): ShortcutTableEntry {
+  return { id, badges, description };
+}
 
 function HelpPane({ focused, width, height }: PaneProps) {
   const registry = getSharedRegistry();
@@ -45,13 +49,11 @@ function HelpPane({ focused, width, height }: PaneProps) {
   const commandBarBadges = actionBadges("command-bar");
   const tickerSearchBadges = actionBadges("ticker-search");
   useEffect(() => subscribeKeybindingCapture(() => setActiveTabId("shortcuts")), []);
-  const copyBadges = shortcutDisplayMode === "terminal"
-    ? ["Ctrl+Shift+C"]
-    : [platformShortcut("C")];
-  const pasteBadges = shortcutDisplayMode === "terminal"
-    ? ["Ctrl+Shift+V"]
-    : [platformShortcut("V")];
+  const copyBadges = shortcutDisplayMode === "terminal" ? ["Ctrl+Shift+C"] : [platformShortcut("C")];
+  const pasteBadges = shortcutDisplayMode === "terminal" ? ["Ctrl+Shift+V"] : [platformShortcut("V")];
   const contentHeight = Math.max(0, height - 1);
+  // The scrolling tab bodies pad by one cell, so their tables get the rest.
+  const bodyWidth = Math.max(1, width - 2);
 
   const openDebugLog = () => {
     showPane("debug");
@@ -65,123 +67,97 @@ function HelpPane({ focused, width, height }: PaneProps) {
     openCommandBar("PL ");
   };
 
+  const commandBarSections = useMemo<Array<TableSection<ShortcutTableEntry>>>(() => [{
+    label: "Command Bar",
+    items: [
+      ...(commandBarBadges.length > 0
+        ? [entry("open", commandBarBadges, "Open command mode for actions, pane commands, and typed prefixes.")]
+        : []),
+      ...(tickerSearchBadges.length > 0
+        ? [entry("ticker-search", tickerSearchBadges, "Open ticker search directly.")]
+        : []),
+      entry("des", ["DES", "<ticker>"], "Open security details for a specific ticker."),
+      entry("upgrade", ["UPGRADE"], "Go Pro for real-time data at gloom.sh/cloud, free for 7 days."),
+      entry("move", ["Up/Down", "Ctrl+P/N"], "Move through command bar results."),
+      entry("run", ["Enter", "Shift+Enter"], "Run the selected result or its secondary action."),
+      entry("accept-arg", ["Tab"], "Accept a suggested command argument when one is available."),
+      entry("close", ["Esc", ...tickerSearchBadges.filter((badge) => badge === "`" || badge.includes("+"))], "Close the command bar."),
+      entry("clear", ["Ctrl+U"], "Clear command text."),
+      entry("delete-word", ["Ctrl+W"], "Delete the previous word in command text."),
+      entry("back", ["Backspace"], "Go back from a nested command screen when the query is empty."),
+      entry("toggle", ["Space"], "Toggle command-bar plugin rows, toggles, and multi-select choices."),
+      entry("reorder", ["[", "]"], "Reorder ordered multi-select choices."),
+      entry("submit", ["Ctrl+S"], "Submit multiline command forms."),
+    ],
+  }], [commandBarBadges, tickerSearchBadges]);
+
+  const referenceSections = useMemo<Array<TableSection<ShortcutTableEntry>>>(() => [
+    {
+      label: "Navigation",
+      items: [
+        entry("rows", ["Up/Down", "j/k"], "Move through focused table and list rows."),
+        entry("activate", ["Enter"], "Open or activate the selected row."),
+        entry("tabs", ["Left/Right", "h/l"], "Switch tabs when a tab bar is focused."),
+        entry("back", ["Esc", "Backspace"], "Go back from a detail view."),
+      ],
+    },
+    {
+      label: "Scrolling",
+      items: [
+        entry("page", ["PageUp/PageDown"], "Scroll focused pane content by page."),
+        entry("ends", ["Home/End"], "Scroll focused pane content to the start or end."),
+      ],
+    },
+    {
+      label: "Charts",
+      items: [
+        entry("pan", ["Drag", "Scroll"], "Pan the chart through time."),
+        entry("zoom-tool", ["Shift+Z", "Shift+Drag"], "Pick the zoom tool, then drag a time range."),
+        entry("ruler", ["Shift+M", "Alt+Drag"], "Pick the ruler, then drag to measure a move."),
+        entry("draw", ["Shift+D", "Shift+P"], "Draw a trend line or a freehand shape."),
+        entry("colour", ["c", "Backspace"], "Cycle the drawing colour, or delete the selection."),
+        entry("zoom-pointer", ["Ctrl+Scroll"], "Zoom around the pointer."),
+        entry("zoom-keys", ["+/-", "0"], "Zoom the focused chart in or out, or reset it."),
+      ],
+    },
+    {
+      label: "Clipboard",
+      items: [
+        entry("copy", copyBadges, "Copy the active terminal selection."),
+        entry("paste", pasteBadges, "Paste clipboard text into the active input."),
+      ],
+    },
+    {
+      label: "Panes",
+      items: [
+        entry("cancel-drag", ["Esc"], "Cancel an active pane drag."),
+        entry("close-pane", ["Esc", "Esc"], "Close the focused pane when nothing is being dragged."),
+      ],
+    },
+    {
+      label: "Window Mode",
+      items: [
+        entry("mode", ["m", "r"], "Switch between move and resize."),
+        entry("dock", ["d"], "Dock or float the selected window."),
+        entry("move", ["Arrows", "h/j/k/l"], "Move, resize, or choose a dock target."),
+        entry("step", ["Shift"], "Use larger move and resize steps with direction keys."),
+        entry("cycle", ["Tab", "w"], "Cycle windows or resize handles."),
+        entry("commit", ["Enter", "Esc"], "Commit pending changes or exit window mode."),
+      ],
+    },
+  ], [copyBadges, pasteBadges]);
+
   const renderContent = () => {
     switch (activeTabId) {
       case "reference":
         return (
           <>
-            <Section title="Navigation">
-              <ShortcutRow
-                badges={["Up/Down", "j/k"]}
-                description="Move through focused table and list rows."
-              />
-              <ShortcutRow
-                badges={["Enter"]}
-                description="Open or activate the selected row."
-              />
-              <ShortcutRow
-                badges={["Left/Right", "h/l"]}
-                description="Switch tabs when a tab bar is focused."
-              />
-              <ShortcutRow
-                badges={["Esc", "Backspace"]}
-                description="Go back from detail views that support back navigation."
-              />
-            </Section>
-
-            <Section title="Scrolling">
-              <ShortcutRow
-                badges={["PageUp/PageDown"]}
-                description="Scroll focused pane content by page."
-              />
-              <ShortcutRow
-                badges={["Home/End"]}
-                description="Scroll focused pane content to the start or end."
-              />
-            </Section>
-
-            <Section title="Charts">
-              <ShortcutRow
-                badges={["Drag", "Scroll"]}
-                description="Pan the chart through time."
-              />
-              <ShortcutRow
-                badges={["Shift+Z", "Shift+Drag"]}
-                description="Pick the zoom tool, then drag a time range to zoom into."
-              />
-              <ShortcutRow
-                badges={["Shift+M", "Alt+Drag"]}
-                description="Pick the ruler, then drag to measure change, percent, bars, and elapsed time."
-              />
-              <ShortcutRow
-                badges={["Shift+D", "Shift+P"]}
-                description="Draw a trend line or a freehand shape. Grab a line's end to reshape it, drag its middle to move it."
-              />
-              <ShortcutRow
-                badges={["c", "Backspace"]}
-                description="Cycle the drawing colour, or delete the selected drawing."
-              />
-              <ShortcutRow
-                badges={["Ctrl+Scroll"]}
-                description="Zoom around the pointer."
-              />
-              <ShortcutRow
-                badges={["+/-", "0"]}
-                description="Zoom the focused chart in or out, or reset it."
-              />
+            <ShortcutTable sections={referenceSections} width={bodyWidth} />
+            <Box marginTop={1}>
               <Text fg={colors.textDim} wrapText>
-                {t("The tool icons sit over the top-left corner of the chart. Most terminals keep shift-drag and option-drag for their own text selection, so pick the tool there instead.")}
+                {t("The chart tool icons sit over its top-left corner. Most terminals keep shift-drag and option-drag for their own text selection, so pick the tool there instead.")}
               </Text>
-            </Section>
-
-            <Section title="Clipboard">
-              <ShortcutRow
-                badges={copyBadges}
-                description="Copy the active terminal selection."
-              />
-              <ShortcutRow
-                badges={pasteBadges}
-                description="Paste clipboard text into the active input."
-              />
-            </Section>
-
-            <Section title="Panes">
-              <ShortcutRow
-                badges={["Esc"]}
-                description="Cancel an active pane drag."
-              />
-              <ShortcutRow
-                badges={["Esc", "Esc"]}
-                description="Close the focused pane when nothing is being dragged."
-              />
-            </Section>
-
-            <Section title="Window Mode">
-              <ShortcutRow
-                badges={["m", "r"]}
-                description="Switch between move and resize."
-              />
-              <ShortcutRow
-                badges={["d"]}
-                description="Dock or float the selected window."
-              />
-              <ShortcutRow
-                badges={["Arrows", "h/j/k/l"]}
-                description="Move, resize, or choose a dock target."
-              />
-              <ShortcutRow
-                badges={["Shift"]}
-                description="Use larger move and resize steps with direction keys."
-              />
-              <ShortcutRow
-                badges={["Tab", "w"]}
-                description="Cycle windows or resize handles."
-              />
-              <ShortcutRow
-                badges={["Enter", "Esc"]}
-                description="Commit pending changes or exit window mode."
-              />
-            </Section>
+            </Box>
           </>
         );
 
@@ -220,72 +196,13 @@ function HelpPane({ focused, width, height }: PaneProps) {
               </Box>
             </Box>
 
-            <Box flexDirection="row" gap={1}>
+            <Box flexDirection="row" gap={1} marginTop={1}>
               <Button label="Layout Actions" onPress={openLayoutActions} />
             </Box>
 
-            <Section title="Command Bar">
-              {commandBarBadges.length > 0 && (
-                <ShortcutRow
-                  badges={commandBarBadges}
-                  description="Open command mode for actions, pane commands, and typed prefixes."
-                />
-              )}
-              {tickerSearchBadges.length > 0 && (
-                <ShortcutRow
-                  badges={tickerSearchBadges}
-                  description="Open ticker search directly."
-                />
-              )}
-              <ShortcutRow
-                badges={["DES", "<ticker>"]}
-                description="Open security details for a specific ticker."
-              />
-              <ShortcutRow
-                badges={["UPGRADE"]}
-                description="Go Pro for real-time data at gloom.sh/cloud, free for 7 days."
-              />
-              <ShortcutRow
-                badges={["Up/Down", "Ctrl+P/N"]}
-                description="Move through command bar results."
-              />
-              <ShortcutRow
-                badges={["Enter", "Shift+Enter"]}
-                description="Run the selected result or its secondary action."
-              />
-              <ShortcutRow
-                badges={["Tab"]}
-                description="Accept a suggested command argument when one is available."
-              />
-              <ShortcutRow
-                badges={["Esc", ...tickerSearchBadges.filter((badge) => badge === "`" || badge.includes("+"))]}
-                description="Close the command bar."
-              />
-              <ShortcutRow
-                badges={["Ctrl+U"]}
-                description="Clear command text."
-              />
-              <ShortcutRow
-                badges={["Ctrl+W"]}
-                description="Delete the previous word in command text."
-              />
-              <ShortcutRow
-                badges={["Backspace"]}
-                description="Go back from a nested command screen when the query is empty."
-              />
-              <ShortcutRow
-                badges={["Space"]}
-                description="Toggle command-bar plugin rows, toggles, and multi-select choices."
-              />
-              <ShortcutRow
-                badges={["[", "]"]}
-                description="Reorder ordered multi-select choices."
-              />
-              <ShortcutRow
-                badges={["Ctrl+S"]}
-                description="Submit multiline command forms."
-              />
-            </Section>
+            <Box marginTop={1}>
+              <ShortcutTable sections={commandBarSections} width={bodyWidth} />
+            </Box>
 
             <Section title="Layout Basics">
               <Text fg={colors.text}>{t("Docked panes stay in the saved layout.")}</Text>
@@ -309,31 +226,22 @@ function HelpPane({ focused, width, height }: PaneProps) {
           scrollable={false}
         />
       </Box>
-      {TABLE_TABS.has(activeTabId) ? (
-        <Box flexDirection="column" width={width} height={contentHeight} paddingX={1}>
-          {activeTabId === "shortcuts" ? (
-            <KeybindingsEditor
-              active
-              focused={focused}
-              width={Math.max(1, width - 2)}
-              height={contentHeight}
-            />
-          ) : (
-            <FunctionsTable
-              commandShortcuts={commandShortcuts}
-              windowTemplates={windowTemplates}
-              focused={focused}
-              width={Math.max(1, width - 2)}
-              height={contentHeight}
-              header={(
-                <Box flexDirection="row" gap={1} flexShrink={0}>
-                  <Button label="Manage Plugins" onPress={openPluginManager} />
-                </Box>
-              )}
-              onRunPrefix={openCommandBar}
-            />
+      {activeTabId === "shortcuts" ? (
+        <KeybindingsEditor focused={focused} width={width} height={contentHeight} />
+      ) : activeTabId === "functions" ? (
+        <FunctionsTable
+          commandShortcuts={commandShortcuts}
+          windowTemplates={windowTemplates}
+          focused={focused}
+          width={width}
+          height={contentHeight}
+          header={(
+            <Box flexDirection="row" gap={1} paddingX={1} flexShrink={0}>
+              <Button label="Manage Plugins" onPress={openPluginManager} />
+            </Box>
           )}
-        </Box>
+          onRunPrefix={openCommandBar}
+        />
       ) : (
         <ScrollBox key={activeTabId} width={width} height={contentHeight} scrollY>
           <Box flexDirection="column" padding={1}>

@@ -48,6 +48,15 @@ export type {
   DataTableRootKeyContext,
   DataTableSelectionChangeReason,
 } from "./data-table/view";
+// Grouped table rows: header rows with a count, skipped by selection and export.
+export {
+  buildSectionedRows,
+  EMPTY_TABLE_CELL,
+  isSectionedItemRow,
+  renderSectionedRowHeader,
+  sectionedRowsHeight,
+} from "./data-table/sections";
+export type { SectionedRow, TableSection } from "./data-table/sections";
 export { DataTableStackView } from "./data-table/stack-view";
 // Row cells that cost real work to derive (formatting, unit resolution,
 // per-row lookups) recomputed only when that row's data version changes, so a

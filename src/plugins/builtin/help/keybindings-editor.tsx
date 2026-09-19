@@ -4,7 +4,9 @@
  * Every row is an action from the keybinding table or a command the user bound
  * to a chord. Enter (or a double click) captures the next keypress for the
  * selected row, which is the one thing a config file cannot do: show what the
- * terminal actually delivered for a combination before it is committed.
+ * terminal actually delivered for a combination before it is committed. The
+ * actions live in the pane footer with every other pane's hints, and the
+ * capture prompt is a footer status segment.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -28,12 +30,17 @@ import {
   type ResolvedKeybindings,
 } from "../../../app/keybindings";
 import {
+  buildSectionedRows,
   DataTableView,
+  EMPTY_TABLE_CELL,
+  isSectionedItemRow,
+  renderSectionedRowHeader,
+  usePaneFooter,
   type DataTableCell,
   type DataTableColumn,
   type DataTableKeyEvent,
+  type SectionedRow,
 } from "../../../components";
-import { ShortcutHint } from "../../../components/ui/shortcut-hint";
 import { t, tf } from "../../../i18n";
 import { useShortcut } from "../../../react/input";
 import { useAppDispatch, useAppSelector, useAppStateRef } from "../../../state/app/context";
@@ -41,37 +48,35 @@ import { saveConfigImmediately } from "../../../state/config-save-scheduler";
 import { useThemeColors } from "../../../theme/theme-context";
 import type { KeybindingsConfig } from "../../../types/config";
 import type { KeyboardShortcut } from "../../../types/plugin";
-import { Box, Text, TextAttributes, useUiHost } from "../../../ui";
+import { useUiHost } from "../../../ui";
 import { isPlainKey } from "../../../utils/keyboard";
 import { detectShortcutPlatform, getShortcutDisplayMode } from "../../../utils/shortcut-labels";
 import { getSharedRegistry } from "../../registry";
 import { usePluginAppActions } from "../../runtime";
+import { badgeCell, badgeColumnWidth, mutedCell } from "./table-cells";
 
 const CAPTURE_SCOPE = "help-keybinding-capture";
-const KEY_COLUMN_WIDTH = 16;
+const FOOTER_ID = "help-keybindings";
 const NOTE_COLUMN_WIDTH = 26;
-/** Below this the note column is dropped; the status row still carries conflicts. */
+/** Below this the note column is dropped; the footer still carries the detail. */
 const NOTE_COLUMN_MIN_TABLE_WIDTH = 76;
 
 type KeybindingColumnId = "key" | "action" | "note";
 type KeybindingColumn = DataTableColumn & { id: KeybindingColumnId };
 
-type EditorRow =
-  | { kind: "section"; key: string; label: string }
-  | { kind: "hint"; key: string; label: string }
-  | {
-    kind: "action" | "command";
-    key: string;
-    /** Chords, already formatted for this host. */
-    chords: string[];
-    label: string;
-    note: string;
-    noteTone: "muted" | "warning";
-    action?: ResolvedKeybindingAction;
-    command?: KeybindingCommand;
-  };
+interface BindableRow {
+  id: string;
+  kind: "action" | "command";
+  /** Chords, already formatted for this host. */
+  chords: string[];
+  label: string;
+  note: string;
+  noteTone: "muted" | "warning";
+  action?: ResolvedKeybindingAction;
+  command?: KeybindingCommand;
+}
 
-type BindableRow = Extract<EditorRow, { kind: "action" | "command" }>;
+type EditorRow = SectionedRow<BindableRow>;
 
 type CaptureTarget =
   | { kind: "row"; row: BindableRow }
@@ -98,17 +103,6 @@ function pluginShortcutsFromRegistry(disabledPlugins: readonly string[]): Keyboa
   });
 }
 
-/** The action column takes whatever the fixed columns leave, via flexGrow. */
-function buildColumns(width: number): KeybindingColumn[] {
-  return [
-    { id: "key", label: "KEY", width: KEY_COLUMN_WIDTH, align: "left" },
-    { id: "action", label: "ACTION", width: 20, align: "left", flexGrow: 1 },
-    ...(width >= NOTE_COLUMN_MIN_TABLE_WIDTH
-      ? [{ id: "note" as const, label: "NOTE", width: NOTE_COLUMN_WIDTH, align: "left" as const }]
-      : []),
-  ];
-}
-
 function conflictNote(
   resolved: ResolvedKeybindings,
   target: string,
@@ -124,13 +118,10 @@ function conflictNote(
 }
 
 export function KeybindingsEditor({
-  active,
   focused,
   width,
   height,
 }: {
-  /** The Shortcuts tab is showing; keys are ignored otherwise. */
-  active: boolean;
   focused: boolean;
   width: number;
   height: number;
@@ -167,11 +158,11 @@ export function KeybindingsEditor({
   }, [resolved]);
 
   const rows = useMemo<EditorRow[]>(() => {
-    const actionRow = (action: ResolvedKeybindingAction): EditorRow => {
+    const actionRow = (action: ResolvedKeybindingAction): BindableRow => {
       const conflict = conflictNote(resolved, action.id, describeTarget);
       return {
+        id: `action:${action.id}`,
         kind: "action",
-        key: `action:${action.id}`,
         chords: action.chords.map(formatChord),
         label: action.def ? t(action.def.description) : action.pluginShortcut?.description ?? action.id,
         note: conflict
@@ -184,43 +175,35 @@ export function KeybindingsEditor({
     };
     const core = resolved.actions.filter((action) => action.def && (isDesktop || !action.def.desktopOnly));
     const plugin = resolved.actions.filter((action) => action.pluginShortcut);
-    const section = (label: string): EditorRow => ({ kind: "section", key: `section:${label}`, label });
+    const commandRows = resolved.commands.map((command): BindableRow => {
+      const conflict = conflictNote(resolved, `command:${command.text}`, describeTarget);
+      return {
+        id: `command:${command.text}`,
+        kind: "command",
+        chords: [formatChord(command.chord)],
+        label: command.query,
+        note: conflict ?? "",
+        noteTone: conflict ? "warning" : "muted",
+        command,
+      };
+    });
 
-    return [
-      section("Global Keys"),
-      ...core.filter((action) => action.def!.category === "Global Keys").map(actionRow),
-      section("Pane Management"),
-      ...core.filter((action) => action.def!.category === "Pane Management").map(actionRow),
-      section("Custom Commands"),
-      ...(resolved.commands.length === 0
-        ? [{
-          kind: "hint" as const,
-          key: "hint:commands",
-          label: "No commands bound yet. Type one in the command bar and choose Bind a key.",
-        }]
-        : []),
-      ...resolved.commands.map((command): EditorRow => {
-        const conflict = conflictNote(resolved, `command:${command.text}`, describeTarget);
-        return {
-          kind: "command",
-          key: `command:${command.text}`,
-          chords: [formatChord(command.chord)],
-          label: command.query,
-          note: conflict ?? "",
-          noteTone: conflict ? "warning" : "muted",
-          command,
-        };
-      }),
-      ...(plugin.length > 0 ? [section("Plugin Shortcuts"), ...plugin.map(actionRow)] : []),
-    ];
+    return buildSectionedRows<BindableRow>([
+      { label: "Global Keys", items: core.filter((action) => action.def!.category === "Global Keys").map(actionRow) },
+      { label: "Pane Management", items: core.filter((action) => action.def!.category === "Pane Management").map(actionRow) },
+      {
+        label: "Custom Commands",
+        items: commandRows,
+        emptyLabel: "No commands bound yet. Type one in the command bar and choose Bind a key.",
+      },
+      ...(plugin.length > 0 ? [{ label: "Plugin Shortcuts", items: plugin.map(actionRow) }] : []),
+    ], (row) => row.id);
   }, [describeTarget, formatChord, isDesktop, resolved]);
 
-  const isBindable = (row: EditorRow): row is BindableRow => row.kind === "action" || row.kind === "command";
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const effectiveSelectedKey = rows.some((row) => row.key === selectedKey && isBindable(row))
-    ? selectedKey
-    : rows.find(isBindable)?.key ?? null;
-  const selectedRow = rows.filter(isBindable).find((row) => row.key === effectiveSelectedKey);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const bindableRows = useMemo(() => rows.filter(isSectionedItemRow).map((row) => row.item), [rows]);
+  const selectedRow = bindableRows.find((row) => row.id === selectedId) ?? bindableRows[0];
+  const effectiveSelectedId = selectedRow?.id ?? null;
   const [capture, setCapture] = useState<CaptureTarget | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
 
@@ -232,7 +215,7 @@ export function KeybindingsEditor({
   const startCapture = useCallback((target: CaptureTarget) => {
     setFeedback(null);
     setCapture(target);
-    if (target.kind === "row") setSelectedKey(target.row.key);
+    if (target.kind === "row") setSelectedId(target.row.id);
   }, []);
 
   // "Bind a key" from the command bar lands here; the pane may have been
@@ -262,7 +245,7 @@ export function KeybindingsEditor({
       let next = config;
       if (capture.kind === "row") next = removeCommandBinding(next, capture.row.command!.text);
       writeKeybindings(setCommandBinding(next, chord, query));
-      setSelectedKey(`command:${serializeKeyChord(chord)}`);
+      setSelectedId(`command:${serializeKeyChord(chord)}`);
     } else {
       const action = capture.row.action!;
       writeKeybindings(applyActionBinding(config, action.id, [chord], action.defaults));
@@ -272,9 +255,11 @@ export function KeybindingsEditor({
       action.chords.some((existing) => keyChordsOverlap(existing, chord))
       && (capture.kind !== "row" || action.id !== capture.row.action?.id)
     ));
+    // The row already shows which binding changed, so the footer stays short
+    // enough to survive beside the hints.
     setFeedback(taken
-      ? { tone: "warning", text: tf("{chord} is also bound to {target}.", { chord: formatChord(chord), target: describeTarget(taken.id) }) }
-      : { tone: "info", text: tf("Bound {target} to {chord}.", { target: captureLabel ?? "", chord: formatChord(chord) }) });
+      ? { tone: "warning", text: tf("Also bound to {target}.", { target: describeTarget(taken.id) }) }
+      : { tone: "info", text: tf("Bound to {chord}.", { chord: formatChord(chord) }) });
   }, [capture, captureLabel, describeTarget, formatChord, resolved.actions, stateRef, writeKeybindings]);
 
   // Capture owns the keyboard: a fresh scope in the earliest phase gets first
@@ -297,12 +282,12 @@ export function KeybindingsEditor({
     const config = stateRef.current.config.keybindings;
     if (selectedRow.kind === "command") {
       writeKeybindings(removeCommandBinding(config, selectedRow.command!.text));
-      setFeedback({ tone: "info", text: tf("Removed the key for {target}.", { target: `"${selectedRow.command!.query}"` }) });
+      setFeedback({ tone: "info", text: t("Key removed.") });
       return;
     }
     const action = selectedRow.action!;
     writeKeybindings(applyActionBinding(config, action.id, [], action.defaults));
-    setFeedback({ tone: "info", text: tf("Unbound {target}.", { target: shortLabel(selectedRow.label) }) });
+    setFeedback({ tone: "info", text: t("Unbound.") });
   }, [selectedRow, stateRef, writeKeybindings]);
 
   const canReset = selectedRow?.kind === "action" && selectedRow.action?.custom === true;
@@ -312,10 +297,7 @@ export function KeybindingsEditor({
     writeKeybindings(applyActionBinding(stateRef.current.config.keybindings, action.id, action.defaults, action.defaults));
     setFeedback({
       tone: "info",
-      text: tf("{target} is back on {chord}.", {
-        target: shortLabel(selectedRow.label),
-        chord: action.defaults.map(formatChord).join(", ") || t("nothing"),
-      }),
+      text: tf("Back on {chord}.", { chord: action.defaults.map(formatChord).join(", ") || t("nothing") }),
     });
   }, [formatChord, selectedRow, stateRef, writeKeybindings]);
 
@@ -324,8 +306,42 @@ export function KeybindingsEditor({
     openCommandBar("");
   }, [notify, openCommandBar]);
 
+  // While capturing, a refused key explains itself in place of the prompt.
+  // Otherwise the footer carries the selected row's note in full, since the
+  // note column truncates, and falls back to whatever the config got wrong.
+  const status: Feedback | null = capture
+    ? feedback?.tone === "warning"
+      ? feedback
+      : {
+        tone: "info",
+        // The row being rebound shows its own prompt, so only a new command
+        // has to name what the key will run.
+        text: capture.kind === "row"
+          ? t("Press a key. Esc cancels.")
+          : tf("Press a key for {target}. Esc cancels.", { target: captureLabel ?? "" }),
+      }
+    : feedback
+      ?? (selectedRow?.note
+        ? { tone: selectedRow.noteTone === "warning" ? "warning" : "info", text: selectedRow.note }
+        : null)
+      ?? (resolved.issues[0] ? { tone: "warning", text: describeKeybindingIssue(resolved.issues[0]) } : null);
+
+  usePaneFooter(FOOTER_ID, () => ({
+    info: status
+      ? [{ id: "status", parts: [{ text: status.text, tone: status.tone === "warning" ? "warning" as const : "muted" as const }] }]
+      : [],
+    hints: capture
+      ? [{ id: "cancel", key: "Esc", label: "cancel", onPress: () => setCapture(null) }]
+      : [
+        { id: "rebind", key: "Enter", label: "rebind", onPress: () => selectedRow && startCapture({ kind: "row", row: selectedRow }), disabled: !selectedRow },
+        { id: "unbind", key: "Backspace", label: "unbind", onPress: unbindSelected, disabled: !selectedRow },
+        { id: "default", key: "0", label: "default", onPress: resetSelected, disabled: !canReset },
+        { id: "bind-command", key: "n", label: "ew command key", onPress: bindNewCommand },
+      ],
+  }), [bindNewCommand, canReset, capture, resetSelected, selectedRow, startCapture, status, unbindSelected]);
+
   const handleRootKey = useCallback((event: DataTableKeyEvent): boolean | void => {
-    if (!active || capture) return;
+    if (capture) return;
     if (isPlainKey(event, "backspace", "delete")) {
       unbindSelected();
     } else if (isPlainKey(event, "0")) {
@@ -338,7 +354,19 @@ export function KeybindingsEditor({
     event.preventDefault?.();
     event.stopPropagation?.();
     return true;
-  }, [active, bindNewCommand, capture, resetSelected, unbindSelected]);
+  }, [bindNewCommand, capture, resetSelected, unbindSelected]);
+
+  const keyColumnWidth = useMemo(
+    () => badgeColumnWidth([...bindableRows.map((row) => row.chords), [t("Press a key")]]),
+    [bindableRows],
+  );
+  const columns = useMemo<KeybindingColumn[]>(() => [
+    { id: "key", label: "KEY", width: keyColumnWidth, align: "left" },
+    { id: "action", label: "ACTION", width: 20, align: "left", flexGrow: 1 },
+    ...(width >= NOTE_COLUMN_MIN_TABLE_WIDTH
+      ? [{ id: "note" as const, label: "NOTE", width: NOTE_COLUMN_WIDTH, align: "left" as const }]
+      : []),
+  ], [keyColumnWidth, width]);
 
   const renderCell = useCallback((
     row: EditorRow,
@@ -346,104 +374,53 @@ export function KeybindingsEditor({
     _index: number,
     rowState: { selected: boolean },
   ): DataTableCell => {
-    if (row.kind === "section") return { text: "" };
-    if (row.kind === "hint") {
-      return column.id === "action" ? { text: t(row.label), color: colors.textDim } : { text: "" };
+    if (row.kind === "section") return EMPTY_TABLE_CELL;
+    if (row.kind === "empty") {
+      return column.id === "action" ? { text: t(row.label), color: colors.textDim } : EMPTY_TABLE_CELL;
     }
-    const capturing = capture?.kind === "row" && capture.row.key === row.key;
+    const capturing = capture?.kind === "row" && capture.row.id === row.item.id;
     if (column.id === "key") {
-      if (capturing) {
-        return { text: t("Press a key"), color: colors.borderFocused, attributes: TextAttributes.BOLD };
-      }
-      return row.chords.length > 0
-        ? {
-          text: row.chords.join(", "),
-          color: rowState.selected ? colors.selectedText : colors.textBright,
-        }
-        : { text: t("unbound"), color: colors.textMuted };
+      if (capturing) return badgeCell([t("Press a key")], column.width, { tone: "accent" });
+      return row.item.chords.length > 0
+        ? badgeCell(row.item.chords, column.width)
+        : mutedCell("unbound", colors.textMuted);
     }
     if (column.id === "action") {
-      return { text: row.label, color: rowState.selected ? colors.selectedText : colors.text };
+      return { text: row.item.label, color: rowState.selected ? colors.selectedText : colors.text };
     }
     return {
-      text: row.note,
-      color: row.noteTone === "warning" ? colors.warning : colors.textMuted,
+      text: row.item.note,
+      color: row.item.noteTone === "warning" ? colors.warning : colors.textMuted,
     };
   }, [capture, colors]);
 
-  const renderSectionHeader = useCallback((row: EditorRow) => (
-    row.kind === "section"
-      ? { text: t(row.label), color: colors.textBright, attributes: TextAttributes.BOLD }
-      : null
-  ), [colors]);
-
-  // While capturing, a refused key explains itself in place of the prompt.
-  // Otherwise the line carries the selected row's note in full, since the note
-  // column truncates, and falls back to whatever the config got wrong.
-  const selectedNote: Feedback | null = selectedRow?.note
-    ? { tone: selectedRow.noteTone === "warning" ? "warning" : "info", text: selectedRow.note }
-    : null;
-  const status: Feedback | null = capture
-    ? feedback?.tone === "warning"
-      ? feedback
-      : { tone: "info", text: tf("Press a key for {target}. Esc cancels.", { target: captureLabel ?? "" }) }
-    : feedback
-      ?? selectedNote
-      ?? (resolved.issues[0] ? { tone: "warning", text: describeKeybindingIssue(resolved.issues[0]) } : null);
-
-  const header = (
-    <Box flexDirection="column" flexShrink={0}>
-      <Box flexDirection="row" gap={2} height={1}>
-        <ShortcutHint
-          hotkey="Enter"
-          label={t("Rebind")}
-          onPress={() => selectedRow && startCapture({ kind: "row", row: selectedRow })}
-          disabled={!selectedRow || !!capture}
-        />
-        <ShortcutHint hotkey="Backspace" label={t("Unbind")} onPress={unbindSelected} disabled={!selectedRow || !!capture} />
-        <ShortcutHint hotkey="0" label={t("Default")} onPress={resetSelected} disabled={!canReset || !!capture} />
-        <ShortcutHint hotkey="N" label={t("Bind a command")} onPress={bindNewCommand} disabled={!!capture} />
-      </Box>
-      <Box height={1} overflow="hidden">
-        <Text
-          fg={status?.tone === "warning" ? colors.warning : capture ? colors.textBright : colors.textDim}
-          attributes={capture ? TextAttributes.BOLD : 0}
-          wrapMode="none"
-          truncate
-        >
-          {status?.text ?? ""}
-        </Text>
-      </Box>
-    </Box>
-  );
-
   return (
     <DataTableView<EditorRow, KeybindingColumn>
-      focused={focused && active && !capture}
+      focused={focused && !capture}
       keyboardNavigation={!capture}
       rootWidth={width}
       rootHeight={height}
-      rootBefore={header}
-      columns={buildColumns(width)}
+      columns={columns}
       items={rows}
       selection={{
         kind: "id",
-        selectedId: effectiveSelectedKey,
+        selectedId: effectiveSelectedId,
         getId: (row) => row.key,
-        onChange: (id) => setSelectedKey(id),
+        onChange: (_id, row) => {
+          if (isSectionedItemRow(row)) setSelectedId(row.item.id);
+        },
       }}
-      isNavigable={(row) => row.kind !== "section" && row.kind !== "hint"}
+      isNavigable={isSectionedItemRow}
       onActivate={(row) => {
-        if (row.kind === "action" || row.kind === "command") startCapture({ kind: "row", row });
+        if (isSectionedItemRow(row)) startCapture({ kind: "row", row: row.item });
       }}
       onRootKeyDown={handleRootKey}
       sortColumnId={null}
       sortDirection="asc"
       onHeaderClick={() => {}}
       getItemKey={(row) => row.key}
-      renderSectionHeader={renderSectionHeader}
+      renderSectionHeader={renderSectionedRowHeader}
       renderCell={renderCell}
-      fillAvailableWidth
       emptyStateTitle="No keybindings"
     />
   );

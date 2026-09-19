@@ -6,6 +6,7 @@ import { AppContext, PaneInstanceProvider, appReducer, createInitialState, type 
 import { createTestPluginRuntime } from "../../../test-support/plugin-runtime";
 import { cloneLayout, createDefaultConfig } from "../../../types/config";
 import { Box } from "../../../ui";
+import { PaneFooterBar, PaneFooterProvider } from "../../../components/layout/pane/footer";
 import { PluginRenderProvider } from "../../runtime";
 import { helpModule } from "./index";
 
@@ -26,9 +27,14 @@ function Harness() {
     <AppContext value={{ state, dispatch }}>
       <PaneInstanceProvider paneId={id}>
         <PluginRenderProvider pluginId="help" runtime={createTestPluginRuntime()}>
-          <Box width={90} height={30}>
-            <HelpPane paneId={id} paneType="help" focused width={90} height={30} />
-          </Box>
+          <PaneFooterProvider>
+            {(footer) => (
+              <Box width={90} height={30} flexDirection="column">
+                <HelpPane paneId={id} paneType="help" focused width={90} height={29} />
+                <PaneFooterBar footer={footer} focused width={90} />
+              </Box>
+            )}
+          </PaneFooterProvider>
         </PluginRenderProvider>
       </PaneInstanceProvider>
     </AppContext>
@@ -60,15 +66,20 @@ afterEach(async () => {
 test("rebinding from the help pane captures the next chord, shows the way back, and resets", async () => {
   await openShortcutsTab();
   let text = setup!.captureCharFrame();
-  expect(text).toContain("Global Keys");
+  // Sections carry their count, and the actions live in the pane footer.
+  expect(text).toContain("Global Keys (10)");
   expect(text).toContain("KEY");
   expect(text).toContain("Open ticker search directly.");
+  expect(text).toContain("[Enter]rebind");
+  expect(text).toContain("[Backspace]unbind");
 
   // Down to ticker search, then capture.
   await emitKeypress(setup!, { name: "j" });
   await emitKeypress(setup!, { name: "return" });
   await frame();
-  expect(setup!.captureCharFrame()).toContain("Press a key for Open ticker search directly.");
+  text = setup!.captureCharFrame();
+  expect(text).toContain("Press a key");
+  expect(text).toContain("[Esc]cancel");
 
   await emitKeypress(setup!, { name: "y", ctrl: true, shift: true });
   await frame();
@@ -76,8 +87,8 @@ test("rebinding from the help pane captures the next chord, shows the way back, 
   text = setup!.captureCharFrame();
   expect(text).toContain("Ctrl+Shift+Y");
   expect(text).toContain("custom, default `");
-  expect(text).toContain("Bound Open ticker search directly to Ctrl+Shift+Y.");
-  // The status line spells out the selected row's note, which the column truncates.
+  expect(text).toContain("Bound to Ctrl+Shift+Y.");
+  // The footer spells out the selected row's note, which the column truncates.
   await emitKeypress(setup!, { name: "k" });
   await emitKeypress(setup!, { name: "j" });
   await frame();
@@ -100,7 +111,7 @@ test("a capture landing on a taken chord still binds and names the other owner",
   await frame();
   expect(latestState?.config.keybindings).toEqual({ actions: { "command-bar": "CmdOrCtrl+W" } });
   const text = setup!.captureCharFrame();
-  expect(text).toContain("Ctrl+W is also bound to Close the focused pane.");
+  expect(text).toContain("Also bound to Close the");
   expect(text).toContain("also Close the focused");
   // The pane row names the collision from its side too.
   expect(text).toContain("also Open the command bar");
@@ -128,9 +139,9 @@ test("a bind request from the command bar captures a command chord and refuses t
   // Escape cancels a capture without touching the table.
   await emitKeypress(setup!, { name: "return" });
   await frame();
-  expect(setup!.captureCharFrame()).toContain("Press a key for");
+  expect(setup!.captureCharFrame()).toContain("Press a key. Esc cancels.");
   await emitKeypress(setup!, { name: "escape" });
   await frame();
-  expect(setup!.captureCharFrame()).not.toContain("Press a key for");
+  expect(setup!.captureCharFrame()).not.toContain("Press a key");
   expect(latestState?.config.keybindings).toEqual({ commands: { "Alt+1": "DES AAPL" } });
 });
