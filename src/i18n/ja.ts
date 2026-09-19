@@ -925,6 +925,7 @@ export const ja: Record<string, string> = {
   "Downloading v{version}: {percent}%": "v{version} をダウンロード中: {percent}%",
   "Update failed: {error}": "更新に失敗しました: {error}",
   "v{version} available — run {command}": "v{version} が利用可能 — {command} を実行",
+  "v{version} available, update through the package manager that installed Gloomberb": "v{version} が利用可能です。Gloomberb をインストールしたパッケージマネージャーで更新してください",
   "v{version} available — starting download...": "v{version} が利用可能 — ダウンロードを開始しています...",
   "command bar": "コマンド バー",
   "Tidy Windows": "ウィンドウを整理",

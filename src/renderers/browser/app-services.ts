@@ -7,14 +7,14 @@ import { AssetDataRouter } from "../../sources/provider-router";
 import { JsonPersistence } from "../../data/json-persistence";
 import { JsonTickerRepository } from "../../data/json-ticker-repository";
 
-export function createBrowserAppServices({ config, plugins }: AppServicesFactoryOptions) {
+export function createBrowserAppServices({ config, plugins, externalPlugins }: AppServicesFactoryOptions) {
   const cloudProvider = createGloomberbCloudProvider();
   const dataProvider = new AssetDataRouter(null, [cloudProvider]);
   const cloudNews = createGloomberbCloudCapabilities(cloudProvider).find(
     (capability): capability is NewsCapability => capability.kind === "news",
   );
   return createAppRuntime({
-    config, plugins, dataProvider,
+    config, plugins, externalPlugins, dataProvider,
     persistence: new JsonPersistence(localStorage),
     tickerRepository: new JsonTickerRepository(localStorage),
     configure({ pluginRegistry, newsService }) {

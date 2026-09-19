@@ -25,7 +25,14 @@ export interface UpdateProgress {
 export type UpdateAction =
   | { kind: "self" }
   | { kind: "desktop" }
-  | { kind: "manual"; command: string };
+  | { kind: "manual"; command: string }
+  /**
+   * A standalone binary this process cannot overwrite: a Nix store path, a
+   * distro package under /usr/bin, anything installed by root. Whatever put it
+   * there updates it; trying ourselves ended in "EROFS: read-only file system"
+   * in the header (#684).
+   */
+  | { kind: "managed"; reason: string };
 
 export type UpdateCheckResult =
   | { kind: "available"; release: ReleaseInfo }
@@ -170,6 +177,32 @@ export function resolveSelfUpdateTargetPath(
   return resolvedExecPath;
 }
 
+/**
+ * Why this process could not replace its own binary, or null when it can (or
+ * when that cannot be told, as for a path that does not exist).
+ *
+ * `fs` is reached through a variable so the browser bundles, which share this
+ * module, do not try to resolve it; they never get here because they have no
+ * `process.execPath` to begin with.
+ */
+export function describeUnwritableInstall(execPath: string): string | null {
+  if (!execPath || typeof require !== "function") return null;
+  const normalized = normalizePath(execPath);
+  const directory = normalized.slice(0, Math.max(0, normalized.lastIndexOf("/"))) || "/";
+  try {
+    const fsModulePath = "fs";
+    const fs = require(fsModulePath) as typeof import("fs");
+    fs.accessSync(execPath, fs.constants.W_OK);
+    fs.accessSync(directory, fs.constants.W_OK);
+    return null;
+  } catch (error) {
+    const code = (error as { code?: string } | null)?.code;
+    if (code === "EROFS") return "the install is on a read-only file system";
+    if (code === "EACCES" || code === "EPERM") return "the install directory is not writable";
+    return null;
+  }
+}
+
 export function detectUpdateAction(
   execPath = getRuntimeProcess()?.execPath ?? "",
   argv = getRuntimeProcess()?.argv ?? [],
@@ -183,7 +216,8 @@ export function detectUpdateAction(
   if (execBase === "gloomberb.exe") return null;
 
   if (resolveSelfUpdateTargetPath(execPath, argv)) {
-    return { kind: "self" };
+    const reason = describeUnwritableInstall(execPath);
+    return reason ? { kind: "managed", reason } : { kind: "self" };
   }
 
   if (!entrypoint || isSourceEntrypoint(entrypoint)) return null;
@@ -323,11 +357,14 @@ export async function performUpdate(
   }
 
   if (!canSelfUpdate(release)) {
+    const action = release.updateAction;
     onProgress({
       phase: "error",
-      error: release.updateAction.kind === "manual"
-        ? `Run ${release.updateAction.command}`
-        : "This update type is unavailable in the current runtime.",
+      error: action.kind === "manual"
+        ? `Run ${action.command}`
+        : action.kind === "managed"
+          ? `Update through the package manager that installed Gloomberb: ${action.reason}.`
+          : "This update type is unavailable in the current runtime.",
     });
     return;
   }

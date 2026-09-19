@@ -1,6 +1,7 @@
+import { existsSync } from "fs";
 import { mkdir, readFile, rename, rm, writeFile } from "fs/promises";
-import { homedir } from "os";
 import { dirname, join } from "path";
+import { expandUserHome, getGloomberbHome, isGloomberbHomeOverridden } from "../home";
 import type { AppConfig } from "../../../types/config";
 import { createDefaultConfig } from "../../../types/config";
 import { debugLog } from "../../../utils/debug-log";
@@ -12,31 +13,27 @@ import {
 
 const configLog = debugLog.createLogger("config");
 
-function getGlobalConfigDir(): string {
-  return join(getHomeDir(), ".gloomberb");
-}
-
 function getGlobalConfigFile(): string {
-  return join(getGlobalConfigDir(), "config.json");
+  return join(getGloomberbHome(), "config.json");
 }
 
-function getHomeDir(): string {
-  return process.env.HOME || homedir();
-}
+const expandHomePath = expandUserHome;
 
-function expandHomePath(filePath: string): string {
-  if (filePath === "~") return getHomeDir();
-  if (filePath.startsWith("~/") || filePath.startsWith("~\\")) {
-    return join(getHomeDir(), filePath.slice(2));
-  }
-  return filePath;
-}
-
+/**
+ * The data directory the global config records, or null on a first run.
+ *
+ * Under `GLOOMBERB_HOME`, a recorded directory that no longer exists gives
+ * way to the home itself: a config.json carried along in a moved folder
+ * still names the old `~/.gloomberb`, and honouring that would recreate the
+ * old folder, which is the one thing the move was meant to avoid.
+ */
 export async function getDataDir(): Promise<string | null> {
   try {
     const raw = await readFile(getGlobalConfigFile(), "utf-8");
     const config = JSON.parse(raw) as { dataDir?: string };
-    return config.dataDir || null;
+    const recorded = config.dataDir || null;
+    if (recorded && isGloomberbHomeOverridden() && !existsSync(recorded)) return getGloomberbHome();
+    return recorded;
   } catch {
     return null;
   }
@@ -53,7 +50,12 @@ async function loadConfigState(dataDir: string): Promise<{ config: AppConfig; ne
   try {
     const raw = await readFile(configPath, "utf-8");
     const saved = JSON.parse(raw) as Record<string, unknown>;
-    return normalizeLoadedConfig(saved, dataDir);
+    const state = normalizeLoadedConfig(saved, dataDir);
+    // A config.json that names a different directory than the one it sits in
+    // came along with a moved folder. Record where it lives now, so the next
+    // launch reads it directly instead of through the missing-path fallback.
+    const recorded = typeof saved.dataDir === "string" ? saved.dataDir : null;
+    return { config: state.config, needsSave: state.needsSave || (recorded !== null && recorded !== dataDir) };
   } catch {
     // Fresh installs have no former built-in plugins to restore. Record the
     // current baseline so onboarding never waits for plugin network installs.

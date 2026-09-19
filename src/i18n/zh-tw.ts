@@ -925,6 +925,7 @@ export const zhTW: Record<string, string> = {
   "Downloading v{version}: {percent}%": "正在下載 v{version}：{percent}%",
   "Update failed: {error}": "更新失敗：{error}",
   "v{version} available — run {command}": "v{version} 可用 — 執行 {command}",
+  "v{version} available, update through the package manager that installed Gloomberb": "v{version} 可用，請透過安裝 Gloomberb 的套件管理器更新",
   "v{version} available — starting download...": "v{version} 可用 — 開始下載...",
   "command bar": "命令列",
   "Tidy Windows": "整理視窗",

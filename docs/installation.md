@@ -61,3 +61,17 @@ gloomberb
 On macOS and Windows, desktop updates replace the installed app in place and keep the terminal command pointing at the updated runtime. Homebrew users can also update through `brew upgrade --cask gloomberb`.
 
 For the best terminal experience, use a [Kitty](https://sw.kovidgoyal.net/kitty/)-compatible terminal such as Ghostty, Kitty, or WezTerm.
+
+## Where your data lives
+
+Gloomberb keeps its configuration, database, installed plugins, and plugin cache in `~/.gloomberb`. To keep that folder somewhere else, point `GLOOMBERB_HOME` at the location before launching the terminal or the desktop app:
+
+```bash
+mv ~/.gloomberb ~/Documents/gloomberb
+export GLOOMBERB_HOME=~/Documents/gloomberb
+gloomberb
+```
+
+The variable moves the whole folder. A `config.json` carried along that still names the old `~/.gloomberb` as its `dataDir` is corrected to the new home on the next launch, so nothing is recreated in your home directory. Set it in your shell profile, or in the environment of whatever launches the desktop app, so every launch finds the same folder.
+
+`gloomberb version` prints the data directory in use.

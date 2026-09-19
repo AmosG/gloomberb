@@ -7,6 +7,7 @@ import { gzipSync } from "zlib";
 import {
   checkForUpdate,
   checkForUpdateDetailed,
+  describeUnwritableInstall,
   detectUpdateAction,
   getAssetBaseNameForRuntime,
   performUpdate,
@@ -61,6 +62,28 @@ describe("detectUpdateAction", () => {
       "/Users/vince/.local/bin/gloomberb",
       ["/Users/vince/.local/bin/gloomberb"],
     )).toEqual({ kind: "self" });
+  });
+
+  test("reports a standalone binary the process cannot overwrite as package-managed", () => {
+    // #684: a Nix store path is read-only, and the self-updater used to get
+    // as far as writing the download next to the binary before failing with
+    // "EROFS: read-only file system" in the header.
+    if (process.platform === "win32" || typeof process.getuid !== "function" || process.getuid() === 0) return;
+    const dir = mkdtempSync(join(tmpdir(), "gloom-readonly-install-"));
+    const binary = join(dir, "gloomberb");
+    writeFileSync(binary, "#!/bin/sh\n");
+    chmodSync(binary, 0o555);
+    chmodSync(dir, 0o555);
+    try {
+      expect(detectUpdateAction(binary, [binary])).toEqual({
+        kind: "managed",
+        reason: "the install directory is not writable",
+      });
+      expect(describeUnwritableInstall("/nonexistent/gloomberb")).toBeNull();
+    } finally {
+      chmodSync(dir, 0o755);
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("uses manual bun updates for bun-managed installs", () => {
@@ -363,6 +386,29 @@ describe("performUpdate", () => {
         error: "Run bun install -g gloomberb@latest",
       },
     ]);
+  });
+
+  it("names the package manager instead of downloading into a read-only install", async () => {
+    const progress: UpdateProgress[] = [];
+    let fetched = false;
+    globalThis.fetch = (async () => { fetched = true; throw new Error("should not download"); }) as typeof fetch;
+    try {
+      await performUpdate({
+        version: "9.9.9",
+        tagName: "v9.9.9",
+        downloadUrl: "https://example.com/gloomberb.gz",
+        publishedAt: "2026-04-01T00:00:00Z",
+        updateAction: { kind: "managed", reason: "the install is on a read-only file system" },
+      }, (entry) => { progress.push(entry); });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(fetched).toBe(false);
+    expect(progress).toEqual([{
+      phase: "error",
+      error: "Update through the package manager that installed Gloomberb: the install is on a read-only file system.",
+    }]);
   });
 
   it("returns an explicit error instead of overwriting Bun when execution context changes", async () => {

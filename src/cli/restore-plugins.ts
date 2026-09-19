@@ -1,5 +1,6 @@
 import { saveConfig } from "../data/config/store";
 import { loadCliConfigIfAvailable } from "./context";
+import { getPluginsDir } from "../plugins/loader";
 import { seedExtractedPlugins } from "../plugins/seed";
 import { debugLog } from "../utils/debug-log";
 
@@ -31,7 +32,7 @@ export async function restoreExtractedPlugins(): Promise<string[] | null> {
 
     await saveConfig({ ...config, seededPlugins: seeded });
     if (result.installed.length > 0) {
-      log.info(`Restored ${result.installed.join(", ")} into ~/.gloomberb/plugins`);
+      log.info(`Restored ${result.installed.join(", ")} into ${getPluginsDir()}`);
     }
     return seeded;
   } catch (error) {
