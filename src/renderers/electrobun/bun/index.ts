@@ -70,6 +70,7 @@ import {
   desktopWindowStyleMask,
 } from "./desktop/window-style";
 import { applyDesktopWindowControl, type DesktopWindowControlAction } from "./desktop/window-controls";
+import { reapStaleTerminalMedia } from "../../opentui/terminal-media";
 import { startRemoteControlServer, type RemoteControlServer } from "../../../remote/server";
 import type { RemoteControlRequest, RemoteControlResponse } from "../../../remote/types";
 
@@ -654,6 +655,12 @@ ApplicationMenu.on("application-menu-clicked", (event: unknown) => {
 });
 
 installApplicationMenu();
+
+// The desktop app never starts a terminal player, but it is usually the next
+// thing launched after a terminal run left one behind, and until something
+// reaps it that player keeps decoding video and flooding the terminal it was
+// started from. Cleaning up here is what makes the stray actually die.
+reapStaleTerminalMedia();
 
 const mainRpc = createWindowRpc(MAIN_WINDOW_RPC_KEY);
 const initialMainWindowFrame = normalizeWindowFrameWithMinimum(

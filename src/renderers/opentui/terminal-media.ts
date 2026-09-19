@@ -10,17 +10,17 @@ export interface TerminalMediaChild {
 }
 
 export interface TerminalMediaReaperOptions {
-  /** File holding the pid of the player started by the most recent run. */
+  /** File holding the pids of the players this and earlier runs started. */
   stateFile: string;
-  /** True when the pid is still running and is actually our media player. */
-  isPlayerProcess?(pid: number): boolean;
+  /** True when the pid is one of our players and its parent is gone. */
+  isStrandedPlayer?(pid: number): boolean;
   killProcess?(pid: number): void;
   /** Install process exit hooks. Off in tests so the suite keeps its handlers. */
   installExitHooks?: boolean;
 }
 
 export interface TerminalMediaReaper {
-  /** Kill a player left behind by a previous run of the app. */
+  /** Kill players left behind by runs that are no longer around to do it. */
   reapStale(): void;
   /** Adopt a freshly spawned player, replacing and killing any current one. */
   track(child: TerminalMediaChild): void;
@@ -30,6 +30,20 @@ export interface TerminalMediaReaper {
 
 export function terminalMediaStateFile(): string {
   return join(getGloomberbHome(), "terminal-media.pid");
+}
+
+/**
+ * Startup cleanup, for any renderer. Reaping used to happen only just before
+ * starting a new terminal player, which meant a stranded one survived for as
+ * long as nobody played TV in a terminal again. The desktop app is the likeliest
+ * thing to be launched next, and it never plays terminal media, so leaving it
+ * out is what let a player decode video for hours after its app was gone.
+ */
+export function reapStaleTerminalMedia(): void {
+  createTerminalMediaReaper({
+    stateFile: terminalMediaStateFile(),
+    installExitHooks: false,
+  }).reapStale();
 }
 
 export interface TerminalMediaArgsOptions {
@@ -48,11 +62,19 @@ export interface TerminalMediaArgsOptions {
 const HLS_BITRATE_CAP = 1_500_000;
 
 /**
- * Frames sent to the terminal, not frames in the source, are the bottleneck:
- * each one is scaled, base64'd, written to the tty, then parsed again by the
- * multiplexer and the terminal.
+ * What is deliberately not capped here: the size and rate of the frames sent to
+ * the terminal. `vo=kitty` scales every frame to the terminal's own pixel size,
+ * base64s it and writes it to the tty, and it re-reads that size on every frame
+ * so that resizing adapts live. Pinning `--vo-kitty-width/height` would buy back
+ * that bandwidth but freeze the picture at a fixed rectangle, because the
+ * transmit escape carries no cell-placement keys for the terminal to scale it
+ * back up. Capping the frame rate is no better: the selected rendition runs at
+ * 30, so the only cap that divides evenly is 15, and the rest judder.
+ *
+ * `--vo-kitty-use-shm=yes` is the option that would cut the tty traffic without
+ * costing picture, but it depends on the terminal supporting shared-memory
+ * transfer, so it wants testing against a real terminal before it goes in.
  */
-const RENDER_FPS = 15;
 
 /**
  * `vo=kitty` is a software path from decode to tty write, and it is paid three
@@ -74,7 +96,6 @@ export function buildTerminalMediaArgs(options: TerminalMediaArgsOptions): strin
     // The kitty output reads frames from system memory, so only a copy-back
     // decoder helps here. An unavailable one degrades to software decoding.
     ...(platform === "darwin" ? ["--hwdec=videotoolbox-copy"] : []),
-    `--vf=fps=${RENDER_FPS}`,
     "--ytdl=no",
     `--mute=${muted === false ? "no" : "yes"}`,
     ...(title ? [`--title=${title}`] : []),
@@ -83,13 +104,18 @@ export function buildTerminalMediaArgs(options: TerminalMediaArgsOptions): strin
   ];
 }
 
-function defaultIsPlayerProcess(pid: number): boolean {
+function defaultIsStrandedPlayer(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 1) return false;
   try {
     // A recycled pid could belong to anything, so confirm the command first.
-    const probe = Bun.spawnSync(["ps", "-p", String(pid), "-o", "comm="]);
+    const probe = Bun.spawnSync(["ps", "-p", String(pid), "-o", "comm=,ppid="]);
     if (probe.exitCode !== 0) return false;
-    return probe.stdout.toString().toLowerCase().includes("mpv");
+    const line = probe.stdout.toString().trim();
+    if (!line.toLowerCase().includes("mpv")) return false;
+    // Only a player whose parent is gone may be killed. A live instance still
+    // owns its own player, and reaping runs on startup now, so a second window
+    // must never be able to shoot down the first one's playback.
+    return Number.parseInt(line.slice(line.lastIndexOf(" ") + 1), 10) === 1;
   } catch {
     return false;
   }
@@ -108,13 +134,14 @@ function defaultKillProcess(pid: number): void {
  * restarts by SIGKILLing the parent, so no exit handler ever runs. Every reload
  * with the TV pane open used to strand another player decoding video forever.
  *
- * Recording the pid on disk lets the next run kill the previous player even
- * though that run was killed without warning.
+ * Recording the pids on disk lets a later run kill those players even though the
+ * run that started them was killed without warning. Every pid is kept, not just
+ * the most recent, because a watch loop can strand one player per reload.
  */
 export function createTerminalMediaReaper(options: TerminalMediaReaperOptions): TerminalMediaReaper {
   const {
     stateFile,
-    isPlayerProcess = defaultIsPlayerProcess,
+    isStrandedPlayer = defaultIsStrandedPlayer,
     killProcess = defaultKillProcess,
     installExitHooks = true,
   } = options;
@@ -122,20 +149,36 @@ export function createTerminalMediaReaper(options: TerminalMediaReaperOptions): 
   let active: TerminalMediaChild | null = null;
   let hooksInstalled = false;
 
-  function forgetState(): void {
+  function readPids(): number[] {
     try {
-      rmSync(stateFile, { force: true });
+      if (!existsSync(stateFile)) return [];
+      return readFileSync(stateFile, "utf8")
+        .split("\n")
+        .map((line) => Number.parseInt(line.trim(), 10))
+        .filter((pid) => Number.isFinite(pid) && pid > 1);
     } catch {
-      // A stale pid file is harmless; the next reap validates it anyway.
+      return [];
     }
   }
 
-  function rememberState(pid: number): void {
+  function writePids(pids: number[]): void {
     try {
-      writeFileSync(stateFile, String(pid), "utf8");
+      if (!pids.length) {
+        rmSync(stateFile, { force: true });
+        return;
+      }
+      writeFileSync(stateFile, `${pids.join("\n")}\n`, "utf8");
     } catch {
-      // Losing the pid only costs us cross-restart reaping, never correctness.
+      // Losing a pid only costs us cross-restart reaping, never correctness.
     }
+  }
+
+  function forgetState(pid?: number): void {
+    writePids(pid === undefined ? [] : readPids().filter((item) => item !== pid));
+  }
+
+  function rememberState(pid: number): void {
+    writePids([...readPids().filter((item) => item !== pid), pid]);
   }
 
   function stopActive(): void {
@@ -147,8 +190,8 @@ export function createTerminalMediaReaper(options: TerminalMediaReaperOptions): 
       } catch {
         // Already exited.
       }
+      forgetState(child.pid);
     }
-    forgetState();
   }
 
   function installExitCleanup(): void {
@@ -166,15 +209,15 @@ export function createTerminalMediaReaper(options: TerminalMediaReaperOptions): 
 
   return {
     reapStale() {
-      if (!existsSync(stateFile)) return;
-      let pid = 0;
-      try {
-        pid = Number.parseInt(readFileSync(stateFile, "utf8").trim(), 10);
-      } catch {
-        pid = 0;
+      const survivors: number[] = [];
+      for (const pid of readPids()) {
+        if (pid === active?.pid) {
+          survivors.push(pid);
+        } else if (isStrandedPlayer(pid)) {
+          killProcess(pid);
+        }
       }
-      forgetState();
-      if (Number.isFinite(pid) && pid > 0 && isPlayerProcess(pid)) killProcess(pid);
+      writePids(survivors);
     },
     track(child) {
       stopActive();
@@ -182,10 +225,8 @@ export function createTerminalMediaReaper(options: TerminalMediaReaperOptions): 
       rememberState(child.pid);
       installExitCleanup();
       void child.exited.then(() => {
-        if (active === child) {
-          active = null;
-          forgetState();
-        }
+        if (active === child) active = null;
+        forgetState(child.pid);
       }).catch(() => {});
     },
     stopActive,
